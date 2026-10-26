@@ -1,6 +1,6 @@
 # ADR 0003 — Estrutura inicial da solução .NET
 
-- **Status:** Aceito
+- **Status:** Aceito; itens 1 e 4 substituídos pelo ADR 0005
 - **Data:** 26/10/2026
 - **Decisor:** Mauro Porpino
 - **Referências:** `CLAUDE.md` (organização sugerida), `ARCHITECTURE.md` (seções 8 e 11) e ADR 0001

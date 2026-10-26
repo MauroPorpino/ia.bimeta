@@ -1,0 +1,22 @@
+{
+  "descricao": "Matriz de dependências entre os módulos do ia.bimeta. Fonte única (ver docs/architecture/BOUNDARIES.md, seção 3). Cada módulo lista os módulos cujos Contracts ele pode referenciar. Aresta nova exige ADR.",
+  "versao": "0.2",
+  "modulos": {
+    "Audit": [],
+    "Tenancy": ["Audit"],
+    "Identity": ["Tenancy", "Audit"],
+    "Conversations": ["Identity", "Tenancy", "Audit"],
+    "AiGateway": ["Identity", "Tenancy", "Audit"],
+    "Knowledge": ["Identity", "Tenancy", "Audit"],
+    "Capabilities": ["Identity", "Tenancy", "Audit"],
+    "ContactCenter": ["Conversations", "Identity", "Tenancy", "Audit"],
+    "Channels": ["Conversations", "Identity", "Tenancy", "Audit"],
+    "Workflows": ["Conversations", "Capabilities", "Identity", "Tenancy", "Audit"],
+    "Agents": ["AiGateway", "Knowledge", "Capabilities", "Workflows", "Conversations", "ContactCenter", "Identity", "Tenancy", "Audit"],
+    "EmployeeAssistant": ["Agents", "AiGateway", "Knowledge", "Capabilities", "Conversations", "Identity", "Tenancy", "Audit"]
+  },
+  "restricoes": {
+    "Agents": { "ContactCenter": ["RequestHandoff"] },
+    "EmployeeAssistant": { "Conversations": ["GetAuthorizedExcerpt"] }
+  }
+}

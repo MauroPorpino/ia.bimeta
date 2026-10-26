@@ -1,7 +1,7 @@
 # ia.bimeta — ARCHITECTURE.md
 
 > **Status:** Documento-base para implementação e discussão.  
-> **Versão:** 0.3 (preparação do repositório; consolida decisões discutidas até 26/10/2026, incluindo o Assistente interno de IA e o roadmap de voz).  
+> **Versão:** 0.4 (preparação do repositório; consolida decisões discutidas até 26/10/2026, incluindo o Assistente interno de IA, o roadmap de voz e o monólito modular com fronteiras de módulo, conforme o ADR 0005 e `docs/architecture/BOUNDARIES.md`).  
 > **Natureza:** Decisões confirmadas estão indicadas como **Decidido**; alternativas técnicas como **Proposta a validar**.  
 > **Escopo:** Plataforma ia.bimeta independente. LabNet e BImeta são sistemas externos integráveis, não módulos internos.
 
@@ -23,6 +23,7 @@ O primeiro caso de referência é um laboratório que utiliza o **LabNet**, mas 
 6. **Omnichannel real:** sessões podem associar canais distintos após verificação de identidade e autorização.
 7. **Observabilidade e auditoria:** rastrear eventos, decisões, chamadas a modelos, ações e custos estimados, sem registrar segredos ou dados sensíveis desnecessários.
 8. **Implantação gradual:** primeiro ambiente local no Windows/VS Code; posteriormente homologação Linux e produção isolada.
+9. **Fronteiras de módulo verificáveis:** módulos, camadas e dependências ficam definidos em `docs/architecture/BOUNDARIES.md` e são verificados por testes automatizados de arquitetura.
 
 ## 3. Hierarquia de organizações e autorização
 
@@ -65,6 +66,8 @@ Tenant
 | **Employee AI Workspace** | Assistente IA interno para colaboradores autorizados do tenant, na mesma aplicação web da Central de Atendimento, com sessões privadas (`EmployeeAssistantSession`) separadas dos atendimentos a clientes; reutiliza AI Agent Runtime, AI Provider Gateway, Knowledge Engine e Capability Execution Engine (ver seção 15) |
 | Workers | Webhooks, filas, sincronização, tarefas assíncronas, reprocessamento e reconciliação |
 
+A divisão em módulos, a matriz de dependências e o mapeamento de cada componente para um módulo estão em `docs/architecture/BOUNDARIES.md` (ADR 0005); esta seção não os duplica.
+
 ### 4.1 Isolamento do contexto: exemplo Mauro e Pedro
 
 - Atendimento `#1001` (Mauro): pergunta sobre exame A.
@@ -94,7 +97,7 @@ Modos:
 2. humano assistido por IA;
 3. IA supervisionada, com aprovações pontuais.
 
-Ao escalar, registrar motivo, resumo, pendências e estado do fluxo; encaminhar à fila apropriada. O operador pode resolver a pendência e devolver à IA sem reiniciar o atendimento.
+Ao escalar, registrar motivo, resumo, pendências e estado do fluxo; encaminhar à fila apropriada. O operador pode resolver a pendência e devolver à IA sem reiniciar o atendimento. O modo de atendimento e o responsável atual são estado do Conversation Engine; o ContactCenter decide atribuição e política e solicita as transições (`docs/architecture/BOUNDARIES.md` §6).
 
 ### 4.3 Canais e voz
 
@@ -166,7 +169,7 @@ Nunca inventar código de exame, cobertura, preço, disponibilidade ou interpret
 - Backend: C# / ASP.NET Core (.NET moderno; **.NET 10 proposto**).
 - Frontend: React + TypeScript.
 - Banco: PostgreSQL (**proposta**, incluindo RLS e `pgvector`).
-- Arquitetura de implantação: **monólito modular inicialmente**, com workers e interfaces bem delimitadas; evitar microserviços prematuros.
+- Arquitetura de implantação: **Decidido (ADR 0005):** monólito modular em .NET 10, com Clean Architecture e Ports & Adapters dentro de cada módulo (projetos Contracts, Core, Infrastructure e Presentation, criados só quando necessários), workers e interfaces bem delimitadas; sem microserviços prematuros. Detalhes em `docs/architecture/BOUNDARIES.md`.
 - Git desde o primeiro commit.
 - Linux como alvo futuro de homologação e produção, com ambientes separados.
 
@@ -206,6 +209,8 @@ Nunca inventar código de exame, cobertura, preço, disponibilidade ou interpret
 10. Homologação Linux e implantação de produção em infraestrutura separada.
 11. Voz (Voice Gateway) e associação de ligações telefônicas a sessões multicanal, **após a primeira versão comercial** e após validação de APIs/custos.
 
+Cada etapa cria apenas os módulos e projetos indicados na coluna Etapa de `docs/architecture/BOUNDARIES.md` §1.
+
 **MVP:** escopo mínimo operacional a aprovar. Não confundir roadmap completo com escopo contratado do MVP. **Decidido (26/10/2026):** o Assistente interno de IA (Employee AI Workspace), inicialmente somente leitura, **integra** o MVP. A **voz não integra** o MVP nem a primeira versão comercial; será implementada **após** a primeira versão comercial, cujas prioridades são WhatsApp, IA e atendimento humano. As abstrações de voz (Voice Gateway, `VoiceCall`) permanecem na arquitetura, e os critérios de entrada da voz (APIs, custos e elegibilidade) serão definidos antes do início dessa etapa. A continuidade entre canais de texto (sessão multicanal) **não está adiada**: pode ser implementada conforme as necessidades do MVP, com verificação de identidade e isolamento de contexto. O escopo detalhado da primeira versão comercial permanece **pendente de definição**.
 
 ## 12. Critérios mínimos de qualidade
@@ -232,10 +237,14 @@ Nunca inventar código de exame, cobertura, preço, disponibilidade ou interpret
 - Disponibilidade e restrições atuais das APIs de voz e canais sociais.
 - Modelos de permissão detalhados, SLA e prioridades de fila.
 - Compatibilidade de toolchain no Windows 10.
+- Acesso a dados dos módulos: EF Core com Npgsql ou SQL direto.
+- Mecanismo do outbox de eventos duráveis, a definir quando o primeiro evento durável entrar em implementação (`BOUNDARIES.md` §4).
+- Papéis de banco por módulo, a avaliar depois da fase 2b (`BOUNDARIES.md` §9).
+- Resultado do spike do ArchUnitNET (compatibilidade comprovada com .NET 10) antes de instalar o pacote (`BOUNDARIES.md` §8).
 
 ## 14. Referências de trabalho
 
-Este documento é uma **síntese operacional** das decisões debatidas, não substitui o documento Word de arquitetura com diagramas. Divergências ou novas escolhas devem ser registradas como ADRs em `docs/adr/` antes de mudanças estruturais.
+Este documento é uma **síntese operacional** das decisões debatidas, não substitui o documento Word de arquitetura com diagramas. Divergências ou novas escolhas devem ser registradas como ADRs em `docs/adr/` antes de mudanças estruturais. A estrutura em módulos, as camadas e a matriz de dependências estão em `docs/architecture/BOUNDARIES.md` (ADR 0005).
 
 
 ## 15. Assistente interno de IA para colaboradores — decisão adicionada em 26/10/2026

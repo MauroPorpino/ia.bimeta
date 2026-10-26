@@ -6,6 +6,8 @@ Você é o agente principal de desenvolvimento do **ia.bimeta**, uma plataforma 
 
 **Leia `ARCHITECTURE.md` integralmente antes de propor ou implementar mudanças.** O arquivo contém as decisões de arquitetura e identifica propostas ainda não aprovadas.
 
+**Leia também `docs/architecture/BOUNDARIES.md` antes de criar módulo, projeto ou dependência entre módulos.** Ele define módulos, camadas e a matriz de dependências verificada por testes (ADR 0005).
+
 ## Contexto obrigatório
 
 - **ia.bimeta é um produto independente.** LabNet (gestão laboratorial) e BImeta (ERP) são **sistemas externos**; não introduza dependências deles no núcleo.
@@ -38,13 +40,13 @@ Você é o agente principal de desenvolvimento do **ia.bimeta**, uma plataforma 
 ## Fluxo de trabalho obrigatório
 
 Para cada tarefa:
-1. **Entender:** ler arquivos pertinentes, confirmar requisitos e identificar impacto em isolamento, segurança e contratos.
+1. **Entender:** ler arquivos pertinentes, confirmar requisitos e identificar o módulo e a camada afetados e o impacto em isolamento, segurança e contratos.
 2. **Planejar:** apresentar objetivo, arquivos previstos, testes, riscos e decisões em aberto.
 3. **Pedir aprovação** para mudanças estruturais, instalação, migração de banco, remoção de arquivos, acesso externo ou operações destrutivas.
 4. **Implementar incrementalmente:** mudanças pequenas, legíveis e reversíveis.
 5. **Validar:** executar build, testes e linters disponíveis; registrar resultados reais e limitações.
 6. **Relatar:** arquivos modificados, comandos executados, testes que passaram/falharam, pendências e próximos passos.
-7. **Documentar:** atualizar `ARCHITECTURE.md` somente após decisão aprovada; registrar decisões importantes em `docs/adr/`.
+7. **Documentar:** atualizar `ARCHITECTURE.md` somente após decisão aprovada; registrar decisões importantes em `docs/adr/`; mudança relevante de fronteira exige ADR (`docs/architecture/BOUNDARIES.md` §11).
 
 Não afirmar que compilou, testou ou instalou algo se não executou a ação.
 
@@ -85,25 +87,37 @@ Não afirmar que compilou, testou ou instalou algo se não executou a ação.
 - Atendimento humano recebe histórico, resumo, anexos e pendências sem perder estado.
 - Um canal pode representar várias unidades; a unidade responsável deve ser identificada e validada.
 
-## Organização sugerida (não criar sem aprovação)
+## Fronteiras e camadas (não negociáveis)
+
+- Monólito modular em .NET 10 (ADR 0005 e `docs/architecture/BOUNDARIES.md`): cada módulo tem os projetos Contracts, Core (Domain + Application), Infrastructure e Presentation, criados só quando necessários.
+- Módulos só se comunicam por `Contracts` (consultas e comandos síncronos; eventos). A matriz em `docs/architecture/module-dependencies.json` é a fonte única; aresta nova exige ADR.
+- Nenhum acesso a tabelas de outro módulo: cada módulo tem esquema, `DbContext` e migrations próprios.
+- Tenant e permissões efetivas só pelo `RequestContext` criado pelo Host, nunca por parâmetro de requisição, evento sem envelope confiável ou saída de modelo de IA.
+- O Conversation Engine é a autoridade do estado e do contexto da conversa, inclusive do modo IA/humano; o modo só muda por `TransitionHandlingMode`, com `StateVersion`. O ContactCenter decide filas, atribuição e políticas.
+- O `EmployeeAssistant` nunca envia mensagens a clientes e só lê trecho de atendimento por ação explícita e autorizada do colaborador.
+- Interface só com uso concreto; Domain e Application ficam em pastas do Core (BOUNDARIES.md §10).
+- Testes de arquitetura ativos devem passar. O ArchUnitNET só entra depois do spike aprovado.
+- Mudança relevante de fronteira exige ADR; ajuste menor vai ao BOUNDARIES.md com aprovação.
+
+## Organização da solução (ADR 0005)
 
 ```text
 ia.bimeta/
-├── CLAUDE.md
-├── ARCHITECTURE.md
+├── CLAUDE.md · ARCHITECTURE.md
+├── docs/
+│   ├── architecture/   BOUNDARIES.md · module-dependencies.json
+│   └── adr/
 ├── backend/
-│   ├── IaBimeta.Api/
-│   ├── IaBimeta.Application/
-│   ├── IaBimeta.Domain/
-│   ├── IaBimeta.Infrastructure/
-│   └── IaBimeta.Worker/
+│   ├── IaBimeta.slnx
+│   ├── host/            IaBimeta.Api · IaBimeta.Worker
+│   ├── building-blocks/ IaBimeta.SharedKernel
+│   ├── modules/<modulo>/IaBimeta.<M>.{Contracts,Core,Infrastructure,Presentation}
+│   └── adapters/        IaBimeta.Adapters.{WhatsApp,Ai.<Provedor>,LabNet,BImeta}
 ├── frontend/
-├── tests/
-└── docs/
-    └── adr/
+└── tests/
 ```
 
-Nomes de projetos e limites entre módulos são propostas, não decisões irrevogáveis. Preferir arquitetura simples e modular, sem microserviços prematuros.
+Criar somente os projetos necessários em cada etapa, com aprovação (BOUNDARIES.md §1 e §10). A solução atual (ADR 0003) migrará para esta organização em etapa própria, também com aprovação. Preferir arquitetura simples e modular, sem microserviços prematuros.
 
 ## Política de alterações e Git
 
@@ -113,11 +127,14 @@ Nomes de projetos e limites entre módulos são propostas, não decisões irrevo
 - Não modificar `ARCHITECTURE.md` para justificar implementação divergente.
 - Se a solicitação conflitar com arquitetura, **explicar o conflito antes de codificar**.
 - Não introduzir bibliotecas grandes sem necessidade comprovada e aprovação.
+- Não criar `.csproj` nem módulo fora dos critérios de `docs/architecture/BOUNDARIES.md` §10. Ajuste menor de fronteira vai ao BOUNDARIES.md com aprovação.
+- Não instalar o ArchUnitNET antes de o spike de compatibilidade com .NET 10 ser aprovado.
 
 ## Prioridades de qualidade
 
 - Código claro e testável; contratos explícitos; DI e separação de responsabilidades.
 - Testes de isolamento multitenant, autorização, concorrência e idempotência desde o começo.
+- Testes de arquitetura ativos devem passar; regra negativa não pode passar com conjunto vazio (BOUNDARIES.md §8).
 - Logs estruturados com correlação e dados minimizados.
 - Tratamento de timeout, retry seguro e circuit breaker quando pertinente.
 - APIs versionadas e contratos de integração documentados.
