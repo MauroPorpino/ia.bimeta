@@ -97,6 +97,11 @@ Não afirmar que compilou, testou ou instalou algo se não executou a ação.
 - O `EmployeeAssistant` nunca envia mensagens a clientes e só lê trecho de atendimento por ação explícita e autorizada do colaborador.
 - Interface só com uso concreto; Domain e Application ficam em pastas do Core (BOUNDARIES.md §10).
 - Testes de arquitetura ativos devem passar. O ArchUnitNET só entra depois do spike aprovado.
+- Processamento de mensagens em três papéis (ADR 0006, BOUNDARIES.md §12): o Receiver só valida a assinatura, resolve canal e tenant pela projeção local do `Channels`, deduplica, grava no Inbox durável e responde 200, sem chamada a outro módulo, à IA ou ao provedor no caminho do webhook.
+- Operação externa com efeito colateral exige idempotência comprovada ou reconciliação; resultado ambíguo nunca é reenviado automaticamente. Lease e `StateVersion` não bastam contra efeito duplicado.
+- O `expires_at` da mensagem é validade operacional e não é a janela de atendimento de 24 horas do WhatsApp. Preservar `provider_timestamp`, `received_at` e `ingest_seq`.
+- Parâmetros da Meta (vazão, códigos de erro, assinatura, retentativas) são configuração, confirmada na documentação oficial antes de implementar o `Channels`.
+- O `Messaging` cresce só com necessidade comprovada: sem escalonador justo avançado, limitador distribuído ou broker antes de teste que o demonstre.
 - Mudança relevante de fronteira exige ADR; ajuste menor vai ao BOUNDARIES.md com aprovação.
 
 ## Organização da solução (ADR 0005)
@@ -109,8 +114,8 @@ ia.bimeta/
 │   └── adr/
 ├── backend/
 │   ├── IaBimeta.slnx
-│   ├── host/            IaBimeta.Api · IaBimeta.Worker
-│   ├── building-blocks/ IaBimeta.SharedKernel
+│   ├── host/            IaBimeta.Api · IaBimeta.Worker (etapa 4)
+│   ├── building-blocks/ IaBimeta.SharedKernel · IaBimeta.Messaging (etapa 4)
 │   ├── modules/<modulo>/IaBimeta.<M>.{Contracts,Core,Infrastructure,Presentation}
 │   └── adapters/        IaBimeta.Adapters.{WhatsApp,Ai.<Provedor>,LabNet,BImeta}
 ├── frontend/

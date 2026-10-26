@@ -1,7 +1,7 @@
 # ia.bimeta — ARCHITECTURE.md
 
 > **Status:** Documento-base para implementação e discussão.  
-> **Versão:** 0.4 (preparação do repositório; consolida decisões discutidas até 26/10/2026, incluindo o Assistente interno de IA, o roadmap de voz e o monólito modular com fronteiras de módulo, conforme o ADR 0005 e `docs/architecture/BOUNDARIES.md`).  
+> **Versão:** 0.5 (preparação do repositório; consolida decisões discutidas até 26/10/2026, incluindo o Assistente interno de IA, o roadmap de voz, o monólito modular com fronteiras de módulo (ADR 0005 e `docs/architecture/BOUNDARIES.md`) e o processamento assíncrono de mensagens em Receiver, Processing e Sender (ADR 0006)).  
 > **Natureza:** Decisões confirmadas estão indicadas como **Decidido**; alternativas técnicas como **Proposta a validar**.  
 > **Escopo:** Plataforma ia.bimeta independente. LabNet e BImeta são sistemas externos integráveis, não módulos internos.
 
@@ -109,6 +109,12 @@ Voz em tempo real envolve streaming, STT/TTS ou speech-to-speech, latência, int
 
 **Roadmap:** voz e telefonia (Voice Gateway, `VoiceCall`) serão implementadas **após a primeira versão comercial** (ver seção 11, etapa 11). A continuidade entre canais de texto não está adiada.
 
+### 4.4 Processamento assíncrono de mensagens
+
+**Decidido (ADR 0006):** recebimento, processamento e envio de mensagens são separados logicamente, sem microsserviços. Um **Receiver** na `IaBimeta.Api` valida a autenticidade, identifica canal e tenant por projeção local do Channels, deduplica e grava em um **Inbox durável** antes de responder HTTP 200. **Processing Workers** (`IaBimeta.Worker`) processam os eventos pelos módulos (Conversation Engine, AI Agent Runtime, ContactCenter e Capability Execution Engine). **Sender Workers** consomem a fila de envio respeitando os limites do provedor.
+
+As filas ficam inicialmente no PostgreSQL, com leases, retentativas, idempotência e tratamento de falhas permanentes, e os contratos permitem introduzir um broker depois, sem alterar os módulos de negócio. O processamento é sequencial por `ServiceSessionId` e paralelo entre sessões. Efeitos externos exigem idempotência comprovada ou reconciliação, e um resultado ambíguo nunca é reenviado automaticamente. Detalhes em `docs/architecture/BOUNDARIES.md` §12.
+
 ## 5. BYOK — modelo de IA contratado pelo tenant
 
 **Decidido:** padrão inicial é **Bring Your Own Key**. O tenant contrata e paga diretamente o consumo de APIs de IA. A BImeta cobra seus serviços SaaS e de implantação/suporte.
@@ -175,7 +181,7 @@ Nunca inventar código de exame, cobertura, preço, disponibilidade ou interpret
 
 **Pendente de validação técnica antes da instalação:** suporte de versões de SDK, Node.js, extensões e PostgreSQL ao Windows 10 Pro 22H2; verificar requisitos oficiais e alternativas. Não presumir compatibilidade. Windows 10 está fora do suporte regular e requer avaliação de segurança.
 
-**Proposta a validar:** Redis, broker/filas e object storage conforme demanda real; não exigir todos no primeiro dia. Para desenvolvimento local, minimizar consumo de RAM e disco.
+**Proposta a validar:** Redis, broker/filas e object storage conforme demanda real; não exigir todos no primeiro dia. Para desenvolvimento local, minimizar consumo de RAM e disco. **Decidido (ADR 0006):** as filas iniciais ficam no PostgreSQL 17; um broker (por exemplo RabbitMQ) só entra com necessidade demonstrada por medição, sem alterar os módulos de negócio.
 
 ## 9. Segurança e LGPD
 
@@ -209,7 +215,7 @@ Nunca inventar código de exame, cobertura, preço, disponibilidade ou interpret
 10. Homologação Linux e implantação de produção em infraestrutura separada.
 11. Voz (Voice Gateway) e associação de ligações telefônicas a sessões multicanal, **após a primeira versão comercial** e após validação de APIs/custos.
 
-Cada etapa cria apenas os módulos e projetos indicados na coluna Etapa de `docs/architecture/BOUNDARIES.md` §1.
+Cada etapa cria apenas os módulos e projetos indicados na coluna Etapa de `docs/architecture/BOUNDARIES.md` §1. O `IaBimeta.Worker` e o bloco `IaBimeta.Messaging` nascem na etapa 4, com o primeiro processamento assíncrono durável (§12.12 do mesmo documento).
 
 **MVP:** escopo mínimo operacional a aprovar. Não confundir roadmap completo com escopo contratado do MVP. **Decidido (26/10/2026):** o Assistente interno de IA (Employee AI Workspace), inicialmente somente leitura, **integra** o MVP. A **voz não integra** o MVP nem a primeira versão comercial; será implementada **após** a primeira versão comercial, cujas prioridades são WhatsApp, IA e atendimento humano. As abstrações de voz (Voice Gateway, `VoiceCall`) permanecem na arquitetura, e os critérios de entrada da voz (APIs, custos e elegibilidade) serão definidos antes do início dessa etapa. A continuidade entre canais de texto (sessão multicanal) **não está adiada**: pode ser implementada conforme as necessidades do MVP, com verificação de identidade e isolamento de contexto. O escopo detalhado da primeira versão comercial permanece **pendente de definição**.
 
@@ -227,7 +233,7 @@ Cada etapa cria apenas os módulos e projetos indicados na coluna Etapa de `docs
 
 ## 13. Decisões ainda abertas
 
-- Escolha final do banco, mecanismo de filas e hospedagem.
+- Escolha final do banco e da hospedagem. O mecanismo de filas inicial é o PostgreSQL (ADR 0006); os critérios para introduzir um broker dependem de testes de carga.
 - Limites exatos do MVP.
 - Escopo detalhado da primeira versão comercial (voz fora; prioridades: WhatsApp, IA e atendimento humano; Assistente interno somente leitura integra o MVP).
 - Política de atendimento encerrado versus nova sessão e recuperação de histórico.
@@ -238,13 +244,15 @@ Cada etapa cria apenas os módulos e projetos indicados na coluna Etapa de `docs
 - Modelos de permissão detalhados, SLA e prioridades de fila.
 - Compatibilidade de toolchain no Windows 10.
 - Acesso a dados dos módulos: EF Core com Npgsql ou SQL direto.
-- Mecanismo do outbox de eventos duráveis, a definir quando o primeiro evento durável entrar em implementação (`BOUNDARIES.md` §4).
+- Confirmação, na documentação oficial da Meta, dos parâmetros de vazão, códigos de erro, assinatura de webhook e retentativas, antes da implementação do Channels (ADR 0006, `BOUNDARIES.md` §12.11).
+- Política de uso de templates aprovados quando a janela de atendimento de 24 horas do WhatsApp estiver fechada.
+- Retenção do Inbox, da fila de envio e do payload bruto (LGPD).
 - Papéis de banco por módulo, a avaliar depois da fase 2b (`BOUNDARIES.md` §9).
 - Resultado do spike do ArchUnitNET (compatibilidade comprovada com .NET 10) antes de instalar o pacote (`BOUNDARIES.md` §8).
 
 ## 14. Referências de trabalho
 
-Este documento é uma **síntese operacional** das decisões debatidas, não substitui o documento Word de arquitetura com diagramas. Divergências ou novas escolhas devem ser registradas como ADRs em `docs/adr/` antes de mudanças estruturais. A estrutura em módulos, as camadas e a matriz de dependências estão em `docs/architecture/BOUNDARIES.md` (ADR 0005).
+Este documento é uma **síntese operacional** das decisões debatidas, não substitui o documento Word de arquitetura com diagramas. Divergências ou novas escolhas devem ser registradas como ADRs em `docs/adr/` antes de mudanças estruturais. A estrutura em módulos, as camadas e a matriz de dependências estão em `docs/architecture/BOUNDARIES.md` (ADR 0005). O processamento assíncrono de mensagens está no mesmo documento (seção 12) e no ADR 0006.
 
 
 ## 15. Assistente interno de IA para colaboradores — decisão adicionada em 26/10/2026
