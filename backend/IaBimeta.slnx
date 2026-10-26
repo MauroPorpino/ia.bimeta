@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="../tests/IaBimeta.Domain.Tests/IaBimeta.Domain.Tests.csproj" />
+  <Project Path="IaBimeta.Api/IaBimeta.Api.csproj" />
+  <Project Path="IaBimeta.Application/IaBimeta.Application.csproj" />
+  <Project Path="IaBimeta.Domain/IaBimeta.Domain.csproj" />
+  <Project Path="IaBimeta.Infrastructure/IaBimeta.Infrastructure.csproj" />
+</Solution>

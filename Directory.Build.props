@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Deterministic>true</Deterministic>
     <InvariantGlobalization>false</InvariantGlobalization>
-    <!-- TreatWarningsAsErrors será decidido na criação dos projetos. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
 
 </Project>
