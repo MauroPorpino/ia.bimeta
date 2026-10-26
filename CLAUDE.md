@@ -137,3 +137,15 @@ Ao iniciar uma sessão de trabalho, informe:
 **Primeira mensagem sugerida ao abrir o projeto:**
 
 > Li `CLAUDE.md` e `ARCHITECTURE.md`. Vou começar apenas diagnosticando o ambiente local e verificando compatibilidade das ferramentas com Windows 10. Não instalarei nem modificarei nada sem sua aprovação. Depois apresentarei um plano de preparação do projeto.
+
+
+## Atualização aprovada — Assistente interno de IA (26/10/2026)
+
+- A **mesma aplicação web** da Central de Atendimento terá um **Assistente IA interno** em aba/painel próprio, utilizável por **qualquer colaborador autorizado do tenant**, não somente atendentes.
+- Implementar `Employee AI Workspace` com sessões privadas (`EmployeeAssistantSession`) separadas de `ServiceSession`/`ConversationId` de clientes. **Nunca** encaminhar automaticamente uma resposta interna ao cliente.
+- Reutilizar AI Agent Runtime, BYOK, Knowledge Engine e Capability Execution Engine. Consultar dados oficiais do LabNet/BImeta por capacidades tipadas e autorizadas; **nunca** executar SQL arbitrário gerado por LLM.
+- Aplicar autorização efetiva a **cada consulta**: tenant, organização, unidade, setor, usuário e papel. A conta técnica da integração não amplia privilégios do colaborador.
+- MVP: consultas somente leitura com catálogo inicial de endpoints LabNet; operações com efeitos colaterais somente em fase posterior e após confirmação/autorização/auditoria.
+- Testar isolamento entre colaboradores e tenants, proibição de acesso a dados fora do escopo, ausência de vazamento para mensagens de clientes e tratamento seguro de falhas.
+- **Decisão de roadmap:** lançar primeiro WhatsApp + atendimento humano + IA; acrescentar **voz depois**, sem removê-la da arquitetura futura.
+- Antes de codificar este módulo, apresentar proposta de contratos, matriz de permissões, UX e testes para aprovação.

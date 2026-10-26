@@ -1,7 +1,7 @@
 # ia.bimeta — ARCHITECTURE.md
 
 > **Status:** Documento-base para implementação e discussão.  
-> **Versão:** 0.1 (preparação do repositório; consolida decisões discutidas até 26/10/2026).  
+> **Versão:** 0.3 (preparação do repositório; consolida decisões discutidas até 26/10/2026, incluindo o Assistente interno de IA e o roadmap de voz).  
 > **Natureza:** Decisões confirmadas estão indicadas como **Decidido**; alternativas técnicas como **Proposta a validar**.  
 > **Escopo:** Plataforma ia.bimeta independente. LabNet e BImeta são sistemas externos integráveis, não módulos internos.
 
@@ -62,6 +62,7 @@ Tenant
 | Routing / Escalation Engine | Filas, distribuição, horários, plantão e transferência humana |
 | Voice Gateway | Telefonia, áudio, transcrição/síntese e interrupções, conforme capacidades reais do canal |
 | Central de Atendimento | Interface web de operadores, filas, histórico, anexos, IA assistiva e supervisão |
+| **Employee AI Workspace** | Assistente IA interno para colaboradores autorizados do tenant, na mesma aplicação web da Central de Atendimento, com sessões privadas (`EmployeeAssistantSession`) separadas dos atendimentos a clientes; reutiliza AI Agent Runtime, AI Provider Gateway, Knowledge Engine e Capability Execution Engine (ver seção 15) |
 | Workers | Webhooks, filas, sincronização, tarefas assíncronas, reprocessamento e reconciliação |
 
 ### 4.1 Isolamento do contexto: exemplo Mauro e Pedro
@@ -102,6 +103,8 @@ Canais previstos: WhatsApp (Meta Cloud API), Instagram Direct, Messenger, Telegr
 `ServiceSession` pode relacionar uma ligação telefônica e documentos recebidos por WhatsApp. Exigir verificação de identidade e consentimento apropriado; nunca associar pessoas somente por semelhança de números.
 
 Voz em tempo real envolve streaming, STT/TTS ou speech-to-speech, latência, interrupção e handoff. **Não presumir disponibilidade da WhatsApp Business Calling API ou de streaming sem validação técnica e comercial atualizada.**
+
+**Roadmap:** voz e telefonia (Voice Gateway, `VoiceCall`) serão implementadas **após a primeira versão comercial** (ver seção 11, etapa 11). A continuidade entre canais de texto não está adiada.
 
 ## 5. BYOK — modelo de IA contratado pelo tenant
 
@@ -183,7 +186,9 @@ Nunca inventar código de exame, cobertura, preço, disponibilidade ou interpret
 
 ## 10. Modelo de entidades inicial (conceitual)
 
-`Tenant`, `Organization`, `BusinessUnit`, `Department`, `User`, `UserOrganizationGrant`, `ServiceQueue`, `QueueMembership`, `RoutingPolicy`, `SchedulePolicy`, `Channel`, `ChannelAccount`, `Contact`, `ServiceSession`, `Conversation`, `Message`, `Attachment`, `VoiceCall`, `WorkflowDefinition`, `WorkflowVersion`, `WorkflowInstance`, `WorkflowState`, `AgentDefinition`, `AiProviderCredentialReference`, `AiRequest`, `KnowledgeSource`, `KnowledgeItem`, `KnowledgeRevision`, `KnowledgeApproval`, `IntegrationDefinition`, `Capability`, `CapabilityExecution`, `AuditEvent`.
+`Tenant`, `Organization`, `BusinessUnit`, `Department`, `User`, `UserOrganizationGrant`, `ServiceQueue`, `QueueMembership`, `RoutingPolicy`, `SchedulePolicy`, `Channel`, `ChannelAccount`, `Contact`, `ServiceSession`, `Conversation`, `Message`, `Attachment`, `VoiceCall`, `EmployeeAssistantSession`, `WorkflowDefinition`, `WorkflowVersion`, `WorkflowInstance`, `WorkflowState`, `AgentDefinition`, `AiProviderCredentialReference`, `AiRequest`, `KnowledgeSource`, `KnowledgeItem`, `KnowledgeRevision`, `KnowledgeApproval`, `IntegrationDefinition`, `Capability`, `CapabilityExecution`, `AuditEvent`.
+
+`EmployeeAssistantSession` pertence a um colaborador (`User`) e é uma entidade **distinta** de `ServiceSession` e `Conversation`: tem contexto, histórico e retenção próprios, e **não** se vincula automaticamente a atendimentos de clientes. O modelo de mensagens e do histórico do assistente interno será detalhado depois (ver pendências da seção 15).
 
 **Não gerar o esquema completo sem aprovação dos contratos e invariantes.** Avaliar chaves compostas por tenant, constraints, índices, versionamento e política de retenção antes das migrations.
 
@@ -197,10 +202,11 @@ Nunca inventar código de exame, cobertura, preço, disponibilidade ou interpret
 6. AI Provider Gateway BYOK, agente e conhecimento aprovado.
 7. Workflow Engine e Capability Execution Engine.
 8. Conector LabNet, documentos, orçamento e agendamento com homologação.
-9. Voz e sessão multicanal, após validação de APIs/custos.
+9. Employee AI Workspace (Assistente IA interno), inicialmente somente leitura, com catálogo inicial de capacidades LabNet homologadas (seção 15).
 10. Homologação Linux e implantação de produção em infraestrutura separada.
+11. Voz (Voice Gateway) e associação de ligações telefônicas a sessões multicanal, **após a primeira versão comercial** e após validação de APIs/custos.
 
-**MVP:** escopo mínimo operacional a aprovar. Não confundir roadmap completo com escopo contratado do MVP; voz é objetivo importante, mas a ordem e critérios de entrada devem ser decididos explicitamente.
+**MVP:** escopo mínimo operacional a aprovar. Não confundir roadmap completo com escopo contratado do MVP. **Decidido (26/10/2026):** o Assistente interno de IA (Employee AI Workspace), inicialmente somente leitura, **integra** o MVP. A **voz não integra** o MVP nem a primeira versão comercial; será implementada **após** a primeira versão comercial, cujas prioridades são WhatsApp, IA e atendimento humano. As abstrações de voz (Voice Gateway, `VoiceCall`) permanecem na arquitetura, e os critérios de entrada da voz (APIs, custos e elegibilidade) serão definidos antes do início dessa etapa. A continuidade entre canais de texto (sessão multicanal) **não está adiada**: pode ser implementada conforme as necessidades do MVP, com verificação de identidade e isolamento de contexto. O escopo detalhado da primeira versão comercial permanece **pendente de definição**.
 
 ## 12. Critérios mínimos de qualidade
 
@@ -217,7 +223,8 @@ Nunca inventar código de exame, cobertura, preço, disponibilidade ou interpret
 ## 13. Decisões ainda abertas
 
 - Escolha final do banco, mecanismo de filas e hospedagem.
-- Limites exatos do MVP e prioridade da voz.
+- Limites exatos do MVP.
+- Escopo detalhado da primeira versão comercial (voz fora; prioridades: WhatsApp, IA e atendimento humano; Assistente interno somente leitura integra o MVP).
 - Política de atendimento encerrado versus nova sessão e recuperação de histórico.
 - Estratégia de migração dos atendimentos legados do LabNet.
 - Contratos dos endpoints LabNet, autenticação e eventos de sincronização.
@@ -229,3 +236,20 @@ Nunca inventar código de exame, cobertura, preço, disponibilidade ou interpret
 ## 14. Referências de trabalho
 
 Este documento é uma **síntese operacional** das decisões debatidas, não substitui o documento Word de arquitetura com diagramas. Divergências ou novas escolhas devem ser registradas como ADRs em `docs/adr/` antes de mudanças estruturais.
+
+
+## 15. Assistente interno de IA para colaboradores — decisão adicionada em 26/10/2026
+
+**Decidido:** qualquer colaborador **autorizado** do tenant, e não apenas atendentes, poderá conversar com um agente de IA na **mesma aplicação** da Central de Atendimento, em uma aba/painel próprio chamado **Assistente IA** (`Employee AI Workspace`). Esse modo funciona sem atendimento de cliente aberto.
+
+- **Reutilizar** AI Agent Runtime, AI Provider Gateway/BYOK, Knowledge Engine, Capability Execution Engine, autenticação e auditoria.
+- **Separar rigorosamente** `EmployeeAssistantSession` (sessão privada do colaborador) de `ServiceSession`/`ConversationId` (atendimento ao cliente). Nenhuma resposta do assistente interno deve ser enviada automaticamente ao cliente; contexto de atendimento só pode ser incorporado por ação explícita e autorizada.
+- **Permissões por solicitação:** validar identidade do colaborador, tenant, organização, unidade, setor, cargo e concessões efetivas. Um atendente não acessa faturamento geral sem permissão. Conector técnico não amplia o direito do usuário.
+- **Dados atuais vêm da origem:** consultas ao LabNet (agendas, requisições, convênios, indicadores autorizados) ou BImeta e outros sistemas via ferramentas/API tipadas e auditadas; não gerar SQL livre para executar contra ERPs.
+- **Conhecimento aprovado** (normas, preparos, procedimentos) via Knowledge Engine; fatos operacionais pelo sistema oficial. Mostrar fonte e horário da consulta quando pertinente.
+- **MVP:** consultas somente leitura, com um catálogo pequeno de capacidades LabNet homologadas. Escritas/ações transacionais ficam para fase posterior, com confirmação, autorização, idempotência e auditoria.
+- **UX:** na mesma interface React, aba/painel próprio e opção de painel lateral durante o atendimento, sem misturar mensagens privadas e mensagens destinadas ao cliente.
+- **Segurança:** LGPD, minimização de dados sensíveis, paginação/limites, logs apropriados, proteção contra prompt injection e testes de isolamento por colaborador/tenant/unidade.
+- **Roadmap:** primeira versão comercial prioriza WhatsApp, IA e atendimento humano; **voz será acrescentada posteriormente**. Preservar abstrações para futura integração de voz.
+
+**Pendências de detalhamento:** matriz de papéis, catálogo inicial de consultas LabNet, retenção do histórico interno, escopo de relatórios e critérios de autenticação reforçada.
