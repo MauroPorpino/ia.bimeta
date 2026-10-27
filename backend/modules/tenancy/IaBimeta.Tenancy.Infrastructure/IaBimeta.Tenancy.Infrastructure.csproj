@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
+    <!-- Alinha o EF Core de execução à versão do Design e do dotnet-ef (o provider exige apenas 10.0.4 ou superior).
+         O Design é PrivateAssets=all e, sem este alinhamento, os hosts resolveriam 10.0.4. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.14" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.14" />
+    <!-- Só em tempo de projeto: gera as migrations (dotnet ef). Não vai para a saída. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.14">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\building-blocks\IaBimeta.SharedKernel\IaBimeta.SharedKernel.csproj" />
+    <ProjectReference Include="..\IaBimeta.Tenancy.Contracts\IaBimeta.Tenancy.Contracts.csproj" />
+    <ProjectReference Include="..\IaBimeta.Tenancy.Core\IaBimeta.Tenancy.Core.csproj" />
+  </ItemGroup>
+
+</Project>

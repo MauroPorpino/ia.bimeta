@@ -115,15 +115,17 @@ function Compare-Alteracoes {
     return $resultados
 }
 
-# Projetos .csproj rastreados pelo git (ignora bin/obj) e suas referencias de projeto.
+# Projetos .csproj rastreados pelo git e os novos ainda nao rastreados (ignora bin/obj e arquivos ignorados),
+# com suas referencias de projeto. Incluir os nao rastreados permite verificar o trabalho antes do commit.
 function Get-GrafoDeProjetos {
     param([string]$Raiz)
-    $caminhos = @(git -C $Raiz --no-optional-locks ls-files -- '*.csproj')
+    $caminhos = @(git -C $Raiz --no-optional-locks ls-files --cached --others --exclude-standard -- '*.csproj')
     if ($LASTEXITCODE -ne 0) { throw 'git ls-files falhou.' }
     $projetos = @()
     foreach ($rel in $caminhos) {
         if (-not $rel) { continue }
         $completo = Join-Path $Raiz ($rel.Replace('/', '\'))
+        if (-not (Test-Path -LiteralPath $completo -PathType Leaf)) { continue }
         $xml = [xml](Get-Content -LiteralPath $completo -Raw -Encoding UTF8)
         $refs = @()
         foreach ($no in $xml.SelectNodes('//ProjectReference')) {

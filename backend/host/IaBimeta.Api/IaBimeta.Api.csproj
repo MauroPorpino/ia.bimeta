@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Segredos de desenvolvimento (string de conexão) ficam fora do repositório: dotnet user-secrets. -->
+    <UserSecretsId>7d1c2f4e-6a3b-4e8a-9c52-1b0f3a6d8e21</UserSecretsId>
+  </PropertyGroup>
+
+  <!-- Os testes de integração exercitam os componentes internos do host (fonte de contexto de desenvolvimento). -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="IaBimeta.IntegrationTests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\building-blocks\IaBimeta.SharedKernel\IaBimeta.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\modules\tenancy\IaBimeta.Tenancy.Contracts\IaBimeta.Tenancy.Contracts.csproj" />
+    <ProjectReference Include="..\..\modules\tenancy\IaBimeta.Tenancy.Core\IaBimeta.Tenancy.Core.csproj" />
+    <ProjectReference Include="..\..\modules\tenancy\IaBimeta.Tenancy.Infrastructure\IaBimeta.Tenancy.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\modules\tenancy\IaBimeta.Tenancy.Presentation\IaBimeta.Tenancy.Presentation.csproj" />
+  </ItemGroup>
+
+</Project>

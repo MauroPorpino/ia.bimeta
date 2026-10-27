@@ -70,6 +70,14 @@ A partir da raiz do repositório:
 
 Todos terminam com código 0 (aprovado) ou 1 (reprovado).
 
+**Se o Windows PowerShell recusar rodar os scripts** ("a execução de scripts foi desabilitada neste sistema"), que é a política padrão `Restricted`, execute-os com a política liberada **apenas naquele processo**, sem alterar a configuração do computador nem do usuário:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\verificacao\Test-TestesDaSolucao.ps1 -Compilar -ExigirSemIgnorados
+```
+
+Os scripts não são assinados. Os testes também rodam sem eles, com `dotnet test backend\IaBimeta.slnx`.
+
 ## Limites conhecidos
 
 - A análise AST é estática: ela não impede um comando digitado fora de um script. Continua valendo a disciplina de nunca usar comandos de remoção nem `git clean`, `git reset --hard` ou `git checkout -- .` sem autorização.

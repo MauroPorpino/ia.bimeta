@@ -1,7 +1,13 @@
 <Solution>
-  <Project Path="../tests/IaBimeta.Domain.Tests/IaBimeta.Domain.Tests.csproj" />
-  <Project Path="IaBimeta.Api/IaBimeta.Api.csproj" />
+  <Project Path="../tests/building-blocks/IaBimeta.SharedKernel.Tests/IaBimeta.SharedKernel.Tests.csproj" />
+  <Project Path="../tests/IaBimeta.IntegrationTests/IaBimeta.IntegrationTests.csproj" />
+  <Project Path="../tests/tenancy/IaBimeta.Tenancy.Tests/IaBimeta.Tenancy.Tests.csproj" />
+  <Project Path="building-blocks/IaBimeta.SharedKernel/IaBimeta.SharedKernel.csproj" />
+  <Project Path="host/IaBimeta.Api/IaBimeta.Api.csproj" />
   <Project Path="IaBimeta.Application/IaBimeta.Application.csproj" />
-  <Project Path="IaBimeta.Domain/IaBimeta.Domain.csproj" />
   <Project Path="IaBimeta.Infrastructure/IaBimeta.Infrastructure.csproj" />
+  <Project Path="modules/tenancy/IaBimeta.Tenancy.Contracts/IaBimeta.Tenancy.Contracts.csproj" />
+  <Project Path="modules/tenancy/IaBimeta.Tenancy.Core/IaBimeta.Tenancy.Core.csproj" />
+  <Project Path="modules/tenancy/IaBimeta.Tenancy.Infrastructure/IaBimeta.Tenancy.Infrastructure.csproj" />
+  <Project Path="modules/tenancy/IaBimeta.Tenancy.Presentation/IaBimeta.Tenancy.Presentation.csproj" />
 </Solution>

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <!-- TEN-1: o RequestContext só é criado pelos hosts (construtor interno). Testes também precisam criá-lo. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="IaBimeta.Api" />
+    <InternalsVisibleTo Include="IaBimeta.Worker" />
+    <InternalsVisibleTo Include="IaBimeta.SharedKernel.Tests" />
+    <InternalsVisibleTo Include="IaBimeta.Tenancy.Tests" />
+    <InternalsVisibleTo Include="IaBimeta.IntegrationTests" />
+  </ItemGroup>
+
+</Project>
