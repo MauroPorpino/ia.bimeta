@@ -6,7 +6,7 @@ Você é o agente principal de desenvolvimento do **ia.bimeta**, uma plataforma 
 
 **Leia `ARCHITECTURE.md` integralmente antes de propor ou implementar mudanças.** O arquivo contém as decisões de arquitetura e identifica propostas ainda não aprovadas.
 
-**Leia também `docs/architecture/BOUNDARIES.md` antes de criar módulo, projeto ou dependência entre módulos.** Ele define módulos, camadas e a matriz de dependências verificada por testes (ADR 0005).
+**Leia também `docs/architecture/BOUNDARIES.md` antes de criar módulo, projeto ou dependência entre módulos.** Ele define módulos, camadas e a matriz de dependências verificada por testes (ADR 0005). Para o Conversation Engine e os turnos de IA, leia também `docs/architecture/CONVERSATION-LIFECYCLE.md` (ADR 0007).
 
 ## Contexto obrigatório
 
@@ -102,6 +102,12 @@ Não afirmar que compilou, testou ou instalou algo se não executou a ação.
 - O `expires_at` da mensagem é validade operacional e não é a janela de atendimento de 24 horas do WhatsApp. Preservar `provider_timestamp`, `received_at` e `ingest_seq`.
 - Parâmetros da Meta (vazão, códigos de erro, assinatura, retentativas) são configuração, confirmada na documentação oficial antes de implementar o `Channels`.
 - O `Messaging` cresce só com necessidade comprovada: sem escalonador justo avançado, limitador distribuído ou broker antes de teste que o demonstre.
+- Ciclo de vida de mensagens e turnos de IA (ADR 0007, CONVERSATION-LIFECYCLE.md): toda resposta da IA carrega `StateVersion`, `basedOnInboundSeq`, `TurnId` e a época do turno ativo. No MVP a resposta defasada é **sempre rejeitada**, por regra fixa: não criar `StaleReplyMode`, `allowStaleInput` nem chave de configuração para isso. A exceção, a política `Queue` e a consulta de evidência ao Audit são evolução futura documentada: não implementar, nem deixar chave ou código preparatório, sem novo ADR.
+- Só o Conversations decide qual turno está logicamente ativo (`BeginTurn`, `EndTurn`, `CancelTurn`). Um turno substituído não registra resposta, mesmo que continue executando. A correção depende das cercas transacionais do Conversations; cancelar fisicamente a chamada de IA é só otimização.
+- Configurações: o Agents controla agrupamento, interrupções, tentativas e rajada longa; o Conversations aplica regras fixas de consistência e de aceitação de respostas, sem configuração por tenant no MVP.
+- `OnChattyBurst`: o padrão é `Alert` (o Agents pede ao Conversations `RaiseSessionAttention`, o ContactCenter sinaliza e permite a transferência por ação do atendente). Transferência automática só com `OnChattyBurst = Handoff` configurado explicitamente, sem herdar de `OnAiPermanentFailure`.
+- `AnsweredThroughSeq` é cobertura lógica, não entrega. Falha definitiva de envio é registrada, sinalizada ao ContactCenter e recuperada por ação autorizada do atendente, sem novo processamento de IA. `RequestResend`: autorização explícita, vínculo auditável, idempotência, regras e janela aplicadas pelo Channels, nunca repete `SendUnknown` automaticamente.
+- Conteúdo de mídia pendente nunca é enviado ao modelo; ao esgotar o prazo, aplica-se a política do tipo de conteúdo.
 - Mudança relevante de fronteira exige ADR; ajuste menor vai ao BOUNDARIES.md com aprovação.
 
 ## Organização da solução (ADR 0005)

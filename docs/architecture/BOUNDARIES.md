@@ -1,9 +1,9 @@
 # Fronteiras e camadas do ia.bimeta (BOUNDARIES.md)
 
-- **Status:** Aprovado (v0.3)
+- **Status:** Aprovado (v0.4)
 - **Data:** 26/10/2026
 - **Decisor:** Mauro Porpino
-- **Formalizado por:** ADR 0005 (v0.2) e ADR 0006 (v0.3, seção 12)
+- **Formalizado por:** ADR 0005 (v0.2), ADR 0006 (v0.3, seção 12) e ADR 0007 (v0.4, seções 6 e 12)
 - **Complementa:** `ARCHITECTURE.md` e os ADRs 0001 a 0004. Não revoga nenhuma decisão deles, exceto os itens 1 e 4 do ADR 0003, substituídos pelo ADR 0005.
 - **Fonte única da matriz de dependências:** `docs/architecture/module-dependencies.json`.
 
@@ -111,6 +111,7 @@ Contracts tem os namespaces `Queries`, `Commands`, `Events` e `Ports`. Os `Ports
 - **DEP-4:** o `SharedKernel` não referencia módulo algum e só aceita tipos sem regra de negócio, e apenas o que algum módulo já usa.
 - **DEP-5:** o Core e os Contracts não conhecem `LabNet`, `BImeta` nem a API da Meta.
 - **DEP-6:** blocos de construção (`SharedKernel`, `Messaging`) não referenciam módulos. As abstrações de mensageria ficam no `SharedKernel`. A implementação (`Messaging`) só é referenciada pelas `Infrastructure` dos módulos e pelos hosts, nunca pelo Core (ARQ-20).
+- **DEP-7 (evolução futura, fora do MVP):** se a exceção de resposta defasada for adotada (`CONVERSATION-LIFECYCLE.md` §6.3), o `Conversations` poderia usar `Audit.Contracts.Queries` para verificar, de forma independente do `Agents`, se um turno praticou atividade protegida. Seria uma consulta nova dentro da aresta `Conversations → Audit` que já existe na matriz. **No MVP o `Conversations` não consulta o `Audit` para aceitar respostas.**
 
 ## 4. Comunicação entre módulos
 
@@ -127,8 +128,8 @@ Contracts tem os namespaces `Queries`, `Commands`, `Events` e `Ports`. Os `Ports
   1. O Receiver (`IaBimeta.Api`) verifica a assinatura, identifica canal e tenant pela projeção local do `Channels`, deduplica e grava no Inbox durável; só então responde 200.
   2. O worker de ingestão do `Channels` chama `Conversations.Commands.IngestInboundMessage`, preservando o timestamp do provedor e a ordem de ingestão.
   3. `Conversations` publica `InboundMessageRegisteredV1`, evento **durável** (COM-3a).
-  4. `Agents` monta a resposta com `AiGateway`, `Knowledge` e `Capabilities`.
-  5. `Agents` chama `Conversations.Commands.RegisterAiReply` com a versão do estado (§6).
+  4. `Agents` abre o turno (`BeginTurn`) e monta a resposta com `AiGateway`, `Knowledge` e `Capabilities`.
+  5. `Agents` chama `Conversations.Commands.RegisterAiReply` com `StateVersion`, `basedOnInboundSeq`, `TurnId` e a época do turno (§6).
 - **Mensagem enviada:** `Conversations` publica `OutboundMessageRequestedV1` (durável), `Channels` grava na fila de envio, o Sender envia respeitando os limites do provedor e o `Channels` chama `RecordDeliveryStatus` (seção 12).
 - **Handoff e retorno à IA:** coordenados como na seção 6.
 
@@ -171,9 +172,14 @@ O `RequestContext` nunca vem de corpo, query string ou saída de modelo de IA. E
 - **Estado:** `HandlingState` = modo (`AiAutonomous`, `AiSupervised`, `HumanAssisted`), `ResponderKind`, `ResponderRef` e `StateVersion`. Vive no Conversations, junto das mensagens, porque a regra "só um responde por vez" tem de valer onde a mensagem é gravada.
 - **Quem decide:** o ContactCenter decide *se* e *para quem* transferir (política, fila, operador) e então chama `Conversations.Commands.TransitionHandlingMode(serviceSessionId, para, responderRef, expectedStateVersion, transitionId, motivo)`. Agentes, operadores e supervisores pedem ao ContactCenter (`RequestHandoff`, `ReturnToAi`), nunca ao Conversations.
 - **Quem valida:** o Conversations impõe a máquina de estados, incrementa a `StateVersion` (token de fencing) e publica `HandlingModeChangedV1` (durável, atômico com a mudança).
-- **Sem respostas concorrentes:** toda resposta, de IA ou de operador, carrega a `StateVersion` sob a qual foi produzida. O Conversations rejeita versão ou responsável divergente (`StaleState`), e quem enviou descarta. A transição invalida o turno de IA em andamento.
+- **Sem respostas concorrentes:** toda resposta, de IA ou de operador, carrega a `StateVersion` sob a qual foi produzida. O Conversations rejeita versão ou responsável divergente (`StaleState`), e quem enviou descarta. A transição invalida o turno de IA em andamento. A resposta da **IA** carrega ainda `TurnId`, a época do turno ativo e `basedOnInboundSeq` (cerca de entrada), e a resposta defasada é **sempre rejeitada** no MVP, por regra fixa e sem chave de configuração (a exceção `allowStaleInput` é evolução futura e depende de novo ADR, `CONVERSATION-LIFECYCLE.md` §6).
 - **Falha no meio:** o ContactCenter guarda a atribuição como `PendingHandoff` e repete o comando (idempotente por `transitionId`). A conversa permanece no modo anterior até a transição ter sucesso. Um job compara a projeção do ContactCenter com os eventos.
 - **Aguardando atendente:** `HumanAssisted` pode ter `ResponderRef` vazio, o que significa atendimento **pendente na fila** do ContactCenter. A IA deixa de responder (a `StateVersion` rejeita as respostas dela), o histórico fica preservado no Conversations e as mensagens novas do cliente se acumulam até um atendente assumir. É o estado usado na falha permanente da IA (§12.3).
+- **Turno logicamente ativo:** o Conversations guarda qual turno de IA está ativo na sessão (`BeginTurn`, `EndTurn` e `CancelTurn`, com época). Há no máximo um por sessão, e um turno substituído não registra resposta, mesmo que continue executando (`CONVERSATION-LIFECYCLE.md` §4).
+- **Cobertura × entrega:** `AnsweredThroughSeq` é a cobertura **lógica** da resposta aceita. Os estados reais de envio e entrega são do `Channels`. Falha definitiva de envio é registrada, sinalizada ao `ContactCenter` e recuperada por ação autorizada do atendente, e **não dispara novo processamento de IA**. O reenvio (`RequestResend`) exige autorização explícita, vínculo auditável com a mensagem original e idempotência, deixa o `Channels` aplicar as regras e a janela, e nunca repete automaticamente um envio em `SendUnknown` (`CONVERSATION-LIFECYCLE.md` §11, COV-7).
+- **Mídia pendente:** conteúdo que ainda não está disponível nunca é entrada do modelo. Ao esgotar o prazo, aplica-se uma política explícita por tipo de conteúdo (`CONVERSATION-LIFECYCLE.md` §10).
+- **Propriedade das configurações:** o `Agents` controla agrupamento, interrupções, tentativas e o comportamento em rajada longa. O `Conversations` aplica regras fixas de consistência e de aceitação de respostas, sem configuração por tenant no MVP. Nenhum módulo lê a configuração de outro (`CONVERSATION-LIFECYCLE.md` §14).
+- **Rajada longa (`OnChattyBurst`):** atingido o limite de mensagens ou de interrupções, o `Agents` pede ao `Conversations` que sinalize a sessão (`RaiseSessionAttention`, aresta existente), e o `ContactCenter` cria o item de atenção e permite a transferência para humano por ação do atendente. O padrão é `Alert`: **não há transferência automática** sem configuração explícita do tenant (`OnChattyBurst = Handoff`). O `Agents` continua chamando o `ContactCenter` somente por `RequestHandoff` (`CONVERSATION-LIFECYCLE.md` INT-6).
 - **Leitura pelo Agents:** o modo vem no snapshot de contexto do Conversations. O Agents só chama o ContactCenter para pedir handoff.
 
 **Assistente interno:**
@@ -238,6 +244,9 @@ O resultado vai para o histórico deste documento. Se o Mono.Cecil não ler os m
 | ARQ-19 | `Channels.Presentation` não referencia outro módulo: o caminho do webhook só grava no Inbox | 5 |
 | ARQ-20 | O Core não referencia a implementação do `Messaging`, só as abstrações do `SharedKernel` | 4 |
 | ARQ-21 | Todo `CapabilityDescriptor` com efeito colateral declara `IdempotencySupport` | 7 |
+| ARQ-22 | Só `Conversations` escreve `InboundSeq`, `AnsweredThroughSeq` e o turno ativo | 3 |
+| ARQ-23 | Todo registro de resposta da IA exige `TurnId`, época e `basedOnInboundSeq` na assinatura do contrato | 3 |
+| ARQ-24 | `Agents` não referencia `OutboundMessageFailedV1` nem os eventos de entrega: falha de envio não dispara IA | 5 |
 | ARQ-08, 09, 14 | Adaptadores só referenciam o `.Contracts` do dono; `LabNet`, `BImeta` e `graph.facebook` só nos adaptadores; voz só como interface | 5 |
 | ARQ-10 | `EmployeeAssistant` não referencia `Channels` nem `Conversations.Contracts.Commands`, e nenhuma ferramenta de IA referencia `Conversations` | 9 |
 
@@ -313,7 +322,7 @@ Cada tabela pertence ao esquema do módulo dono (DAD-1 e DAD-2). O bloco `IaBime
 ### 12.3 Processing
 
 - **PRO-1 (ingestão):** o worker de ingestão do `Channels` percorre o Inbox por lane (canal, contato) e chama `Conversations.Commands.IngestInboundMessage` ou `RecordDeliveryStatus`. A lane também evita criar duas sessões para o mesmo contato novo quando duas mensagens chegam juntas.
-- **PRO-2 (turno de IA):** o `Agents` consome `InboundMessageRegisteredV1` por lane `ServiceSessionId` e orquestra: snapshot de contexto, `AiGateway`, `Knowledge`, `Capabilities` e `Workflows`. Registra a resposta com a `StateVersion`.
+- **PRO-2 (turno de IA):** o `Agents` consome `InboundMessageRegisteredV1` por lane `ServiceSessionId` e orquestra: snapshot de contexto, `AiGateway`, `Knowledge`, `Capabilities` e `Workflows`. Abre o turno com `BeginTurn` e registra a resposta com as cercas do §6 (`StateVersion`, `basedOnInboundSeq`, `TurnId` e época do turno ativo).
 - **PRO-3:** `ContactCenter` e outros consomem os eventos de que precisam nos próprios handlers (projeções, roteamento).
 - **PRO-4:** nenhum módulo orquestra outro. O Worker só hospeda os handlers, e quem orquestra o turno é o `Agents`, no topo da matriz.
 - **PRO-5 (falha permanente da IA):** quando um turno vira `dead`, o `Agents` aplica a política do tenant `OnAiPermanentFailure`: `Handoff` (padrão) ou `AlertOnly`. Em `Handoff`, chama `ContactCenter.RequestHandoff` com o motivo `AiProcessingFailed`. O ContactCenter transfere para um atendente disponível. **Se não houver atendente, o atendimento fica pendente na fila**, em `HumanAssisted` sem responsável (§6), com o histórico preservado no Conversations, e a IA deixa de responder nele. Se o próprio pedido de handoff falhar, vale a repetição idempotente do §6. A política fica nas configurações do agente do tenant, no `Agents`.
@@ -326,6 +335,7 @@ Cada tabela pertence ao esquema do módulo dono (DAD-1 e DAD-2). O bloco `IaBime
 - **SND-4 (validade operacional):** `expires_at` é a **validade operacional** da mensagem, definida pela nossa política (por exemplo, uma resposta que deixou de fazer sentido). **Não é a janela de atendimento de 24 horas do WhatsApp**, que é regra do provedor e outra verificação.
 - **SND-5 (janela de atendimento):** antes de enviar mensagem livre, o `Channels` verifica se a janela está aberta, a partir do `provider_timestamp` da última mensagem do cliente. Com a janela fechada, não envia mensagem livre e **avalia o uso de template aprovado**, conforme as políticas do provedor (categoria permitida, aprovação do template, consentimento e custo, a confirmar). Se não for possível, marca `Failed(WindowClosed)` e avisa o atendimento. Esse erro não é retentado automaticamente. A política de templates é item de avaliação da etapa 5.
 - **SND-6 (erro de conta):** erro que atinge a conta (token expirado, conta restrita) pausa a conta e alerta, em vez de consumir as tentativas de cada mensagem.
+- **SND-7 (falha definitiva):** `Failed`, `Expired` e `Dead` são falhas definitivas de envio. O `Channels` as informa ao `Conversations` (`RecordDeliveryStatus`), que publica `OutboundMessageFailedV1`. O `ContactCenter` sinaliza o atendimento, e a recuperação depende de ação autorizada pelo atendente. **Falha de envio não é entrada para a IA e não dispara novo turno** (`CONVERSATION-LIFECYCLE.md` §11).
 
 ### 12.5 Mecânica no PostgreSQL
 
@@ -343,7 +353,7 @@ Cada tabela pertence ao esquema do módulo dono (DAD-1 e DAD-2). O bloco `IaBime
 - **ORD-1:** a lane é a unidade de exclusão: dentro dela o processamento é **sequencial**, e entre lanes é paralelo.
 - **ORD-2:** há duas lanes encadeadas. A ingestão é por (canal, contato). O turno é por `ServiceSessionId`, que só existe depois da ingestão.
 - **ORD-3:** teto de eventos por ciclo de lease, para uma sessão não monopolizar o worker.
-- **ORD-4:** mensagens pendentes da mesma sessão podem virar um turno (ordem preservada). É decisão do `Agents`.
+- **ORD-4:** mensagens pendentes da mesma sessão viram um único turno, conforme o agrupamento (janela quieta e teto de espera) especificado em `docs/architecture/CONVERSATION-LIFECYCLE.md` §7, com a ordem preservada.
 - **ORD-5 (três tempos preservados):** `ingest_seq` (ordem de ingestão: define a sequência de processamento e a auditoria), `provider_timestamp` (momento no provedor: ordena a exibição e o contexto) e `received_at` (relógio do servidor). O atraso do evento é `received_at − provider_timestamp`.
 - **ORD-6 (atrasados e fora de ordem, tratados explicitamente):** nenhum evento é descartado por atraso. Uma mensagem atrasada entra no histórico na posição do `provider_timestamp`, mantendo o `ingest_seq`. Se a sessão já respondeu depois desse instante, o `Agents` recebe a marca `late_arrival` e decide por um novo turno com o contexto atualizado. A resposta anterior não é apagada nem reenviada. **Status** (enviada, entregue, lida, falha) segue máquina de estados monotônica e nunca regride. Status que chega antes de o id da mensagem estar gravado fica estacionado, com retentativa limitada.
 - **ORD-7:** o atraso é medido (§12.10), e o limiar de alerta é configurável.
@@ -447,6 +457,7 @@ Todos usam o PostgreSQL 17 local (porta 5433) com dados sintéticos e dublês: u
 | **Janela e templates** | janela fechada: sem envio livre, `Failed(WindowClosed)` ou template avaliado; `expires_at` operacional independente da janela |
 | **Justiça** | um tenant inunda 10 mil eventos enquanto outros enviam poucos: tetos por tenant respeitados e a espera dos demais medida; se exceder a meta, abre-se a necessidade do escalonador justo (LIM-3); concorrência de IA por tenant nunca excedida (contador no dublê) |
 | **Isolamento** | canários entre tenants nos workers; Mauro/Pedro no pipeline assíncrono; evento sem tenant falha fechado; resposta com `StateVersion` antiga rejeitada |
+| **Ciclo de vida** | substituição atômica de turnos, resposta defasada sensível, falha definitiva de envio e mídia indisponível, entre outros: ver `CONVERSATION-LIFECYCLE.md` §16 |
 | **Provedor** | dublê com 5xx, 429 e timeout (backoff e balde de fichas); status duplicado; erro de conta pausa a conta; erro 131056 faz esperar só aquele destinatário |
 | **Resistência** | 1 hora de carga contínua observando inchaço das tabelas de fila, autovacuum, memória e rotatividade de lease |
 | **Calibração** | escritas por mensagem trocada (amplificação), latência de aquisição de lane e profundidade sustentável: dão os limiares para a decisão sobre o broker |
@@ -457,3 +468,4 @@ Todos usam o PostgreSQL 17 local (porta 5433) com dados sintéticos e dublês: u
 |---|---|---|---|---|
 | 26/10/2026 | 0.2 | Versão inicial aprovada: monólito modular, quatro projetos por módulo, matriz verificável, coordenação do modo IA/humano, assistente interno com acesso explícito, governança | Mauro Porpino | 0005 |
 | 26/10/2026 | 0.3 | Seção 12 (processamento de mensagens: Receiver, Processing e Sender); `Worker` e `Messaging` na etapa 4; DEP-6; ARQ-19 a ARQ-21; envelope com `OrderingKey` e `CausationId`; atendimento pendente sem responsável | Mauro Porpino | 0006 |
+| 26/10/2026 | 0.4 | Ciclo de vida de mensagens e turnos de IA: cercas de resposta (`TurnId`, época, `basedOnInboundSeq`), turno logicamente ativo, cobertura lógica × entrega, mídia pendente; resposta defasada sempre rejeitada por regra fixa, sem `StaleReplyMode` (a exceção é evolução futura e depende de novo ADR); propriedade das configurações; `RequestResend` com garantias; comportamento inicial de `OnChattyBurst`; DEP-7 (futura); ARQ-22 a ARQ-24; SND-7; ORD-4 | Mauro Porpino | 0007 |

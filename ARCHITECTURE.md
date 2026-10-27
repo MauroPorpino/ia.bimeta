@@ -1,7 +1,7 @@
 # ia.bimeta — ARCHITECTURE.md
 
 > **Status:** Documento-base para implementação e discussão.  
-> **Versão:** 0.5 (preparação do repositório; consolida decisões discutidas até 26/10/2026, incluindo o Assistente interno de IA, o roadmap de voz, o monólito modular com fronteiras de módulo (ADR 0005 e `docs/architecture/BOUNDARIES.md`) e o processamento assíncrono de mensagens em Receiver, Processing e Sender (ADR 0006)).  
+> **Versão:** 0.6 (preparação do repositório; consolida decisões discutidas até 26/10/2026, incluindo o Assistente interno de IA, o roadmap de voz, o monólito modular com fronteiras de módulo (ADR 0005 e `docs/architecture/BOUNDARIES.md`), o processamento assíncrono de mensagens em Receiver, Processing e Sender (ADR 0006) e o ciclo de vida de mensagens e turnos de IA (ADR 0007 e `docs/architecture/CONVERSATION-LIFECYCLE.md`)).  
 > **Natureza:** Decisões confirmadas estão indicadas como **Decidido**; alternativas técnicas como **Proposta a validar**.  
 > **Escopo:** Plataforma ia.bimeta independente. LabNet e BImeta são sistemas externos integráveis, não módulos internos.
 
@@ -87,6 +87,8 @@ Identificadores sugeridos:
 - `WorkflowInstanceId`, `Version`
 
 Cada chamada à IA recebe apenas instruções, resumo, mensagens recentes relevantes, dados estruturados confirmados, referências documentais e ferramentas permitidas. Resumos não substituem fatos estruturados. Implementar deduplicação de webhooks, ordenação/controle de concorrência por sessão, idempotência, cancelamento, prevenção de resposta obsoleta e checagem do destino antes do envio.
+
+**Decidido (ADR 0007):** o ciclo de vida das mensagens e dos turnos de IA (agrupamento de mensagens próximas em um turno, interrupção, cancelamento, concorrência e cercas de resposta) está especificado em `docs/architecture/CONVERSATION-LIFECYCLE.md`. O Conversation Engine é a autoridade: rejeita sempre a resposta defasada no MVP, mantém um só turno logicamente ativo por atendimento e distingue a cobertura lógica da resposta da entrega feita pelo Channels.
 
 ### 4.2 Central de atendimento e transição IA ↔ humano
 
@@ -247,12 +249,18 @@ Cada etapa cria apenas os módulos e projetos indicados na coluna Etapa de `docs
 - Confirmação, na documentação oficial da Meta, dos parâmetros de vazão, códigos de erro, assinatura de webhook e retentativas, antes da implementação do Channels (ADR 0006, `BOUNDARIES.md` §12.11).
 - Política de uso de templates aprovados quando a janela de atendimento de 24 horas do WhatsApp estiver fechada.
 - Retenção do Inbox, da fila de envio e do payload bruto (LGPD).
+- Calibração dos valores de agrupamento e de interrupção (`QuietWindow`, `MaxWait`, `MaxSupersedesPerBurst`, `MaxTurnAttempts`) com dados reais do piloto.
+- Responsável pelo processamento de mídia (download, transcrição, extração) e prazos por tipo de conteúdo (`CONVERSATION-LIFECYCLE.md` §10).
+- Configuração por tenant da recuperação de falha definitiva de envio (`OnReplyDeliveryFailure`): no MVP a política é fixa (registrar, sinalizar o atendimento e permitir recuperação autorizada pelo atendente, por `RequestResend` com autorização explícita, vínculo auditável, idempotência e sem repetir `SendUnknown` automaticamente); alternativas automáticas são evolução futura.
+- Fluxo completo do modo `AiSupervised` (aprovação, edição e rejeição).
+- Exceção de resposta defasada (`allowStaleInput`) e política `Queue`: evolução futura documentada em `CONVERSATION-LIFECYCLE.md` §6.3, fora do MVP, sem chave de configuração, e dependente de novo ADR.
+- Rajada longa: no MVP `OnChattyBurst` sinaliza o atendimento ao ContactCenter e permite a transferência por ação do atendente; a transferência automática exige configuração explícita do tenant. Calibrar `ChattyBurstMaxMessages` e `ChattyBurstMaxInterruptions` com o piloto.
 - Papéis de banco por módulo, a avaliar depois da fase 2b (`BOUNDARIES.md` §9).
 - Resultado do spike do ArchUnitNET (compatibilidade comprovada com .NET 10) antes de instalar o pacote (`BOUNDARIES.md` §8).
 
 ## 14. Referências de trabalho
 
-Este documento é uma **síntese operacional** das decisões debatidas, não substitui o documento Word de arquitetura com diagramas. Divergências ou novas escolhas devem ser registradas como ADRs em `docs/adr/` antes de mudanças estruturais. A estrutura em módulos, as camadas e a matriz de dependências estão em `docs/architecture/BOUNDARIES.md` (ADR 0005). O processamento assíncrono de mensagens está no mesmo documento (seção 12) e no ADR 0006.
+Este documento é uma **síntese operacional** das decisões debatidas, não substitui o documento Word de arquitetura com diagramas. Divergências ou novas escolhas devem ser registradas como ADRs em `docs/adr/` antes de mudanças estruturais. A estrutura em módulos, as camadas e a matriz de dependências estão em `docs/architecture/BOUNDARIES.md` (ADR 0005). O processamento assíncrono de mensagens está no mesmo documento (seção 12) e no ADR 0006. O ciclo de vida de mensagens e turnos de IA está em `docs/architecture/CONVERSATION-LIFECYCLE.md` (ADR 0007).
 
 
 ## 15. Assistente interno de IA para colaboradores — decisão adicionada em 26/10/2026
