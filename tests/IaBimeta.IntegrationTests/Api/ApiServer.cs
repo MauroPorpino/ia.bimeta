@@ -25,11 +25,19 @@ internal sealed class ApiServer : IAsyncDisposable
 
     /// <param name="ambiente">Development, Production, Staging...</param>
     /// <param name="configuracao">Sobrescreve a configuração (por exemplo, a string de conexão e a seção Tenancy:Development).</param>
-    public static async Task<ApiServer> StartAsync(string ambiente, IDictionary<string, string?> configuracao)
+    /// <param name="relogio">Relógio controlado pelo teste (por exemplo, para fazer uma sessão expirar). Sem ele, vale o relógio do sistema.</param>
+    public static async Task<ApiServer> StartAsync(string ambiente, IDictionary<string, string?> configuracao, TimeProvider? relogio = null)
     {
         var app = ApiHost.Build(
             new[] { "--environment=" + ambiente },
-            builder => builder.Configuration.AddInMemoryCollection(configuracao));
+            builder =>
+            {
+                builder.Configuration.AddInMemoryCollection(configuracao);
+                if (relogio is not null)
+                {
+                    builder.Services.AddSingleton<TimeProvider>(relogio);
+                }
+            });
         app.Urls.Add("http://127.0.0.1:0");
         await app.StartAsync();
 
@@ -42,6 +50,14 @@ internal sealed class ApiServer : IAsyncDisposable
     {
         ["ConnectionStrings:Tenancy"] = TestDatabase.ConnectionString,
         ["Tenancy:Development:HeaderEnabled"] = cabecalhoHabilitado ? "true" : "false",
+        ["Identity:PasswordHashIterations"] = PostgresFixture.PasswordIterations.ToString(),
+    };
+
+    /// <summary>Configuração de produção: só o banco de teste, sem nenhum recurso de desenvolvimento.</summary>
+    public static Dictionary<string, string?> ConfiguracaoDeProducao() => new()
+    {
+        ["ConnectionStrings:Tenancy"] = TestDatabase.ConnectionString,
+        ["Identity:PasswordHashIterations"] = PostgresFixture.PasswordIterations.ToString(),
     };
 
     public HttpRequestMessage Requisicao(HttpMethod metodo, string caminho, string? tenantSlug = null, HttpContent? conteudo = null)
@@ -50,6 +66,18 @@ internal sealed class ApiServer : IAsyncDisposable
         if (tenantSlug is not null)
         {
             requisicao.Headers.Add("X-Dev-Tenant", tenantSlug);
+        }
+
+        return requisicao;
+    }
+
+    /// <summary>Requisição de um usuário autenticado, com o token de sessão no cabeçalho <c>Authorization: Bearer</c>.</summary>
+    public HttpRequestMessage RequisicaoDe(string? token, HttpMethod metodo, string caminho, HttpContent? conteudo = null)
+    {
+        var requisicao = new HttpRequestMessage(metodo, caminho) { Content = conteudo };
+        if (token is not null)
+        {
+            requisicao.Headers.TryAddWithoutValidation("Authorization", "Bearer " + token);
         }
 
         return requisicao;

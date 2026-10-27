@@ -8,16 +8,28 @@ namespace IaBimeta.SharedKernel;
 public sealed class RequestContext
 {
     internal RequestContext(TenantId tenantId, string origin)
+        : this(tenantId, origin, null)
+    {
+    }
+
+    internal RequestContext(TenantId tenantId, string origin, ActorPrincipal? principal)
     {
         ArgumentNullException.ThrowIfNull(tenantId);
         ArgumentException.ThrowIfNullOrWhiteSpace(origin);
 
         TenantId = tenantId;
         Origin = origin;
+        Principal = principal;
     }
 
     public TenantId TenantId { get; }
 
-    /// <summary>Fonte confiável que criou o contexto (por exemplo, "development-header"). Serve a auditoria e diagnóstico.</summary>
+    /// <summary>Fonte confiável que criou o contexto (por exemplo, "session" ou "development-header"). Serve a auditoria e diagnóstico.</summary>
     public string Origin { get; }
+
+    /// <summary>O usuário autenticado e suas permissões, quando a fonte é uma sessão. Nulo em contexto de sistema.</summary>
+    public ActorPrincipal? Principal { get; }
+
+    /// <summary>Contexto sem usuário (desenvolvimento, seed, jobs): as permissões de usuário não se aplicam (<see cref="AccessPolicy"/>).</summary>
+    public bool IsSystem => Principal is null;
 }

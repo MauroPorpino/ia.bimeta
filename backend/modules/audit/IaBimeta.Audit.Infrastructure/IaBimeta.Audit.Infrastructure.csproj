@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
+    <!-- Mesmas versões do Tenancy: o EF Core de execução fica alinhado ao Design e ao dotnet-ef. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.14" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.14" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.14">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\building-blocks\IaBimeta.SharedKernel\IaBimeta.SharedKernel.csproj" />
+    <ProjectReference Include="..\IaBimeta.Audit.Contracts\IaBimeta.Audit.Contracts.csproj" />
+    <ProjectReference Include="..\IaBimeta.Audit.Core\IaBimeta.Audit.Core.csproj" />
+  </ItemGroup>
+
+</Project>

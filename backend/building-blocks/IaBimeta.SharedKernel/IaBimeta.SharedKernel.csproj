@@ -12,6 +12,8 @@
     <InternalsVisibleTo Include="IaBimeta.Worker" />
     <InternalsVisibleTo Include="IaBimeta.SharedKernel.Tests" />
     <InternalsVisibleTo Include="IaBimeta.Tenancy.Tests" />
+    <InternalsVisibleTo Include="IaBimeta.Identity.Tests" />
+    <InternalsVisibleTo Include="IaBimeta.Audit.Tests" />
     <InternalsVisibleTo Include="IaBimeta.IntegrationTests" />
   </ItemGroup>
 

@@ -23,6 +23,81 @@ namespace IaBimeta.Tenancy.Infrastructure.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("IaBimeta.Tenancy.Domain.BusinessUnit", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<short>("Kind")
+                        .HasColumnType("smallint")
+                        .HasColumnName("kind");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("name");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.HasKey("TenantId", "Id");
+
+                    b.HasIndex("TenantId", "OrganizationId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_business_units_one_headquarters")
+                        .HasFilter("kind = 1");
+
+                    b.HasIndex("TenantId", "OrganizationId", "Name")
+                        .IsUnique()
+                        .HasDatabaseName("ix_business_units_tenant_id_organization_id_name");
+
+                    b.ToTable("business_units", "tenancy");
+                });
+
+            modelBuilder.Entity("IaBimeta.Tenancy.Domain.Department", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("BusinessUnitId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("business_unit_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("name");
+
+                    b.HasKey("TenantId", "Id");
+
+                    b.HasIndex("TenantId", "BusinessUnitId", "Name")
+                        .IsUnique()
+                        .HasDatabaseName("ix_departments_tenant_id_business_unit_id_name");
+
+                    b.ToTable("departments", "tenancy");
+                });
+
             modelBuilder.Entity("IaBimeta.Tenancy.Domain.Organization", b =>
                 {
                     b.Property<Guid>("TenantId")
@@ -85,6 +160,24 @@ namespace IaBimeta.Tenancy.Infrastructure.Migrations
                         .HasDatabaseName("ix_tenants_slug");
 
                     b.ToTable("tenants", "tenancy");
+                });
+
+            modelBuilder.Entity("IaBimeta.Tenancy.Domain.BusinessUnit", b =>
+                {
+                    b.HasOne("IaBimeta.Tenancy.Domain.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("IaBimeta.Tenancy.Domain.Department", b =>
+                {
+                    b.HasOne("IaBimeta.Tenancy.Domain.BusinessUnit", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "BusinessUnitId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("IaBimeta.Tenancy.Domain.Organization", b =>

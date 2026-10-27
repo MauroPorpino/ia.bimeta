@@ -30,6 +30,11 @@
     <ProjectReference Include="..\..\backend\modules\tenancy\IaBimeta.Tenancy.Contracts\IaBimeta.Tenancy.Contracts.csproj" />
     <ProjectReference Include="..\..\backend\modules\tenancy\IaBimeta.Tenancy.Core\IaBimeta.Tenancy.Core.csproj" />
     <ProjectReference Include="..\..\backend\modules\tenancy\IaBimeta.Tenancy.Infrastructure\IaBimeta.Tenancy.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\backend\modules\audit\IaBimeta.Audit.Contracts\IaBimeta.Audit.Contracts.csproj" />
+    <ProjectReference Include="..\..\backend\modules\audit\IaBimeta.Audit.Core\IaBimeta.Audit.Core.csproj" />
+    <ProjectReference Include="..\..\backend\modules\audit\IaBimeta.Audit.Infrastructure\IaBimeta.Audit.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\backend\modules\identity\IaBimeta.Identity.Core\IaBimeta.Identity.Core.csproj" />
+    <ProjectReference Include="..\..\backend\modules\identity\IaBimeta.Identity.Infrastructure\IaBimeta.Identity.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

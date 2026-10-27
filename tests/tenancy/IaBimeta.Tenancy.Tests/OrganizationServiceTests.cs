@@ -40,7 +40,7 @@ public class OrganizationServiceTests
     {
         var repositorio = new RepositorioEmMemoria();
         var holder = new RequestContextHolder();
-        return (new OrganizationService(repositorio, holder, TimeProvider.System), repositorio, holder);
+        return (new OrganizationService(repositorio, holder, TimeProvider.System, new AuditoriaEmMemoria()), repositorio, holder);
     }
 
     [Fact]

@@ -8,6 +8,9 @@ namespace IaBimeta.Api.RequestContexts;
 /// </summary>
 internal sealed class RequestContextMiddleware
 {
+    // Rotas que não usam contexto: o /health não exige tenant nem depende do banco, e o login é anterior a qualquer sessão.
+    private static readonly string[] RotasSemContexto = { "/health", "/auth/login" };
+
     private readonly RequestDelegate _next;
 
     public RequestContextMiddleware(RequestDelegate next)
@@ -17,9 +20,9 @@ internal sealed class RequestContextMiddleware
 
     public async Task InvokeAsync(HttpContext http, RequestContextHolder holder)
     {
-        // O /health não exige tenant nem depende do banco: as fontes nem são resolvidas. Resolvê-las aqui, e não como
-        // parâmetro do método, evita que uma fonte que usa o banco quebre o /health quando o banco não está configurado.
-        if (!http.Request.Path.StartsWithSegments("/health"))
+        // Resolver as fontes aqui, e não como parâmetro do método, evita que uma fonte que usa o banco quebre as
+        // rotas sem contexto quando o banco não está configurado.
+        if (!RotasSemContexto.Any(rota => http.Request.Path.StartsWithSegments(rota)))
         {
             foreach (var fonte in http.RequestServices.GetServices<ITenantContextSource>())
             {

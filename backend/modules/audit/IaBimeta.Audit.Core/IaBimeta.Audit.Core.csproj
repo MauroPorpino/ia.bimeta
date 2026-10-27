@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\building-blocks\IaBimeta.SharedKernel\IaBimeta.SharedKernel.csproj" />
+    <ProjectReference Include="..\IaBimeta.Audit.Contracts\IaBimeta.Audit.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

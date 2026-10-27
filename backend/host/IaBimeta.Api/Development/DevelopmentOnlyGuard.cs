@@ -11,7 +11,11 @@ internal static class DevelopmentOnlyGuard
         var opcoes = configuracao.GetSection(DevelopmentTenancyOptions.SectionName).Get<DevelopmentTenancyOptions>()
             ?? new DevelopmentTenancyOptions();
 
-        var algumLigado = opcoes.HeaderEnabled || opcoes.ApplyMigrations || opcoes.SeedTenants.Count > 0;
+        var algumLigado = opcoes.HeaderEnabled
+            || opcoes.ApplyMigrations
+            || opcoes.SeedTenants.Count > 0
+            || opcoes.SeedAdministrators.Count > 0;
+
         if (algumLigado && !ambiente.IsDevelopment())
         {
             throw new InvalidOperationException(

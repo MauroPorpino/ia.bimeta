@@ -10,7 +10,7 @@ public static class TenancyInfrastructureExtensions
 {
     /// <summary>
     /// Registra o módulo Tenancy (casos de uso, repositórios e DbContext). O host precisa registrar antes o
-    /// <c>IRequestContextAccessor</c>. A string de conexão é lida só quando o DbContext é usado, para que um
+    /// <c>IRequestContextAccessor</c> e o módulo Audit (<c>IAuditWriter</c>). A string de conexão é lida só quando o DbContext é usado, para que um
     /// host sem banco configurado continue subindo (por exemplo, para o /health).
     /// </summary>
     public static IServiceCollection AddTenancy(this IServiceCollection services, Func<IServiceProvider, string> connectionString)
@@ -29,6 +29,12 @@ public static class TenancyInfrastructureExtensions
         services.AddScoped<TenantRegistrationService>();
         services.AddScoped<ITenantDirectory, TenantDirectory>();
         services.AddScoped<OrganizationService>();
+        services.AddScoped<IOrganizationDirectory, OrganizationDirectory>();
+
+        services.AddScoped<IBusinessUnitRepository, BusinessUnitRepository>();
+        services.AddScoped<IDepartmentRepository, DepartmentRepository>();
+        services.AddScoped<BusinessUnitService>();
+        services.AddScoped<DepartmentService>();
 
         return services;
     }

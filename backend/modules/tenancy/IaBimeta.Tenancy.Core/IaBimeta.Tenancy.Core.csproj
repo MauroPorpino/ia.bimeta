@@ -9,6 +9,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\..\building-blocks\IaBimeta.SharedKernel\IaBimeta.SharedKernel.csproj" />
     <ProjectReference Include="..\IaBimeta.Tenancy.Contracts\IaBimeta.Tenancy.Contracts.csproj" />
+    <ProjectReference Include="..\..\audit\IaBimeta.Audit.Contracts\IaBimeta.Audit.Contracts.csproj" />
   </ItemGroup>
 
 </Project>

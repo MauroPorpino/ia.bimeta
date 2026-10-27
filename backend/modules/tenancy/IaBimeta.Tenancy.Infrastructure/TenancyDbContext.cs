@@ -29,6 +29,10 @@ public sealed class TenancyDbContext : DbContext
 
     public DbSet<Organization> Organizations => Set<Organization>();
 
+    public DbSet<BusinessUnit> BusinessUnits => Set<BusinessUnit>();
+
+    public DbSet<Department> Departments => Set<Department>();
+
     // O EF reavalia esta propriedade a cada execução de consulta (membro do DbContext no filtro global).
     private TenantId TenantAtual => _contexto.GetRequired().TenantId;
 
@@ -38,8 +42,12 @@ public sealed class TenancyDbContext : DbContext
 
         modelBuilder.ApplyConfiguration(new TenantConfiguration());
         modelBuilder.ApplyConfiguration(new OrganizationConfiguration());
+        modelBuilder.ApplyConfiguration(new BusinessUnitConfiguration());
+        modelBuilder.ApplyConfiguration(new DepartmentConfiguration());
 
         modelBuilder.Entity<Organization>().HasQueryFilter(o => o.TenantId == TenantAtual);
+        modelBuilder.Entity<BusinessUnit>().HasQueryFilter(u => u.TenantId == TenantAtual);
+        modelBuilder.Entity<Department>().HasQueryFilter(d => d.TenantId == TenantAtual);
     }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
