@@ -17,14 +17,21 @@ internal sealed class CenarioDeConversas
 {
     private readonly PostgresFixture _banco;
 
-    private readonly bool _canaisReais;
+    private enum Canais
+    {
+        Dubles,
+        Reais,
+        Indisponiveis,
+    }
 
-    private CenarioDeConversas(PostgresFixture banco, TenantInfo tenant, Guid organizacaoId, bool canaisReais)
+    private readonly Canais _canais;
+
+    private CenarioDeConversas(PostgresFixture banco, TenantInfo tenant, Guid organizacaoId, Canais canais)
     {
         _banco = banco;
         Tenant = tenant;
         OrganizacaoId = organizacaoId;
-        _canaisReais = canaisReais;
+        _canais = canais;
     }
 
     public TenantInfo Tenant { get; }
@@ -42,13 +49,31 @@ internal sealed class CenarioDeConversas
     {
         var tenant = await banco.RegistrarTenantAsync(prefixo);
         var organizacao = await banco.CriarOrganizacaoAsync(tenant, $"Organização {prefixo}");
-        return new CenarioDeConversas(banco, tenant, organizacao.Id, canaisReais);
+        return new CenarioDeConversas(banco, tenant, organizacao.Id, canaisReais ? Canais.Reais : Canais.Dubles);
     }
 
-    private AsyncServiceScope NovoEscopo(RequestContext? contexto) =>
-        _canaisReais ? _banco.NovoEscopoComCanaisReais(contexto) : _banco.NovoEscopo(contexto);
+    /// <summary>
+    /// O mesmo tenant e a mesma organização, mas com o banco do Channels fora do ar: toda pergunta de autorização de unidade
+    /// falha. As demais operações (Conversations, Tenancy, Audit) continuam funcionando.
+    /// </summary>
+    public CenarioDeConversas ComCanaisIndisponiveis() => new(_banco, Tenant, OrganizacaoId, Canais.Indisponiveis);
 
-    private InMemoryEventPublisher Eventos => _canaisReais ? _banco.EventosComCanaisReais : _banco.Eventos;
+    private AsyncServiceScope NovoEscopo(RequestContext? contexto) => _canais switch
+    {
+        Canais.Reais => _banco.NovoEscopoComCanaisReais(contexto),
+        Canais.Indisponiveis => _banco.NovoEscopoComCanaisIndisponiveis(contexto),
+        _ => _banco.NovoEscopo(contexto),
+    };
+
+    private InMemoryEventPublisher Eventos => _canais switch
+    {
+        Canais.Reais => _banco.EventosComCanaisReais,
+        Canais.Indisponiveis => _banco.EventosComCanaisIndisponiveis,
+        _ => _banco.Eventos,
+    };
+
+    /// <summary>Quantos eventos deste tenant o dublê em memória recebeu, de qualquer tipo.</summary>
+    public int TotalDeEventosDoTenant => Eventos.Published.Count(e => e.TenantId == Tenant.TenantId);
 
     /// <summary>
     /// Cadastra um número (conta, instância, unidades autorizadas, padrões e ativação) como um administrador faria, e devolve o

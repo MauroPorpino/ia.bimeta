@@ -3,7 +3,7 @@
 - **Status:** Aprovado (v0.4)
 - **Data:** 26/10/2026
 - **Decisor:** Mauro Porpino
-- **Formalizado por:** ADR 0005 (v0.2), ADR 0006 (v0.3, seção 12) e ADR 0007 (v0.4, seções 6 e 12)
+- **Formalizado por:** ADR 0005 (v0.2), ADR 0006 (v0.3, seção 12), ADR 0007 (v0.4, seções 6 e 12) e ADR 0008 (v0.4.2, COM-7)
 - **Complementa:** `ARCHITECTURE.md` e os ADRs 0001 a 0004. Não revoga nenhuma decisão deles, exceto os itens 1 e 4 do ADR 0003, substituídos pelo ADR 0005.
 - **Fonte única da matriz de dependências:** `docs/architecture/module-dependencies.json`.
 
@@ -27,7 +27,7 @@
 | Audit | auditoria §2.7 | AuditEvent | 2 (quando o primeiro caso de uso precisar) |
 | Conversations | Conversation Engine e Context Manager | Contact, ServiceSession, Conversation, Message, Attachment, **estado e modo de atendimento** | 3 |
 | ContactCenter | Central de Atendimento e Routing/Escalation | ServiceQueue, QueueMembership, RoutingPolicy, SchedulePolicy, atribuição e histórico de handoff | 4 |
-| Channels | Channel Gateway/Registry | Channel, ChannelAccount, eventos brutos de webhook | 5 |
+| Channels | Channel Gateway/Registry | ChannelAccount (conta no provedor), ChannelInstance (número), unidades autorizadas de cada número, ChannelRoute (rota de entrada) e credenciais por referência (**cadastro**, entregue em 28/10/2026); eventos brutos de webhook (Inbox) | 5 (cadastro antecipado; Receiver, Inbox e Sender seguem na etapa 5) |
 | AiGateway | AI Provider Gateway | AiProviderCredentialReference, AiRequest | 6 |
 | Knowledge | Knowledge Engine | KnowledgeSource, KnowledgeItem, KnowledgeRevision, KnowledgeApproval | 6 |
 | Agents | AI Agent Runtime | AgentDefinition | 6 e 7 |
@@ -72,6 +72,10 @@ tests/
 | `ArchitectureTests` | começa só com testes do grafo de projetos, sem biblioteca |
 
 `Audit` e os projetos `Infrastructure` entraram na 2b, e o `Conversations` (`Contracts`, `Core`, `Infrastructure` e `Presentation`) na etapa 3. Os projetos globais antigos (`Domain`, `Application`, `Infrastructure`) e o `Domain.Tests` já não fazem parte da solução: saíram nos commits `72e94e2` e `5b6c8ac`.
+
+O `Channels` (`Contracts`, `Core`, `Infrastructure` e `Presentation`) nasceu em 28/10/2026 só com o **cadastro**: conta, número, unidades autorizadas, rota de entrada e credenciais por referência. O `Channels.Contracts` existe porque o host o consome (adaptador da porta de autorização de unidade do `Conversations`, ADR 0008). O Receiver, o Inbox, o Sender e a integração com a Meta **não existem** e continuam na etapa 5, sob o gate PRV-2 (§12.11). Os testes do módulo ficam em `tests/channels/` e em `tests/IaBimeta.IntegrationTests/Channels/`.
+
+**Divergência registrada:** a REC-2 (§12.2) descreve a resolução do canal por uma projeção local `channels.channel_account`, e o cadastro implementado resolve a rota de entrada por `channels.channel_routes` (provedor e identificador externo). A REC-2 não foi alterada: a conciliação é **obrigatória antes da implementação do Receiver da Meta**, sob o gate PRV-2, e será registrada no ADR do `Channels` (ver ADR 0008, Pendências).
 
 O `IaBimeta.Worker` e o bloco `IaBimeta.Messaging` nascem na etapa 4, com o primeiro processamento assíncrono durável. O `Messaging` é implementado progressivamente, sem antecipar funcionalidade sem necessidade comprovada (§12.12).
 
@@ -121,6 +125,7 @@ Contracts tem os namespaces `Queries`, `Commands`, `Events` e `Ports`. Os `Ports
 - **COM-4:** módulo inferior **não chama** superior; avisa por evento. O contrato do evento fica no módulo emissor.
 - **COM-5:** não há transação entre módulos. A consistência é eventual, com compensação.
 - **COM-6:** `CorrelationId` atravessa as chamadas, e `AiRequestId` correlaciona as respostas da IA.
+- **COM-7 (exceção aprovada, ADR 0008):** a pergunta "este número pode atender esta unidade?" é uma **consulta síncrona de leitura** do `Conversations` (inferior) ao `Channels` (superior), **mediada pelo host**. O `Conversations` define a porta `IChannelUnitAuthorization` (padrão: nega tudo), e o host a liga ao `Channels.Contracts.Queries.IChannelRouting` por um adaptador sem regra de negócio. Não há referência de compilação entre os dois módulos nem aresta nova na matriz. Falha fechada: só um "sim" inequívoco autoriza e a falha da consulta **sobe**, sem virar "sim" nem "não". Não há cópia da lista (cada pergunta consulta o `Channels` na hora). A COM-4 continua valendo para eventos e para qualquer escrita, e outro módulo que precisar do mesmo padrão define a **própria** porta e justifica.
 
 **Fluxos de referência:**
 
@@ -470,3 +475,4 @@ Todos usam o PostgreSQL 17 local (porta 5433) com dados sintéticos e dublês: u
 | 26/10/2026 | 0.3 | Seção 12 (processamento de mensagens: Receiver, Processing e Sender); `Worker` e `Messaging` na etapa 4; DEP-6; ARQ-19 a ARQ-21; envelope com `OrderingKey` e `CausationId`; atendimento pendente sem responsável | Mauro Porpino | 0006 |
 | 26/10/2026 | 0.4 | Ciclo de vida de mensagens e turnos de IA: cercas de resposta (`TurnId`, época, `basedOnInboundSeq`), turno logicamente ativo, cobertura lógica × entrega, mídia pendente; resposta defasada sempre rejeitada por regra fixa, sem `StaleReplyMode` (a exceção é evolução futura e depende de novo ADR); propriedade das configurações; `RequestResend` com garantias; comportamento inicial de `OnChattyBurst`; DEP-7 (futura); ARQ-22 a ARQ-24; SND-7; ORD-4 | Mauro Porpino | 0007 |
 | 27/10/2026 | 0.4.1 | Ajuste de redação do §1: registra que os projetos globais antigos já saíram da solução e que o `Conversations` nasceu na etapa 3. Nenhuma decisão de fronteira mudou | Mauro Porpino | — |
+| 28/10/2026 | 0.4.2 | §1: registra a criação dos projetos do `Channels` (previstos na tabela, só o cadastro), que Receiver, Inbox, Sender e Meta continuam na etapa 5 sob o gate PRV-2, e a divergência com a REC-2, a conciliar antes do Receiver. §4: COM-7 registra a exceção aprovada (consulta síncrona de leitura mediada pelo host). Nenhuma aresta nova na matriz | Mauro Porpino | 0008 |

@@ -13,6 +13,7 @@ using IaBimeta.Tenancy.Contracts;
 using IaBimeta.Tenancy.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 
 namespace IaBimeta.IntegrationTests;
 
@@ -42,15 +43,17 @@ public sealed class PostgresFixture : IAsyncLifetime
 
     private ServiceProvider? _servicos;
     private ServiceProvider? _servicosComCanaisReais;
+    private ServiceProvider? _servicosComCanaisIndisponiveis;
 
     public string ConnectionString { get; } = TestDatabase.ConnectionString;
 
     /// <summary>
-    /// Dois provedores, a mesma composição do host. No padrão, a autorização de unidade por canal é um dublê que aceita tudo (os
+    /// Três provedores, a mesma composição do host. No padrão, a autorização de unidade por canal é um dublê que aceita tudo (os
     /// testes de conversas não registram canais). No de "canais reais", é a implementação do host sobre o Channels: aceita só o
-    /// que o cadastro autoriza.
+    /// que o cadastro autoriza. No de "canais indisponíveis", é a mesma implementação do host, mas o banco do Channels não responde
+    /// (um banco que não existe), enquanto o do Conversations e os demais funcionam: a falha da consulta de autorização, de verdade.
     /// </summary>
-    private ServiceProvider Compor(bool canaisReais)
+    private ServiceProvider Compor(bool canaisReais, bool canaisIndisponiveis = false)
     {
         var colecao = new ServiceCollection();
         colecao.AddScoped<RequestContextHolder>();
@@ -61,12 +64,15 @@ public sealed class PostgresFixture : IAsyncLifetime
         // Etapa 3: o publicador é o dublê em memória (não durável), como no host.
         colecao.AddSingleton<InMemoryEventPublisher>();
         colecao.AddSingleton<IEventPublisher>(provider => provider.GetRequiredService<InMemoryEventPublisher>());
-        colecao.AddChannels(_ => ConnectionString, opcoes =>
+        var conexaoDosCanais = canaisIndisponiveis
+            ? new NpgsqlConnectionStringBuilder(ConnectionString) { Database = $"iabimeta_canais_fora_{Guid.NewGuid():N}", Timeout = 5 }.ConnectionString
+            : ConnectionString;
+        colecao.AddChannels(_ => conexaoDosCanais, opcoes =>
         {
             opcoes.ActiveKeyId = IdDaChaveDeTeste;
             opcoes.Keys[IdDaChaveDeTeste] = ChaveDeCifraDeTeste;
         });
-        if (canaisReais)
+        if (canaisReais || canaisIndisponiveis)
         {
             colecao.AddScoped<IChannelUnitAuthorization, ChannelsBackedUnitAuthorization>();
         }
@@ -83,6 +89,7 @@ public sealed class PostgresFixture : IAsyncLifetime
     {
         _servicos = Compor(canaisReais: false);
         _servicosComCanaisReais = Compor(canaisReais: true);
+        _servicosComCanaisIndisponiveis = Compor(canaisReais: true, canaisIndisponiveis: true);
 
         await using var escopo = _servicos.CreateAsyncScope();
         await escopo.ServiceProvider.GetRequiredService<AuditDbContext>().Database.MigrateAsync();
@@ -98,6 +105,9 @@ public sealed class PostgresFixture : IAsyncLifetime
     /// <summary>Os eventos publicados na composição de "canais reais" (cada composição tem o próprio dublê).</summary>
     public InMemoryEventPublisher EventosComCanaisReais => _servicosComCanaisReais!.GetRequiredService<InMemoryEventPublisher>();
 
+    /// <summary>Os eventos publicados na composição de "canais indisponíveis".</summary>
+    public InMemoryEventPublisher EventosComCanaisIndisponiveis => _servicosComCanaisIndisponiveis!.GetRequiredService<InMemoryEventPublisher>();
+
     public async Task DisposeAsync()
     {
         if (_servicos is not null)
@@ -109,6 +119,11 @@ public sealed class PostgresFixture : IAsyncLifetime
         {
             await _servicosComCanaisReais.DisposeAsync();
         }
+
+        if (_servicosComCanaisIndisponiveis is not null)
+        {
+            await _servicosComCanaisIndisponiveis.DisposeAsync();
+        }
     }
 
     /// <summary>Equivale a uma requisição. Sem <paramref name="contexto"/>, nenhum tenant foi estabelecido.</summary>
@@ -119,6 +134,12 @@ public sealed class PostgresFixture : IAsyncLifetime
     /// unidades que o cadastro do canal autoriza.
     /// </summary>
     public AsyncServiceScope NovoEscopoComCanaisReais(RequestContext? contexto = null) => Abrir(_servicosComCanaisReais!, contexto);
+
+    /// <summary>
+    /// Como <see cref="NovoEscopoComCanaisReais"/>, mas com o banco do Channels fora do ar: toda consulta de autorização de unidade
+    /// falha. Serve para provar que a falha não vira "sim" nem "não" e que nada é gravado por causa dela.
+    /// </summary>
+    public AsyncServiceScope NovoEscopoComCanaisIndisponiveis(RequestContext? contexto = null) => Abrir(_servicosComCanaisIndisponiveis!, contexto);
 
     private static AsyncServiceScope Abrir(ServiceProvider provedor, RequestContext? contexto)
     {
