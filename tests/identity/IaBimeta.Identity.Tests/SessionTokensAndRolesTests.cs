@@ -95,11 +95,86 @@ public class RolePermissionsTests
     }
 
     [Fact]
-    public void Gestor_acrescenta_gerir_estrutura_e_ver_usuarios()
+    public void Gestor_acrescenta_gerir_estrutura_ver_usuarios_ler_e_gerir_conversas_e_ler_canais()
     {
         Assert.Equal(
-            new HashSet<Permission> { Permission.OrganizationRead, Permission.StructureRead, Permission.StructureManage, Permission.UserRead },
+            new HashSet<Permission>
+            {
+                Permission.OrganizationRead,
+                Permission.StructureRead,
+                Permission.StructureManage,
+                Permission.UserRead,
+                Permission.ConversationRead,
+                Permission.ConversationManage,
+                Permission.ChannelRead,
+            },
             Permissoes(Role.Manager, Organizacao));
+    }
+
+    [Fact]
+    public void Usuario_comum_nao_le_nem_gere_canais()
+    {
+        var permissoes = Permissoes(Role.User, Organizacao);
+
+        Assert.DoesNotContain(Permission.ChannelRead, permissoes);
+        Assert.DoesNotContain(Permission.ChannelManage, permissoes);
+    }
+
+    [Fact]
+    public void Gestor_le_mas_nao_gere_canais_porque_associar_numero_e_unidade_muda_quem_pode_atender()
+    {
+        var permissoes = Permissoes(Role.Manager, Organizacao);
+
+        Assert.Contains(Permission.ChannelRead, permissoes);
+        Assert.DoesNotContain(Permission.ChannelManage, permissoes);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Administrador_le_e_gere_canais_e_o_escopo_segue_o_da_concessao(bool escopoDoTenant)
+    {
+        var escopo = escopoDoTenant ? (Guid?)null : Organizacao;
+
+        var canais = RolePermissions.Expand(Role.OrganizationAdmin, escopo)
+            .Where(p => p.Permission is Permission.ChannelRead or Permission.ChannelManage)
+            .ToList();
+
+        Assert.Equal(2, canais.Count);
+        Assert.All(canais, p => Assert.Equal(escopo, p.OrganizationId));
+    }
+
+    [Fact]
+    public void Usuario_comum_nao_le_nem_gere_conversas_ate_o_ContactCenter_definir_o_acesso_por_fila()
+    {
+        var permissoes = Permissoes(Role.User, Organizacao);
+
+        Assert.DoesNotContain(Permission.ConversationRead, permissoes);
+        Assert.DoesNotContain(Permission.ConversationManage, permissoes);
+    }
+
+    [Theory]
+    [InlineData(Role.User)]
+    [InlineData(Role.Manager)]
+    [InlineData(Role.OrganizationAdmin)]
+    public void Nenhum_papel_recebe_a_permissao_de_operacao_de_maquina_nem_com_escopo_de_organizacao_ou_de_tenant(Role papel)
+    {
+        Assert.DoesNotContain(Permission.SystemOperation, Permissoes(papel, Organizacao));
+        Assert.DoesNotContain(Permission.SystemOperation, Permissoes(papel, null));
+    }
+
+    [Theory]
+    [InlineData(Role.Manager)]
+    [InlineData(Role.OrganizationAdmin)]
+    public void Quem_le_conversas_tambem_as_gere_na_mesma_organizacao_e_o_escopo_segue_o_da_concessao(Role papel)
+    {
+        var daOrganizacao = RolePermissions.Expand(papel, Organizacao).Where(p => p.Permission is Permission.ConversationRead or Permission.ConversationManage).ToList();
+        var doTenant = RolePermissions.Expand(papel, null).Where(p => p.Permission is Permission.ConversationRead or Permission.ConversationManage).ToList();
+
+        Assert.Equal(2, daOrganizacao.Count);
+        Assert.All(daOrganizacao, p => Assert.Equal(Organizacao, p.OrganizationId));
+        Assert.Equal(2, doTenant.Count);
+        Assert.All(doTenant, p => Assert.Null(p.OrganizationId));
     }
 
     [Fact]
@@ -110,6 +185,7 @@ public class RolePermissionsTests
         Assert.Contains(Permission.UserManage, permissoes);
         Assert.DoesNotContain(Permission.OrganizationCreate, permissoes);
         Assert.DoesNotContain(Permission.AuditRead, permissoes);
+        Assert.DoesNotContain(Permission.TenantSettingsManage, permissoes);
     }
 
     [Fact]
@@ -120,6 +196,7 @@ public class RolePermissionsTests
         Assert.Contains(Permission.OrganizationCreate, permissoes);
         Assert.Contains(Permission.AuditRead, permissoes);
         Assert.Contains(Permission.UserManage, permissoes);
+        Assert.Contains(Permission.TenantSettingsManage, permissoes); // o idioma padrão é do tenant, não de uma organização
     }
 
     [Theory]
@@ -132,6 +209,7 @@ public class RolePermissionsTests
         Assert.DoesNotContain(Permission.OrganizationCreate, permissoes);
         Assert.DoesNotContain(Permission.AuditRead, permissoes);
         Assert.DoesNotContain(Permission.UserManage, permissoes);
+        Assert.DoesNotContain(Permission.TenantSettingsManage, permissoes);
     }
 
     [Fact]

@@ -26,7 +26,12 @@ internal sealed class ApiServer : IAsyncDisposable
     /// <param name="ambiente">Development, Production, Staging...</param>
     /// <param name="configuracao">Sobrescreve a configuração (por exemplo, a string de conexão e a seção Tenancy:Development).</param>
     /// <param name="relogio">Relógio controlado pelo teste (por exemplo, para fazer uma sessão expirar). Sem ele, vale o relógio do sistema.</param>
-    public static async Task<ApiServer> StartAsync(string ambiente, IDictionary<string, string?> configuracao, TimeProvider? relogio = null)
+    /// <param name="servicos">Registros que vencem os padrões dos módulos (por exemplo, um escritor de auditoria que falha).</param>
+    public static async Task<ApiServer> StartAsync(
+        string ambiente,
+        IDictionary<string, string?> configuracao,
+        TimeProvider? relogio = null,
+        Action<IServiceCollection>? servicos = null)
     {
         var app = ApiHost.Build(
             new[] { "--environment=" + ambiente },
@@ -37,6 +42,8 @@ internal sealed class ApiServer : IAsyncDisposable
                 {
                     builder.Services.AddSingleton<TimeProvider>(relogio);
                 }
+
+                servicos?.Invoke(builder.Services);
             });
         app.Urls.Add("http://127.0.0.1:0");
         await app.StartAsync();

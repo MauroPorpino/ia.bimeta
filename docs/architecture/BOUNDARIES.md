@@ -71,7 +71,7 @@ tests/
 | `SharedKernel.Tests`, `Tenancy.Tests`, `Identity.Tests` | |
 | `ArchitectureTests` | começa só com testes do grafo de projetos, sem biblioteca |
 
-`Audit` e os projetos `Infrastructure` entram na 2b. Os projetos globais atuais (`Domain`, `Application`, `Infrastructure`) e o `Domain.Tests` saem numa etapa de migração posterior, que também exige aprovação.
+`Audit` e os projetos `Infrastructure` entraram na 2b, e o `Conversations` (`Contracts`, `Core`, `Infrastructure` e `Presentation`) na etapa 3. Os projetos globais antigos (`Domain`, `Application`, `Infrastructure`) e o `Domain.Tests` já não fazem parte da solução: saíram nos commits `72e94e2` e `5b6c8ac`.
 
 O `IaBimeta.Worker` e o bloco `IaBimeta.Messaging` nascem na etapa 4, com o primeiro processamento assíncrono durável. O `Messaging` é implementado progressivamente, sem antecipar funcionalidade sem necessidade comprovada (§12.12).
 
@@ -469,3 +469,4 @@ Todos usam o PostgreSQL 17 local (porta 5433) com dados sintéticos e dublês: u
 | 26/10/2026 | 0.2 | Versão inicial aprovada: monólito modular, quatro projetos por módulo, matriz verificável, coordenação do modo IA/humano, assistente interno com acesso explícito, governança | Mauro Porpino | 0005 |
 | 26/10/2026 | 0.3 | Seção 12 (processamento de mensagens: Receiver, Processing e Sender); `Worker` e `Messaging` na etapa 4; DEP-6; ARQ-19 a ARQ-21; envelope com `OrderingKey` e `CausationId`; atendimento pendente sem responsável | Mauro Porpino | 0006 |
 | 26/10/2026 | 0.4 | Ciclo de vida de mensagens e turnos de IA: cercas de resposta (`TurnId`, época, `basedOnInboundSeq`), turno logicamente ativo, cobertura lógica × entrega, mídia pendente; resposta defasada sempre rejeitada por regra fixa, sem `StaleReplyMode` (a exceção é evolução futura e depende de novo ADR); propriedade das configurações; `RequestResend` com garantias; comportamento inicial de `OnChattyBurst`; DEP-7 (futura); ARQ-22 a ARQ-24; SND-7; ORD-4 | Mauro Porpino | 0007 |
+| 27/10/2026 | 0.4.1 | Ajuste de redação do §1: registra que os projetos globais antigos já saíram da solução e que o `Conversations` nasceu na etapa 3. Nenhuma decisão de fronteira mudou | Mauro Porpino | — |

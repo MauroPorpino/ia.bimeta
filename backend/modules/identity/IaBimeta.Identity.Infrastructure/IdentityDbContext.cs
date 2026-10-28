@@ -31,6 +31,8 @@ public sealed class IdentityDbContext : DbContext
 
     public DbSet<Session> Sessions => Set<Session>();
 
+    public DbSet<LoginThrottle> LoginThrottles => Set<LoginThrottle>();
+
     // O EF reavalia esta propriedade a cada execução de consulta (membro do DbContext no filtro global).
     private TenantId TenantAtual => _tenantDaAutenticacao ?? _contexto.GetRequired().TenantId;
 
@@ -41,7 +43,9 @@ public sealed class IdentityDbContext : DbContext
         modelBuilder.ApplyConfiguration(new UserConfiguration());
         modelBuilder.ApplyConfiguration(new UserOrganizationGrantConfiguration());
         modelBuilder.ApplyConfiguration(new SessionConfiguration());
+        modelBuilder.ApplyConfiguration(new LoginThrottleConfiguration());
 
+        modelBuilder.Entity<LoginThrottle>().HasQueryFilter(t => t.TenantId == TenantAtual);
         modelBuilder.Entity<User>().HasQueryFilter(u => u.TenantId == TenantAtual);
         modelBuilder.Entity<UserOrganizationGrant>().HasQueryFilter(g => g.TenantId == TenantAtual);
         modelBuilder.Entity<Session>().HasQueryFilter(s => s.TenantId == TenantAtual);

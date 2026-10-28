@@ -20,11 +20,18 @@ public sealed class TenantRegistrationService
         _clock = clock;
     }
 
+    /// <summary>Cadastra o tenant com o idioma padrão inicial (<see cref="Tenant.FallbackDefaultLocale"/>).</summary>
     /// <exception cref="TenancyValidationException">Slug ou nome inválido.</exception>
     /// <exception cref="DuplicateTenantSlugException">O slug já está em uso.</exception>
-    public async Task<TenantInfo> RegisterAsync(string slug, string name, CancellationToken cancellationToken = default)
+    public Task<TenantInfo> RegisterAsync(string slug, string name, CancellationToken cancellationToken = default) =>
+        RegisterAsync(slug, name, null, cancellationToken);
+
+    /// <summary>Cadastra o tenant com o idioma padrão escolhido (<c>null</c> usa o inicial).</summary>
+    /// <exception cref="TenancyValidationException">Slug ou nome inválido.</exception>
+    /// <exception cref="DuplicateTenantSlugException">O slug já está em uso.</exception>
+    public async Task<TenantInfo> RegisterAsync(string slug, string name, Locale? defaultLocale, CancellationToken cancellationToken = default)
     {
-        var tenant = Tenant.Register(new TenantId(Guid.CreateVersion7()), slug, name, _clock.GetUtcNow());
+        var tenant = Tenant.Register(new TenantId(Guid.CreateVersion7()), slug, name, _clock.GetUtcNow(), defaultLocale);
 
         if (await _tenants.FindBySlugAsync(tenant.Slug, cancellationToken) is not null)
         {

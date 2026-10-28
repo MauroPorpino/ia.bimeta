@@ -13,4 +13,13 @@ public sealed class IdentityOptions
 
     /// <summary>Duração de uma sessão desde o login. Passado esse tempo ela é recusada.</summary>
     public TimeSpan SessionLifetime { get; set; } = TimeSpan.FromHours(8);
+
+    /// <summary>Senhas erradas, dentro da janela, para o mesmo e-mail no mesmo tenant, até o bloqueio temporário.</summary>
+    public int MaxFailedLogins { get; set; } = 5;
+
+    /// <summary>Janela em que as falhas são contadas. Passada a janela sem bloqueio, a contagem recomeça.</summary>
+    public TimeSpan FailedLoginWindow { get; set; } = TimeSpan.FromMinutes(15);
+
+    /// <summary>Duração do bloqueio temporário. Durante ele nem a senha certa é aceita (e a senha nem é verificada).</summary>
+    public TimeSpan LockoutDuration { get; set; } = TimeSpan.FromMinutes(15);
 }

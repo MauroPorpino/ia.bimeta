@@ -106,6 +106,71 @@ public sealed class DevelopmentSeedTests(PostgresFixture banco)
         Assert.DoesNotContain(token, texto);
     }
 
+    [Fact]
+    public async Task A_senha_da_variavel_de_ambiente_vence_a_do_arquivo_de_configuracao()
+    {
+        var slug = SlugNovo();
+        var email = $"admin@{slug}.local";
+        const string senhaDoArquivo = "Senha-Do-Arquivo-De-Seed-2026!";
+        const string senhaDoAmbiente = "Senha-Do-Ambiente-De-Seed-2026!";
+        var configuracao = ConfiguracaoDoSeed(slug, email, senhaDoArquivo);
+        // A variável de ambiente entra na configuração com o próprio nome.
+        configuracao[IaBimeta.Api.Development.DevelopmentTenancyOptions.AdminPasswordVariable] = senhaDoAmbiente;
+
+        await using var api = await ApiServer.StartAsync("Development", configuracao);
+
+        Assert.NotEmpty(await api.LoginAsync(new UsuarioCriado(Guid.Empty, email, senhaDoAmbiente, slug)));
+        using var comArquivo = await api.Client.PostAsJsonAsync("/auth/login", new { tenant = slug, email, password = senhaDoArquivo });
+        Assert.Equal(HttpStatusCode.Unauthorized, comArquivo.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_variavel_vazia_nao_substitui_a_senha_do_arquivo()
+    {
+        var slug = SlugNovo();
+        var email = $"admin@{slug}.local";
+        var configuracao = ConfiguracaoDoSeed(slug, email, SenhaSintetica);
+        configuracao[IaBimeta.Api.Development.DevelopmentTenancyOptions.AdminPasswordVariable] = string.Empty;
+
+        await using var api = await ApiServer.StartAsync("Development", configuracao);
+
+        Assert.NotEmpty(await api.LoginAsync(new UsuarioCriado(Guid.Empty, email, SenhaSintetica, slug)));
+    }
+
+    [Theory]
+    [InlineData("Production")]
+    [InlineData("Staging")]
+    public void A_partida_falha_se_a_variavel_de_senha_de_desenvolvimento_estiver_definida_fora_de_Development(string ambiente)
+    {
+        const string senha = "Senha-Do-Ambiente-De-Seed-2026!";
+        var configuracao = new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:Tenancy"] = TestDatabase.ConnectionString,
+            [IaBimeta.Api.Development.DevelopmentTenancyOptions.AdminPasswordVariable] = senha,
+        };
+
+        var falha = Assert.Throws<InvalidOperationException>(() => ApiHost.Build(
+            new[] { "--environment=" + ambiente },
+            builder => builder.Configuration.AddInMemoryCollection(configuracao)));
+
+        Assert.Contains("Development", falha.Message);
+        Assert.DoesNotContain(senha, falha.Message);
+    }
+
+    [Fact]
+    public async Task Em_producao_as_credenciais_de_desenvolvimento_nao_entram_nem_com_o_tenant_e_o_usuario_existindo()
+    {
+        // Mesmo que alguém crie, em produção, um usuário com o e-mail do seed de desenvolvimento, a senha de
+        // desenvolvimento só vale se for a senha dele: o seed não existe fora de Development.
+        var tenant = await banco.RegistrarTenantAsync("proddev");
+        var admin = await banco.CriarAdministradorDoTenantAsync(tenant, "admin@demo-a.local", "Outra-Senha-De-Producao-2026!");
+        await using var api = await ApiServer.StartAsync("Production", ApiServer.ConfiguracaoDeProducao());
+
+        using var comSenhaDeDev = await api.Client.PostAsJsonAsync("/auth/login", new { tenant = tenant.Slug, email = admin.Email, password = "DevLocal-Admin-2026!" });
+        Assert.Equal(HttpStatusCode.Unauthorized, comSenhaDeDev.StatusCode);
+        Assert.NotEmpty(await api.LoginAsync(admin));
+    }
+
     [Theory]
     [InlineData("Production")]
     [InlineData("Staging")]

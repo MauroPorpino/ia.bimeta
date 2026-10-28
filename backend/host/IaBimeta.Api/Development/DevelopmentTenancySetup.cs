@@ -1,3 +1,4 @@
+using IaBimeta.SharedKernel;
 using IaBimeta.Tenancy.Application;
 using IaBimeta.Tenancy.Contracts.Queries;
 using IaBimeta.Tenancy.Infrastructure;
@@ -42,7 +43,13 @@ internal sealed class DevelopmentTenancySetup : IHostedService
             {
                 if (await diretorio.FindBySlugAsync(semente.Slug, cancellationToken) is null)
                 {
-                    await cadastro.RegisterAsync(semente.Slug, semente.Name, cancellationToken);
+                    Locale? idioma = null;
+                    if (!string.IsNullOrWhiteSpace(semente.DefaultLocale) && !Locale.TryParse(semente.DefaultLocale, out idioma))
+                    {
+                        _log.LogWarning("Idioma '{Locale}' do tenant de demonstração '{Slug}' ignorado: não é BCP 47 bem formado.", semente.DefaultLocale, semente.Slug);
+                    }
+
+                    await cadastro.RegisterAsync(semente.Slug, semente.Name, idioma, cancellationToken);
                     _log.LogInformation("Tenant de demonstração '{Slug}' cadastrado.", semente.Slug);
                 }
             }

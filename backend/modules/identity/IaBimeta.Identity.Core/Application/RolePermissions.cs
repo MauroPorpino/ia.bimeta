@@ -16,14 +16,19 @@ public static class RolePermissions
         Permission.StructureRead,
     };
 
+    // O usuário comum ainda não lê atendimentos: o acesso do atendente vem por fila e equipe, no ContactCenter (etapa 4).
     private static readonly Permission[] ManagerPermissions =
     {
         Permission.OrganizationRead,
         Permission.StructureRead,
         Permission.StructureManage,
         Permission.UserRead,
+        Permission.ConversationRead,
+        Permission.ConversationManage,
+        Permission.ChannelRead,
     };
 
+    // Quem gere a organização gere os canais dela: o cadastro dos números e das unidades autorizadas muda quem pode atender.
     private static readonly Permission[] AdminPermissions =
     {
         Permission.OrganizationRead,
@@ -31,12 +36,17 @@ public static class RolePermissions
         Permission.StructureManage,
         Permission.UserRead,
         Permission.UserManage,
+        Permission.ConversationRead,
+        Permission.ConversationManage,
+        Permission.ChannelRead,
+        Permission.ChannelManage,
     };
 
     private static readonly Permission[] TenantAdminExtraPermissions =
     {
         Permission.OrganizationCreate,
         Permission.AuditRead,
+        Permission.TenantSettingsManage,
     };
 
     /// <param name="organizationId">A organização da concessão, ou nulo para a concessão de escopo do tenant.</param>

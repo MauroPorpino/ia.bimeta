@@ -100,9 +100,48 @@ public class GrafoDeProjetosTests
             .OrderBy(a => a.Item1).ThenBy(a => a.Item2)
             .ToList();
 
+        // O Conversations usa Tenancy (organização e unidade) e Audit (reenvio); a matriz também permite Identity, mas ele
+        // não precisa: o RequestContext já chega pronto do host. O Channels usa Tenancy (organização, unidade e setor) e Audit;
+        // a matriz também permite Conversations (o Receiver, depois do PRV-2) e Identity, que ainda não são necessários. Não há
+        // aresta Conversations -> Channels nem ContactCenter -> Channels: a lista de unidades autorizadas chega ao Conversations
+        // por uma porta dele, implementada pelo host sobre o Channels.Contracts. Aresta nova exige ADR e atualização desta lista.
         Assert.Equal(
-            new[] { ("Identity", "Audit"), ("Identity", "Tenancy"), ("Tenancy", "Audit") },
+            new[]
+            {
+                ("Channels", "Audit"), ("Channels", "Tenancy"),
+                ("Conversations", "Audit"), ("Conversations", "Tenancy"),
+                ("Identity", "Audit"), ("Identity", "Tenancy"),
+                ("Tenancy", "Audit"),
+            },
             arestas);
+    }
+
+    [Fact]
+    public void O_modulo_Channels_existe_com_as_camadas_esperadas()
+    {
+        var nomes = Projetos.Select(p => p.Nome).ToHashSet();
+
+        foreach (var esperado in new[]
+        {
+            "IaBimeta.Channels.Contracts", "IaBimeta.Channels.Core", "IaBimeta.Channels.Infrastructure", "IaBimeta.Channels.Presentation",
+        })
+        {
+            Assert.Contains(esperado, nomes);
+        }
+    }
+
+    [Fact]
+    public void O_modulo_Conversations_da_etapa_3_existe_com_as_camadas_esperadas()
+    {
+        var nomes = Projetos.Select(p => p.Nome).ToHashSet();
+
+        foreach (var esperado in new[]
+        {
+            "IaBimeta.Conversations.Contracts", "IaBimeta.Conversations.Core", "IaBimeta.Conversations.Infrastructure", "IaBimeta.Conversations.Presentation",
+        })
+        {
+            Assert.Contains(esperado, nomes);
+        }
     }
 
     [Fact]

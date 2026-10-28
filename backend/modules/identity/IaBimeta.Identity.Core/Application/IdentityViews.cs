@@ -12,9 +12,9 @@ public sealed record LoginResult(string Token, DateTimeOffset ExpiresAt);
 /// </summary>
 public sealed record AuthenticatedPrincipal(TenantId TenantId, Guid UserId, Guid SessionId, IReadOnlyList<PermissionGrant> Permissions);
 
-public sealed record UserView(Guid Id, string Email, string DisplayName, DateTimeOffset CreatedAt)
+public sealed record UserView(Guid Id, string Email, string DisplayName, DateTimeOffset CreatedAt, Locale? PreferredLocale = null)
 {
-    internal static UserView From(User user) => new(user.Id, user.Email, user.DisplayName, user.CreatedAt);
+    internal static UserView From(User user) => new(user.Id, user.Email, user.DisplayName, user.CreatedAt, user.PreferredLocale);
 }
 
 /// <summary>Um usuário com o papel que tem na organização. <see cref="TenantWide"/> indica concessão de escopo do tenant.</summary>
@@ -26,4 +26,4 @@ public sealed record UserAccessView(Guid UserId, string Email, string DisplayNam
 
 public sealed record GrantView(Guid? OrganizationId, Role Role);
 
-public sealed record CurrentUserView(Guid Id, string Email, string DisplayName, IReadOnlyList<GrantView> Grants);
+public sealed record CurrentUserView(Guid Id, string Email, string DisplayName, IReadOnlyList<GrantView> Grants, Locale? PreferredLocale = null);

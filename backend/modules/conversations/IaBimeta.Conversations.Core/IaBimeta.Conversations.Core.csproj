@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <!-- Os testes de unidade exercitam os componentes internos (cursores e montagem de eventos). -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="IaBimeta.Conversations.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\building-blocks\IaBimeta.SharedKernel\IaBimeta.SharedKernel.csproj" />
+    <ProjectReference Include="..\IaBimeta.Conversations.Contracts\IaBimeta.Conversations.Contracts.csproj" />
+    <ProjectReference Include="..\..\tenancy\IaBimeta.Tenancy.Contracts\IaBimeta.Tenancy.Contracts.csproj" />
+    <ProjectReference Include="..\..\audit\IaBimeta.Audit.Contracts\IaBimeta.Audit.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

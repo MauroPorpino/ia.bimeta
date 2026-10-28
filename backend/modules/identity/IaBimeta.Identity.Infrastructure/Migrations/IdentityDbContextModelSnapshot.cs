@@ -23,6 +23,34 @@ namespace IaBimeta.Identity.Infrastructure.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("IaBimeta.Identity.Domain.LoginThrottle", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<string>("Key")
+                        .HasMaxLength(254)
+                        .HasColumnType("character varying(254)")
+                        .HasColumnName("throttle_key");
+
+                    b.Property<int>("FailedCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("failed_count");
+
+                    b.Property<DateTimeOffset?>("LockedUntil")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("locked_until");
+
+                    b.Property<DateTimeOffset>("WindowStartedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("window_started_at");
+
+                    b.HasKey("TenantId", "Key");
+
+                    b.ToTable("login_throttles", "identity");
+                });
+
             modelBuilder.Entity("IaBimeta.Identity.Domain.Session", b =>
                 {
                     b.Property<Guid>("TenantId")
@@ -99,13 +127,21 @@ namespace IaBimeta.Identity.Infrastructure.Migrations
                         .HasColumnType("character varying(200)")
                         .HasColumnName("password_hash");
 
+                    b.Property<string>("PreferredLocale")
+                        .HasMaxLength(35)
+                        .HasColumnType("character varying(35)")
+                        .HasColumnName("preferred_locale");
+
                     b.HasKey("TenantId", "Id");
 
                     b.HasIndex("TenantId", "Email")
                         .IsUnique()
                         .HasDatabaseName("ix_users_tenant_id_email");
 
-                    b.ToTable("users", "identity");
+                    b.ToTable("users", "identity", t =>
+                        {
+                            t.HasCheckConstraint("ck_users_preferred_locale", "preferred_locale IS NULL OR preferred_locale ~ '^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$'");
+                        });
                 });
 
             modelBuilder.Entity("IaBimeta.Identity.Domain.UserOrganizationGrant", b =>

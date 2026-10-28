@@ -14,6 +14,7 @@
     <InternalsVisibleTo Include="IaBimeta.Tenancy.Tests" />
     <InternalsVisibleTo Include="IaBimeta.Identity.Tests" />
     <InternalsVisibleTo Include="IaBimeta.Audit.Tests" />
+    <InternalsVisibleTo Include="IaBimeta.Conversations.Tests" />
     <InternalsVisibleTo Include="IaBimeta.IntegrationTests" />
   </ItemGroup>
 

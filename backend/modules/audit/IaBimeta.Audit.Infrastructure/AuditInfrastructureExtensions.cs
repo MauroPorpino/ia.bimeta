@@ -24,7 +24,8 @@ public static class AuditInfrastructureExtensions
                 npgsql => npgsql.MigrationsHistoryTable("__ef_migrations_history", AuditDbContext.Schema)));
 
         services.AddScoped<IAuditRepository, AuditRepository>();
-        services.AddScoped<IAuditWriter, AuditWriter>();
+        // TryAdd: quem registrou um escritor antes (os testes de falha de auditoria) continua valendo.
+        services.TryAddScoped<IAuditWriter, AuditWriter>();
         services.AddScoped<AuditQueryService>();
 
         return services;

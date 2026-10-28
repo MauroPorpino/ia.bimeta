@@ -44,7 +44,14 @@ public sealed class UserService
     /// <exception cref="AccessDeniedException">Falta a permissão de gerir usuários da organização.</exception>
     /// <exception cref="IdentityValidationException">E-mail, nome, senha ou papel inválidos.</exception>
     /// <exception cref="DuplicateUserEmailException">O e-mail já existe neste tenant.</exception>
-    public async Task<UserView> CreateAsync(Guid organizationId, string? email, string? displayName, string? password, Role role, CancellationToken cancellationToken = default)
+    public async Task<UserView> CreateAsync(
+        Guid organizationId,
+        string? email,
+        string? displayName,
+        string? password,
+        Role role,
+        string? preferredLocale = null,
+        CancellationToken cancellationToken = default)
     {
         var contexto = _context.GetRequired();
         await RequireVisibleOrganizationAsync(contexto, organizationId, cancellationToken);
@@ -54,10 +61,11 @@ public sealed class UserService
 
         UserOrganizationGrant.ValidateRole(role);
         User.ValidateProfile(email, displayName);
+        var idioma = User.ParsePreferredLocale(preferredLocale);
         PasswordPolicy.Validate(password);
 
         var agora = _clock.GetUtcNow();
-        var usuario = User.Create(contexto.TenantId, email, displayName, _hasher.Hash(password!), agora);
+        var usuario = User.Create(contexto.TenantId, email, displayName, _hasher.Hash(password!), agora, idioma);
         var concessao = UserOrganizationGrant.Create(contexto.TenantId, usuario.Id, organizationId, role, agora, contexto.Principal?.UserId);
         await _users.AddAsync(usuario, concessao, cancellationToken);
 
@@ -143,7 +151,33 @@ public sealed class UserService
             usuario.Id,
             usuario.Email,
             usuario.DisplayName,
-            concessoes.Select(c => new GrantView(c.OrganizationId, c.Role)).ToList());
+            concessoes.Select(c => new GrantView(c.OrganizationId, c.Role)).ToList(),
+            usuario.PreferredLocale);
+    }
+
+    /// <summary>
+    /// O usuário autenticado define o próprio idioma preferido (BCP 47), ou o limpa com <c>null</c>. É dado do próprio usuário:
+    /// o alvo é sempre o usuário do contexto, nunca um parâmetro, e outro usuário não é alcançável por aqui.
+    /// </summary>
+    /// <exception cref="AuthenticationRequiredException">O contexto não tem usuário autenticado.</exception>
+    /// <exception cref="IdentityValidationException">O idioma não é um identificador BCP 47 bem formado.</exception>
+    public async Task<Locale?> SetMyPreferredLocaleAsync(string? locale, CancellationToken cancellationToken = default)
+    {
+        var principal = _context.GetRequired().RequirePrincipal();
+        var idioma = User.ParsePreferredLocale(locale);
+
+        var usuario = await _users.FindForUpdateAsync(principal.UserId, cancellationToken)
+            ?? throw new IdentityResourceNotFoundException("Usuário");
+        if (usuario.PreferredLocale == idioma)
+        {
+            return idioma;
+        }
+
+        usuario.SetPreferredLocale(idioma);
+        await _users.SaveChangesAsync(cancellationToken);
+
+        await _audit.WriteAsync(new AuditEntry("identity.user.locale.set", "user", usuario.Id.ToString(), AuditOutcome.Success), cancellationToken);
+        return idioma;
     }
 
     /// <summary>

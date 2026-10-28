@@ -37,8 +37,13 @@ internal sealed class UserRepository : IUserRepository
     public Task<User?> FindByIdAsync(Guid id, CancellationToken cancellationToken) =>
         _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == id, cancellationToken);
 
+    public Task<User?> FindForUpdateAsync(Guid id, CancellationToken cancellationToken) =>
+        _db.Users.FirstOrDefaultAsync(u => u.Id == id, cancellationToken);
+
     public Task<User?> FindByEmailAsync(string normalizedEmail, CancellationToken cancellationToken) =>
         _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Email == normalizedEmail, cancellationToken);
+
+    public Task SaveChangesAsync(CancellationToken cancellationToken) => _db.SaveChangesAsync(cancellationToken);
 }
 
 internal sealed class GrantRepository : IGrantRepository

@@ -21,7 +21,7 @@ Nenhum commit é criado sem aprovação específica, e nunca há `push`.
 | `Test-EntradaDeEtapa.ps1` | gate de entrada |
 | `Test-SaidaDeEtapa.ps1` | gate de saída, antes do commit |
 | `Test-PosCommit.ps1` | gate após o commit aprovado |
-| `Test-GrafoDeProjetos.ps1` | grafo de `ProjectReference` × `module-dependencies.json` (ARQ-04, ARQ-05, ARQ-06, DEP-4/6). Versão provisória: os testes C# da etapa M3 a substituem |
+| `Test-GrafoDeProjetos.ps1` | grafo de `ProjectReference` × `module-dependencies.json` (ARQ-04, ARQ-05, ARQ-06, DEP-4/6). A regra já é protegida também pelos testes C# de `tests/IaBimeta.ArchitectureTests`, que rodam em `dotnet test`; este script segue como conferência independente, sem depender do SDK de testes |
 | `Test-FormatoDeArquivos.ps1` | LF no que será commitado, sem BOM nem falta de nova linha em arquivo novo, scripts ASCII |
 | `Test-TestesDaSolucao.ps1` | executa `dotnet test` e confere aprovados, ignorados e falhas |
 | `Get-LinhaDeBase.ps1` | emite a linha de base em texto (quem chama decide onde gravar) |
@@ -82,8 +82,8 @@ Os scripts não são assinados. Os testes também rodam sem eles, com `dotnet te
 
 - A análise AST é estática: ela não impede um comando digitado fora de um script. Continua valendo a disciplina de nunca usar comandos de remoção nem `git clean`, `git reset --hard` ou `git checkout -- .` sem autorização.
 - `dotnet test` sem `--no-build` grava em `bin/obj` (ignorados pelo Git) e no cache do NuGet.
-- Pendências de formato herdadas dos templates do `dotnet`, apenas avisadas: BOM nos `.csproj` de `Application`, `Domain`, `Infrastructure` e `Domain.Tests`, e `Domain.Tests.csproj` sem nova linha final. A cópia de trabalho de vários arquivos está em CRLF; o `.gitattributes` (`text eol=lf`) normaliza para LF no commit.
+- A cópia de trabalho de vários arquivos está em CRLF; o `.gitattributes` (`text eol=lf`) normaliza para LF no commit. As pendências de BOM dos `.csproj` antigos acabaram com a remoção dos projetos legados. As migrations geradas pelo `dotnet ef` saem com BOM e CRLF e precisam ser normalizadas antes do commit (o `Test-FormatoDeArquivos.ps1` acusa).
 
-## Pendência registrada na linha de base
+## Pendência registrada na linha de base (resolvida)
 
-O teste de aceitação Mauro/Pedro (`Contexto_de_um_atendimento_nao_vaza_para_outro`) estava **ignorado** (`Skip`) na linha de base de 27/10/2026: ignorado conta como pendência, não como cobertura. Ele deve ser **ativado (ou substituído) antes da validação funcional multi-tenant**. `Test-TestesDaSolucao.ps1` **registra** a situação atual (linhas `INFO`: testes ignorados e estado desse teste), mas **não exige** que ele continue ignorado. Exigências opcionais: `-AprovadosEsperados` e `-IgnoradosEsperados` (`-1` = não verificar) e `-ExigirSemIgnorados` (zero testes ignorados).
+O teste de aceitação Mauro/Pedro (`Contexto_de_um_atendimento_nao_vaza_para_outro`) estava **ignorado** (`Skip`) na linha de base de 27/10/2026: ignorado conta como pendência, não como cobertura. Ele foi **substituído** por testes ativos com PostgreSQL real: o isolamento entre tenants (`MauroPedroIsolamentoDeTenantsTests`, etapa 1) e, no nível da conversa, `MauroPedroConversasTests` (etapa 3: sessões #1001 e #1002, tenants 1001 e 1002, contexto do turno, resposta só para o atendimento certo). `Test-TestesDaSolucao.ps1` **registra** a situação atual (linhas `INFO`: testes ignorados e estado do nome antigo, que agora aparece como removido), mas **não exige** nada sobre ele. Exigências opcionais: `-AprovadosEsperados` e `-IgnoradosEsperados` (`-1` = não verificar) e `-ExigirSemIgnorados` (zero testes ignorados).

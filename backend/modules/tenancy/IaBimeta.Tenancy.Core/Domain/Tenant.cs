@@ -14,16 +14,23 @@ public sealed class Tenant
     public const int SlugMaxLength = 40;
     public const int NameMaxLength = 120;
 
+    /// <summary>
+    /// Idioma padrão de um tenant cadastrado sem escolher um. É só o valor inicial da configuração: o tenant o troca quando
+    /// quiser, e ele nunca diz o idioma de um cliente (a conversa tem o seu próprio idioma efetivo, no Conversations).
+    /// </summary>
+    public static readonly Locale FallbackDefaultLocale = Locale.Parse("pt-BR");
+
     private static readonly Regex SlugPattern = new("^[a-z0-9]+(-[a-z0-9]+)*$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     // Usado pela fábrica e pelo EF Core (que liga os parâmetros às propriedades pelo nome).
-    private Tenant(TenantId id, string slug, string name, TenantStatus status, DateTimeOffset createdAt)
+    private Tenant(TenantId id, string slug, string name, TenantStatus status, DateTimeOffset createdAt, Locale defaultLocale)
     {
         Id = id;
         Slug = slug;
         Name = name;
         Status = status;
         CreatedAt = createdAt;
+        DefaultLocale = defaultLocale;
     }
 
     public TenantId Id { get; }
@@ -37,7 +44,10 @@ public sealed class Tenant
 
     public DateTimeOffset CreatedAt { get; }
 
-    public static Tenant Register(TenantId id, string slug, string name, DateTimeOffset now)
+    /// <summary>O idioma padrão do tenant (BCP 47), configurável. Serve de último recurso quando nada melhor se sabe do cliente.</summary>
+    public Locale DefaultLocale { get; private set; }
+
+    public static Tenant Register(TenantId id, string slug, string name, DateTimeOffset now, Locale? defaultLocale = null)
     {
         ArgumentNullException.ThrowIfNull(id);
 
@@ -54,7 +64,13 @@ public sealed class Tenant
             throw new TenancyValidationException($"O nome do tenant deve ter de 1 a {NameMaxLength} caracteres.");
         }
 
-        return new Tenant(id, slugValido, nomeValido, TenantStatus.Active, now);
+        return new Tenant(id, slugValido, nomeValido, TenantStatus.Active, now, defaultLocale ?? FallbackDefaultLocale);
+    }
+
+    public void ChangeDefaultLocale(Locale locale)
+    {
+        ArgumentNullException.ThrowIfNull(locale);
+        DefaultLocale = locale;
     }
 
     public void Suspend()

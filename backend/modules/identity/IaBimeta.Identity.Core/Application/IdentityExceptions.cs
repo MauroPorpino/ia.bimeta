@@ -12,6 +12,21 @@ public sealed class InvalidCredentialsException : Exception
     }
 }
 
+/// <summary>
+/// Muitas senhas erradas para este e-mail: o login está bloqueado por um tempo, e a senha nem é verificada. A resposta
+/// é a mesma exista o e-mail ou não, para não revelar o que existe.
+/// </summary>
+public sealed class LoginThrottledException : Exception
+{
+    public LoginThrottledException(TimeSpan retryAfter)
+        : base("Muitas tentativas de login. Tente novamente mais tarde.")
+    {
+        RetryAfter = retryAfter < TimeSpan.Zero ? TimeSpan.Zero : retryAfter;
+    }
+
+    public TimeSpan RetryAfter { get; }
+}
+
 public sealed class DuplicateUserEmailException : Exception
 {
     public DuplicateUserEmailException()

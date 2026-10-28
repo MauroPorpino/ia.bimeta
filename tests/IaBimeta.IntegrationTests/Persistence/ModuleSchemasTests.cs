@@ -1,4 +1,6 @@
 using IaBimeta.Audit.Infrastructure;
+using IaBimeta.Channels.Infrastructure;
+using IaBimeta.Conversations.Infrastructure;
 using IaBimeta.Identity.Infrastructure;
 using IaBimeta.Tenancy.Infrastructure;
 using Microsoft.EntityFrameworkCore;
@@ -13,13 +15,15 @@ namespace IaBimeta.IntegrationTests.Persistence;
 [Collection(PostgresCollection.Name)]
 public sealed class ModuleSchemasTests(PostgresFixture banco)
 {
-    public static TheoryData<string> Modulos => new() { "tenancy", "identity", "audit" };
+    public static TheoryData<string> Modulos => new() { "tenancy", "identity", "audit", "conversations", "channels" };
 
     private static DbContext ContextoDo(IServiceProvider provider, string modulo) => modulo switch
     {
         "tenancy" => provider.GetRequiredService<TenancyDbContext>(),
         "identity" => provider.GetRequiredService<IdentityDbContext>(),
         "audit" => provider.GetRequiredService<AuditDbContext>(),
+        "conversations" => provider.GetRequiredService<ConversationsDbContext>(),
+        "channels" => provider.GetRequiredService<ChannelsDbContext>(),
         _ => throw new ArgumentOutOfRangeException(nameof(modulo)),
     };
 
@@ -52,7 +56,20 @@ public sealed class ModuleSchemasTests(PostgresFixture banco)
         { "identity", "users" },
         { "identity", "user_organization_grants" },
         { "identity", "sessions" },
+        { "identity", "login_throttles" },
         { "audit", "audit_events" },
+        { "conversations", "contacts" },
+        { "conversations", "service_sessions" },
+        { "conversations", "conversations" },
+        { "conversations", "messages" },
+        { "conversations", "handling_transitions" },
+        { "conversations", "message_translations" },
+        { "conversations", "session_transfers" },
+        { "channels", "channel_accounts" },
+        { "channels", "channel_instances" },
+        { "channels", "channel_instance_units" },
+        { "channels", "channel_routes" },
+        { "channels", "channel_secrets" },
     };
 
     [Theory]
@@ -79,7 +96,7 @@ public sealed class ModuleSchemasTests(PostgresFixture banco)
 
         Assert.Equal("NO", anulavel);
         Assert.Equal("tenant_id", colunasDaChave.First());
-        Assert.Equal(2, colunasDaChave.Count);
+        Assert.True(colunasDaChave.Count >= 2, "A chave precisa ser composta: tenant_id e ao menos uma coluna do recurso.");
     }
 
     [Theory]
@@ -109,7 +126,7 @@ public sealed class ModuleSchemasTests(PostgresFixture banco)
                 "select count(*)::int as \"Value\" from information_schema.referential_constraints rc " +
                 "join information_schema.table_constraints fk on fk.constraint_name = rc.constraint_name and fk.constraint_schema = rc.constraint_schema " +
                 "join information_schema.table_constraints pk on pk.constraint_name = rc.unique_constraint_name and pk.constraint_schema = rc.unique_constraint_schema " +
-                "where fk.table_schema in ('tenancy', 'identity', 'audit') and fk.table_schema <> pk.table_schema")
+                "where fk.table_schema in ('tenancy', 'identity', 'audit', 'conversations') and fk.table_schema <> pk.table_schema")
             .SingleAsync();
 
         Assert.Equal(0, entreEsquemas);

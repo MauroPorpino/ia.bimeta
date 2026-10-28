@@ -12,9 +12,11 @@ internal static class DevelopmentOnlyGuard
             ?? new DevelopmentTenancyOptions();
 
         var algumLigado = opcoes.HeaderEnabled
+            || opcoes.SimulatorEnabled
             || opcoes.ApplyMigrations
             || opcoes.SeedTenants.Count > 0
-            || opcoes.SeedAdministrators.Count > 0;
+            || opcoes.SeedAdministrators.Count > 0
+            || !string.IsNullOrEmpty(configuracao[DevelopmentTenancyOptions.AdminPasswordVariable]);
 
         if (algumLigado && !ambiente.IsDevelopment())
         {

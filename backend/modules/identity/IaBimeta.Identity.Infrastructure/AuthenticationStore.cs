@@ -58,4 +58,39 @@ internal sealed class AuthenticationStore : IAuthenticationStore
         await _db.Grants.IgnoreQueryFilters().AsNoTracking()
             .Where(g => g.TenantId == tenantId && g.UserId == userId)
             .ToListAsync(cancellationToken);
+
+    public Task<LoginThrottle?> FindLoginThrottleAsync(TenantId tenantId, string key, CancellationToken cancellationToken) =>
+        _db.LoginThrottles.IgnoreQueryFilters().AsNoTracking()
+            .FirstOrDefaultAsync(t => t.TenantId == tenantId && t.Key == key, cancellationToken);
+
+    public async Task<bool> RecordLoginFailureAsync(TenantId tenantId, string key, DateTimeOffset now, LoginThrottlePolicy policy, CancellationToken cancellationToken)
+    {
+        using var escopo = _db.UseAuthenticationTenant(tenantId);
+        await using var transacao = await _db.Database.BeginTransactionAsync(cancellationToken);
+
+        // Garante a linha e a trava: falhas simultâneas do mesmo e-mail se enfileiram, e nenhuma contagem se perde.
+        await _db.Database.ExecuteSqlInterpolatedAsync(
+            $@"INSERT INTO identity.login_throttles (tenant_id, throttle_key, failed_count, window_started_at, locked_until)
+               VALUES ({tenantId.Value}, {key}, 0, {now}, NULL)
+               ON CONFLICT (tenant_id, throttle_key) DO NOTHING",
+            cancellationToken);
+        await _db.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT 1 FROM identity.login_throttles WHERE tenant_id = {tenantId.Value} AND throttle_key = {key} FOR UPDATE",
+            cancellationToken);
+
+        var contagem = await _db.LoginThrottles.IgnoreQueryFilters()
+            .SingleAsync(t => t.TenantId == tenantId && t.Key == key, cancellationToken);
+        var bloqueou = contagem.RegisterFailure(now, policy);
+
+        await _db.SaveChangesAsync(cancellationToken);
+        await transacao.CommitAsync(cancellationToken);
+        return bloqueou;
+    }
+
+    public async Task ClearLoginThrottleAsync(TenantId tenantId, string key, CancellationToken cancellationToken)
+    {
+        await _db.LoginThrottles.IgnoreQueryFilters()
+            .Where(t => t.TenantId == tenantId && t.Key == key)
+            .ExecuteDeleteAsync(cancellationToken);
+    }
 }

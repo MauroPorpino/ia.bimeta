@@ -18,7 +18,12 @@ public interface IUserRepository
 
     Task<User?> FindByIdAsync(Guid id, CancellationToken cancellationToken);
 
+    /// <summary>O usuário do tenant já rastreado para alteração, ou <c>null</c> se não existe no tenant.</summary>
+    Task<User?> FindForUpdateAsync(Guid id, CancellationToken cancellationToken);
+
     Task<User?> FindByEmailAsync(string normalizedEmail, CancellationToken cancellationToken);
+
+    Task SaveChangesAsync(CancellationToken cancellationToken);
 }
 
 /// <summary>Porta de persistência das concessões, dentro do tenant do contexto da operação.</summary>
@@ -67,4 +72,16 @@ public interface IAuthenticationStore
     Task UpdatePasswordHashAsync(TenantId tenantId, Guid userId, string newHash, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<UserOrganizationGrant>> ListGrantsAsync(TenantId tenantId, Guid userId, CancellationToken cancellationToken);
+
+    /// <summary>A contagem de falhas do e-mail no tenant, ou <c>null</c> se não há falha registrada.</summary>
+    Task<LoginThrottle?> FindLoginThrottleAsync(TenantId tenantId, string key, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Registra uma falha de senha de forma atômica (falhas simultâneas do mesmo e-mail se enfileiram). Devolve
+    /// <c>true</c> se esta falha causou o bloqueio.
+    /// </summary>
+    Task<bool> RecordLoginFailureAsync(TenantId tenantId, string key, DateTimeOffset now, LoginThrottlePolicy policy, CancellationToken cancellationToken);
+
+    /// <summary>Zera a contagem depois de um login bem-sucedido.</summary>
+    Task ClearLoginThrottleAsync(TenantId tenantId, string key, CancellationToken cancellationToken);
 }

@@ -16,7 +16,7 @@ public sealed class User : ITenantOwned
     private static readonly Regex EmailPattern = new(@"^[^@\s]+@[^@\s]+\.[^@\s]+$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     // Usado pela fábrica e pelo EF Core (que liga os parâmetros às propriedades pelo nome).
-    private User(Guid id, TenantId tenantId, string email, string displayName, string passwordHash, DateTimeOffset createdAt)
+    private User(Guid id, TenantId tenantId, string email, string displayName, string passwordHash, DateTimeOffset createdAt, Locale? preferredLocale)
     {
         Id = id;
         TenantId = tenantId;
@@ -24,6 +24,7 @@ public sealed class User : ITenantOwned
         DisplayName = displayName;
         PasswordHash = passwordHash;
         CreatedAt = createdAt;
+        PreferredLocale = preferredLocale;
     }
 
     public Guid Id { get; }
@@ -39,13 +40,37 @@ public sealed class User : ITenantOwned
 
     public DateTimeOffset CreatedAt { get; }
 
-    public static User Create(TenantId tenantId, string? email, string? displayName, string passwordHash, DateTimeOffset now)
+    /// <summary>O idioma que o usuário prefere para a interface (BCP 47), ou <c>null</c> se ainda não escolheu. Não é o idioma de nenhuma conversa.</summary>
+    public Locale? PreferredLocale { get; private set; }
+
+    public static User Create(TenantId tenantId, string? email, string? displayName, string passwordHash, DateTimeOffset now, Locale? preferredLocale = null)
     {
         ArgumentNullException.ThrowIfNull(tenantId);
         ArgumentException.ThrowIfNullOrWhiteSpace(passwordHash);
 
         var (emailNormalizado, nome) = ValidateProfile(email, displayName);
-        return new User(Guid.CreateVersion7(), tenantId, emailNormalizado, nome, passwordHash, now);
+        return new User(Guid.CreateVersion7(), tenantId, emailNormalizado, nome, passwordHash, now, preferredLocale);
+    }
+
+    /// <summary>
+    /// Lê o idioma informado (<c>null</c> ou vazio significa "sem preferência").
+    /// </summary>
+    /// <exception cref="IdentityValidationException">Não é um identificador BCP 47 bem formado.</exception>
+    public static Locale? ParsePreferredLocale(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        return Locale.TryParse(text, out var locale)
+            ? locale
+            : throw new IdentityValidationException("O idioma deve ser um identificador BCP 47 bem formado, como pt-BR, en-US, es-ES ou fr-FR.");
+    }
+
+    public void SetPreferredLocale(Locale? locale)
+    {
+        PreferredLocale = locale;
     }
 
     /// <summary>

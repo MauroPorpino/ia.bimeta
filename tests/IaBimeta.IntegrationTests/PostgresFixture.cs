@@ -1,4 +1,9 @@
+using System.Security.Cryptography;
+using IaBimeta.Api.Channels;
 using IaBimeta.Audit.Infrastructure;
+using IaBimeta.Channels.Infrastructure;
+using IaBimeta.Conversations.Application;
+using IaBimeta.Conversations.Infrastructure;
 using IaBimeta.Identity.Application;
 using IaBimeta.Identity.Domain;
 using IaBimeta.Identity.Infrastructure;
@@ -30,11 +35,22 @@ public sealed class PostgresFixture : IAsyncLifetime
 
     public const string PasswordPadrao = "Senha-De-Teste-2026!";
 
+    /// <summary>A chave de cifra das credenciais nos testes: aleatória a cada execução, sintética, nunca gravada em arquivo.</summary>
+    public static readonly string ChaveDeCifraDeTeste = Convert.ToBase64String(RandomNumberGenerator.GetBytes(ChannelSecretOptions.KeySizeBytes));
+
+    public const string IdDaChaveDeTeste = "teste-1";
+
     private ServiceProvider? _servicos;
+    private ServiceProvider? _servicosComCanaisReais;
 
     public string ConnectionString { get; } = TestDatabase.ConnectionString;
 
-    public async Task InitializeAsync()
+    /// <summary>
+    /// Dois provedores, a mesma composição do host. No padrão, a autorização de unidade por canal é um dublê que aceita tudo (os
+    /// testes de conversas não registram canais). No de "canais reais", é a implementação do host sobre o Channels: aceita só o
+    /// que o cadastro autoriza.
+    /// </summary>
+    private ServiceProvider Compor(bool canaisReais)
     {
         var colecao = new ServiceCollection();
         colecao.AddScoped<RequestContextHolder>();
@@ -42,26 +58,84 @@ public sealed class PostgresFixture : IAsyncLifetime
         colecao.AddAudit(_ => ConnectionString);
         colecao.AddTenancy(_ => ConnectionString);
         colecao.AddIdentityModule(_ => ConnectionString, opcoes => opcoes.PasswordHashIterations = PasswordIterations);
-        _servicos = colecao.BuildServiceProvider(validateScopes: true);
+        // Etapa 3: o publicador é o dublê em memória (não durável), como no host.
+        colecao.AddSingleton<InMemoryEventPublisher>();
+        colecao.AddSingleton<IEventPublisher>(provider => provider.GetRequiredService<InMemoryEventPublisher>());
+        colecao.AddChannels(_ => ConnectionString, opcoes =>
+        {
+            opcoes.ActiveKeyId = IdDaChaveDeTeste;
+            opcoes.Keys[IdDaChaveDeTeste] = ChaveDeCifraDeTeste;
+        });
+        if (canaisReais)
+        {
+            colecao.AddScoped<IChannelUnitAuthorization, ChannelsBackedUnitAuthorization>();
+        }
+        else
+        {
+            colecao.AddScoped<IChannelUnitAuthorization, AutorizaQualquerUnidade>();
+        }
+
+        colecao.AddConversations(_ => ConnectionString);
+        return colecao.BuildServiceProvider(validateScopes: true);
+    }
+
+    public async Task InitializeAsync()
+    {
+        _servicos = Compor(canaisReais: false);
+        _servicosComCanaisReais = Compor(canaisReais: true);
 
         await using var escopo = _servicos.CreateAsyncScope();
         await escopo.ServiceProvider.GetRequiredService<AuditDbContext>().Database.MigrateAsync();
         await escopo.ServiceProvider.GetRequiredService<TenancyDbContext>().Database.MigrateAsync();
         await escopo.ServiceProvider.GetRequiredService<IdentityDbContext>().Database.MigrateAsync();
+        await escopo.ServiceProvider.GetRequiredService<ConversationsDbContext>().Database.MigrateAsync();
+        await escopo.ServiceProvider.GetRequiredService<ChannelsDbContext>().Database.MigrateAsync();
     }
 
-    public Task DisposeAsync() => _servicos is null ? Task.CompletedTask : _servicos.DisposeAsync().AsTask();
+    /// <summary>Os eventos publicados pelo Conversations (dublê em memória), para os testes conferirem o que sairia para os consumidores.</summary>
+    public InMemoryEventPublisher Eventos => _servicos!.GetRequiredService<InMemoryEventPublisher>();
+
+    /// <summary>Os eventos publicados na composição de "canais reais" (cada composição tem o próprio dublê).</summary>
+    public InMemoryEventPublisher EventosComCanaisReais => _servicosComCanaisReais!.GetRequiredService<InMemoryEventPublisher>();
+
+    public async Task DisposeAsync()
+    {
+        if (_servicos is not null)
+        {
+            await _servicos.DisposeAsync();
+        }
+
+        if (_servicosComCanaisReais is not null)
+        {
+            await _servicosComCanaisReais.DisposeAsync();
+        }
+    }
 
     /// <summary>Equivale a uma requisição. Sem <paramref name="contexto"/>, nenhum tenant foi estabelecido.</summary>
-    public AsyncServiceScope NovoEscopo(RequestContext? contexto = null)
+    public AsyncServiceScope NovoEscopo(RequestContext? contexto = null) => Abrir(_servicos!, contexto);
+
+    /// <summary>
+    /// Como <see cref="NovoEscopo"/>, mas com a autorização de unidade por canal REAL (o host sobre o Channels): só aceita as
+    /// unidades que o cadastro do canal autoriza.
+    /// </summary>
+    public AsyncServiceScope NovoEscopoComCanaisReais(RequestContext? contexto = null) => Abrir(_servicosComCanaisReais!, contexto);
+
+    private static AsyncServiceScope Abrir(ServiceProvider provedor, RequestContext? contexto)
     {
-        var escopo = _servicos!.CreateAsyncScope();
+        var escopo = provedor.CreateAsyncScope();
         if (contexto is not null)
         {
             escopo.ServiceProvider.GetRequiredService<RequestContextHolder>().Set(contexto);
         }
 
         return escopo;
+    }
+
+    /// <summary>O dublê dos testes de conversas: aceita qualquer unidade em qualquer canal (os testes de autorização trocam-no pelo real).</summary>
+    private sealed class AutorizaQualquerUnidade : IChannelUnitAuthorization
+    {
+        public Task<bool> IsBusinessUnitAuthorizedAsync(ChannelInstanceId channelInstanceId, Guid businessUnitId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(true);
     }
 
     /// <summary>Contexto de sistema (sem usuário), como o do cabeçalho de desenvolvimento, do seed e dos jobs.</summary>

@@ -137,6 +137,12 @@ namespace IaBimeta.Tenancy.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
+                    b.Property<string>("DefaultLocale")
+                        .IsRequired()
+                        .HasMaxLength(35)
+                        .HasColumnType("character varying(35)")
+                        .HasColumnName("default_locale");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(120)
@@ -159,7 +165,10 @@ namespace IaBimeta.Tenancy.Infrastructure.Migrations
                         .IsUnique()
                         .HasDatabaseName("ix_tenants_slug");
 
-                    b.ToTable("tenants", "tenancy");
+                    b.ToTable("tenants", "tenancy", t =>
+                        {
+                            t.HasCheckConstraint("ck_tenants_default_locale", "default_locale ~ '^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$'");
+                        });
                 });
 
             modelBuilder.Entity("IaBimeta.Tenancy.Domain.BusinessUnit", b =>

@@ -28,9 +28,13 @@ public static class TenancyInfrastructureExtensions
         services.AddScoped<IOrganizationRepository, OrganizationRepository>();
         services.AddScoped<TenantRegistrationService>();
         services.AddScoped<ITenantDirectory, TenantDirectory>();
+        services.AddScoped<TenantSettingsService>();
+        services.AddScoped<ITenantSettings>(provider => provider.GetRequiredService<TenantSettingsService>());
         services.AddScoped<OrganizationService>();
         services.AddScoped<IOrganizationDirectory, OrganizationDirectory>();
 
+        services.AddScoped<IBusinessUnitDirectory, BusinessUnitDirectory>();
+        services.AddScoped<IDepartmentDirectory, DepartmentDirectory>();
         services.AddScoped<IBusinessUnitRepository, BusinessUnitRepository>();
         services.AddScoped<IDepartmentRepository, DepartmentRepository>();
         services.AddScoped<BusinessUnitService>();

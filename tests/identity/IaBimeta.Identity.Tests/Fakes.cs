@@ -103,6 +103,10 @@ internal sealed class IdentidadeEmMemoria : IUserRepository, IGrantRepository, I
     public Task<User?> FindByIdAsync(Guid id, CancellationToken cancellationToken) =>
         Task.FromResult(Usuarios.FirstOrDefault(u => u.Id == id));
 
+    // Em memória, a instância guardada já é a "rastreada": alterá-la basta.
+    public Task<User?> FindForUpdateAsync(Guid id, CancellationToken cancellationToken) =>
+        Task.FromResult(Usuarios.FirstOrDefault(u => u.Id == id));
+
     public Task<User?> FindByEmailAsync(string normalizedEmail, CancellationToken cancellationToken) =>
         Task.FromResult(Usuarios.FirstOrDefault(u => u.Email == normalizedEmail));
 
@@ -172,6 +176,40 @@ internal sealed class IdentidadeEmMemoria : IUserRepository, IGrantRepository, I
 
     public Task<IReadOnlyList<UserOrganizationGrant>> ListGrantsAsync(TenantId tenantId, Guid userId, CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<UserOrganizationGrant>>(Concessoes.Where(g => g.TenantId == tenantId && g.UserId == userId).ToList());
+
+    public Dictionary<(TenantId Tenant, string Chave), LoginThrottle> Contagens { get; } = new();
+
+    public Task<LoginThrottle?> FindLoginThrottleAsync(TenantId tenantId, string key, CancellationToken cancellationToken) =>
+        Task.FromResult(Contagens.GetValueOrDefault((tenantId, key)));
+
+    public Task<bool> RecordLoginFailureAsync(TenantId tenantId, string key, DateTimeOffset now, LoginThrottlePolicy policy, CancellationToken cancellationToken)
+    {
+        if (!Contagens.TryGetValue((tenantId, key), out var contagem))
+        {
+            contagem = LoginThrottle.Create(tenantId, key, now);
+            Contagens[(tenantId, key)] = contagem;
+        }
+
+        return Task.FromResult(contagem.RegisterFailure(now, policy));
+    }
+
+    public Task ClearLoginThrottleAsync(TenantId tenantId, string key, CancellationToken cancellationToken)
+    {
+        Contagens.Remove((tenantId, key));
+        return Task.CompletedTask;
+    }
+}
+
+/// <summary>Escritor de auditoria que sempre falha, para provar que a falha nunca vira sucesso silencioso.</summary>
+internal sealed class AuditoriaQueFalha : IAuditWriter
+{
+    public const string Mensagem = "auditoria indisponível (simulada)";
+
+    public Task WriteAsync(AuditEntry entry, CancellationToken cancellationToken = default) =>
+        throw new InvalidOperationException(Mensagem);
+
+    public Task WriteForAuthenticationAsync(TenantId tenantId, Guid? actorUserId, AuditEntry entry, CancellationToken cancellationToken = default) =>
+        throw new InvalidOperationException(Mensagem);
 }
 
 internal static class Senhas

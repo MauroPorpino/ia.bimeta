@@ -82,6 +82,19 @@ public static class TenancyEndpoints
             return setor is null ? Results.NotFound() : Results.Ok(DepartmentResponse.From(setor));
         });
 
+        // Configurações do tenant do contexto. Ler vale para qualquer usuário autenticado do tenant; alterar exige a
+        // concessão de escopo do tenant (TenantSettingsManage).
+        var configuracoes = app.MapGroup("/tenant/settings").AddEndpointFilter(TratarErrosDoTenancy);
+
+        configuracoes.MapGet("/", async (TenantSettingsService servico, CancellationToken ct) =>
+            Results.Ok(new TenantSettingsResponse((await servico.GetDefaultLocaleAsync(ct)).ToString())));
+
+        configuracoes.MapPut("/default-locale", async (SetDefaultLocaleRequest requisicao, TenantSettingsService servico, CancellationToken ct) =>
+        {
+            await servico.SetDefaultLocaleAsync(requisicao.Locale, ct);
+            return Results.NoContent();
+        });
+
         return app;
     }
 
