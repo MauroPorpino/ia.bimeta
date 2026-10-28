@@ -1,4 +1,5 @@
 using IaBimeta.Identity.Application;
+using IaBimeta.Identity.Contracts.Queries;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -39,6 +40,8 @@ public static class IdentityInfrastructureExtensions
         services.AddScoped<AuthenticationService>();
         services.AddScoped<SessionAuthenticator>();
         services.AddScoped<UserService>();
+        services.AddScoped<UserDirectory>();
+        services.AddScoped<IUserDirectory>(provider => provider.GetRequiredService<UserDirectory>());
 
         return services;
     }

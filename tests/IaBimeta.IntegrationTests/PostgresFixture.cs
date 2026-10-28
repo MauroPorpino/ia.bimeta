@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using IaBimeta.Api.Channels;
 using IaBimeta.Audit.Infrastructure;
 using IaBimeta.Channels.Infrastructure;
+using IaBimeta.ContactCenter.Infrastructure;
 using IaBimeta.Conversations.Application;
 using IaBimeta.Conversations.Infrastructure;
 using IaBimeta.Identity.Application;
@@ -82,6 +83,7 @@ public sealed class PostgresFixture : IAsyncLifetime
         }
 
         colecao.AddConversations(_ => ConnectionString);
+        colecao.AddContactCenter(_ => ConnectionString);
         return colecao.BuildServiceProvider(validateScopes: true);
     }
 
@@ -97,6 +99,7 @@ public sealed class PostgresFixture : IAsyncLifetime
         await escopo.ServiceProvider.GetRequiredService<IdentityDbContext>().Database.MigrateAsync();
         await escopo.ServiceProvider.GetRequiredService<ConversationsDbContext>().Database.MigrateAsync();
         await escopo.ServiceProvider.GetRequiredService<ChannelsDbContext>().Database.MigrateAsync();
+        await escopo.ServiceProvider.GetRequiredService<ContactCenterDbContext>().Database.MigrateAsync();
     }
 
     /// <summary>Os eventos publicados pelo Conversations (dublê em memória), para os testes conferirem o que sairia para os consumidores.</summary>

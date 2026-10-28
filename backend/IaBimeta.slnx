@@ -2,6 +2,7 @@
   <Project Path="../tests/audit/IaBimeta.Audit.Tests/IaBimeta.Audit.Tests.csproj" />
   <Project Path="../tests/building-blocks/IaBimeta.SharedKernel.Tests/IaBimeta.SharedKernel.Tests.csproj" />
   <Project Path="../tests/channels/IaBimeta.Channels.Tests/IaBimeta.Channels.Tests.csproj" />
+  <Project Path="../tests/contact-center/IaBimeta.ContactCenter.Tests/IaBimeta.ContactCenter.Tests.csproj" />
   <Project Path="../tests/conversations/IaBimeta.Conversations.Tests/IaBimeta.Conversations.Tests.csproj" />
   <Project Path="../tests/IaBimeta.ArchitectureTests/IaBimeta.ArchitectureTests.csproj" />
   <Project Path="../tests/IaBimeta.IntegrationTests/IaBimeta.IntegrationTests.csproj" />
@@ -17,10 +18,14 @@
   <Project Path="modules/channels/IaBimeta.Channels.Core/IaBimeta.Channels.Core.csproj" />
   <Project Path="modules/channels/IaBimeta.Channels.Infrastructure/IaBimeta.Channels.Infrastructure.csproj" />
   <Project Path="modules/channels/IaBimeta.Channels.Presentation/IaBimeta.Channels.Presentation.csproj" />
+  <Project Path="modules/contact-center/IaBimeta.ContactCenter.Core/IaBimeta.ContactCenter.Core.csproj" />
+  <Project Path="modules/contact-center/IaBimeta.ContactCenter.Infrastructure/IaBimeta.ContactCenter.Infrastructure.csproj" />
+  <Project Path="modules/contact-center/IaBimeta.ContactCenter.Presentation/IaBimeta.ContactCenter.Presentation.csproj" />
   <Project Path="modules/conversations/IaBimeta.Conversations.Contracts/IaBimeta.Conversations.Contracts.csproj" />
   <Project Path="modules/conversations/IaBimeta.Conversations.Core/IaBimeta.Conversations.Core.csproj" />
   <Project Path="modules/conversations/IaBimeta.Conversations.Infrastructure/IaBimeta.Conversations.Infrastructure.csproj" />
   <Project Path="modules/conversations/IaBimeta.Conversations.Presentation/IaBimeta.Conversations.Presentation.csproj" />
+  <Project Path="modules/identity/IaBimeta.Identity.Contracts/IaBimeta.Identity.Contracts.csproj" />
   <Project Path="modules/identity/IaBimeta.Identity.Core/IaBimeta.Identity.Core.csproj" />
   <Project Path="modules/identity/IaBimeta.Identity.Infrastructure/IaBimeta.Identity.Infrastructure.csproj" />
   <Project Path="modules/identity/IaBimeta.Identity.Presentation/IaBimeta.Identity.Presentation.csproj" />

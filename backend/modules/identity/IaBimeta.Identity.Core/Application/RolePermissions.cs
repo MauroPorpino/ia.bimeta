@@ -26,9 +26,11 @@ public static class RolePermissions
         Permission.ConversationRead,
         Permission.ConversationManage,
         Permission.ChannelRead,
+        Permission.QueueRead,
     };
 
     // Quem gere a organização gere os canais dela: o cadastro dos números e das unidades autorizadas muda quem pode atender.
+    // E gere as filas: quem entra em cada fila muda quem atende quem.
     private static readonly Permission[] AdminPermissions =
     {
         Permission.OrganizationRead,
@@ -40,6 +42,8 @@ public static class RolePermissions
         Permission.ConversationManage,
         Permission.ChannelRead,
         Permission.ChannelManage,
+        Permission.QueueRead,
+        Permission.QueueManage,
     };
 
     private static readonly Permission[] TenantAdminExtraPermissions =

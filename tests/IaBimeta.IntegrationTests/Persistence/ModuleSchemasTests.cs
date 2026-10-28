@@ -1,5 +1,6 @@
 using IaBimeta.Audit.Infrastructure;
 using IaBimeta.Channels.Infrastructure;
+using IaBimeta.ContactCenter.Infrastructure;
 using IaBimeta.Conversations.Infrastructure;
 using IaBimeta.Identity.Infrastructure;
 using IaBimeta.Tenancy.Infrastructure;
@@ -15,7 +16,7 @@ namespace IaBimeta.IntegrationTests.Persistence;
 [Collection(PostgresCollection.Name)]
 public sealed class ModuleSchemasTests(PostgresFixture banco)
 {
-    public static TheoryData<string> Modulos => new() { "tenancy", "identity", "audit", "conversations", "channels" };
+    public static TheoryData<string> Modulos => new() { "tenancy", "identity", "audit", "conversations", "channels", "contact_center" };
 
     private static DbContext ContextoDo(IServiceProvider provider, string modulo) => modulo switch
     {
@@ -24,6 +25,7 @@ public sealed class ModuleSchemasTests(PostgresFixture banco)
         "audit" => provider.GetRequiredService<AuditDbContext>(),
         "conversations" => provider.GetRequiredService<ConversationsDbContext>(),
         "channels" => provider.GetRequiredService<ChannelsDbContext>(),
+        "contact_center" => provider.GetRequiredService<ContactCenterDbContext>(),
         _ => throw new ArgumentOutOfRangeException(nameof(modulo)),
     };
 
@@ -70,6 +72,8 @@ public sealed class ModuleSchemasTests(PostgresFixture banco)
         { "channels", "channel_instance_units" },
         { "channels", "channel_routes" },
         { "channels", "channel_secrets" },
+        { "contact_center", "service_queues" },
+        { "contact_center", "queue_memberships" },
     };
 
     [Theory]
@@ -126,7 +130,7 @@ public sealed class ModuleSchemasTests(PostgresFixture banco)
                 "select count(*)::int as \"Value\" from information_schema.referential_constraints rc " +
                 "join information_schema.table_constraints fk on fk.constraint_name = rc.constraint_name and fk.constraint_schema = rc.constraint_schema " +
                 "join information_schema.table_constraints pk on pk.constraint_name = rc.unique_constraint_name and pk.constraint_schema = rc.unique_constraint_schema " +
-                "where fk.table_schema in ('tenancy', 'identity', 'audit', 'conversations') and fk.table_schema <> pk.table_schema")
+                "where fk.table_schema in ('tenancy', 'identity', 'audit', 'conversations', 'channels', 'contact_center') and fk.table_schema <> pk.table_schema")
             .SingleAsync();
 
         Assert.Equal(0, entreEsquemas);

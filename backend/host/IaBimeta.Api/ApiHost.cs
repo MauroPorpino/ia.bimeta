@@ -5,6 +5,8 @@ using IaBimeta.Audit.Infrastructure;
 using IaBimeta.Audit.Presentation;
 using IaBimeta.Channels.Infrastructure;
 using IaBimeta.Channels.Presentation;
+using IaBimeta.ContactCenter.Infrastructure;
+using IaBimeta.ContactCenter.Presentation;
 using IaBimeta.Conversations.Application;
 using IaBimeta.Conversations.Infrastructure;
 using IaBimeta.Conversations.Presentation;
@@ -72,6 +74,10 @@ public static class ApiHost
         builder.Services.AddScoped<IChannelUnitAuthorization, ChannelsBackedUnitAuthorization>();
         builder.Services.AddConversations(provider => ConnectionStringOf(provider, "Conversations"));
 
+        // ContactCenter (etapa 4, primeira fatia): filas de atendimento e atendentes de cada fila. O roteamento, a atribuição e o
+        // handoff IA/humano ainda não existem.
+        builder.Services.AddContactCenter(provider => ConnectionStringOf(provider, "ContactCenter"));
+
         // Enums saem e entram como texto (por exemplo, "HumanAssisted"), não como número.
         builder.Services.ConfigureHttpJsonOptions(opcoes => opcoes.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
@@ -125,6 +131,7 @@ public static class ApiHost
         app.MapAuditEndpoints();
         app.MapConversationsEndpoints();
         app.MapChannelsEndpoints();
+        app.MapContactCenterEndpoints();
 
         if (desenvolvimento.SimulatorEnabled)
         {

@@ -104,11 +104,14 @@ public class GrafoDeProjetosTests
         // não precisa: o RequestContext já chega pronto do host. O Channels usa Tenancy (organização, unidade e setor) e Audit;
         // a matriz também permite Conversations (o Receiver, depois do PRV-2) e Identity, que ainda não são necessários. Não há
         // aresta Conversations -> Channels nem ContactCenter -> Channels: a lista de unidades autorizadas chega ao Conversations
-        // por uma porta dele, implementada pelo host sobre o Channels.Contracts. Aresta nova exige ADR e atualização desta lista.
+        // por uma porta dele, implementada pelo host sobre o Channels.Contracts (ADR 0008). O ContactCenter da etapa 4 (filas e
+        // atendentes) usa Tenancy (organização, unidade e setor), Identity (o usuário existe no tenant) e Audit; a matriz também
+        // permite Conversations, que só entra com o handoff. Aresta nova exige ADR e atualização desta lista.
         Assert.Equal(
             new[]
             {
                 ("Channels", "Audit"), ("Channels", "Tenancy"),
+                ("ContactCenter", "Audit"), ("ContactCenter", "Identity"), ("ContactCenter", "Tenancy"),
                 ("Conversations", "Audit"), ("Conversations", "Tenancy"),
                 ("Identity", "Audit"), ("Identity", "Tenancy"),
                 ("Tenancy", "Audit"),
@@ -128,6 +131,24 @@ public class GrafoDeProjetosTests
         {
             Assert.Contains(esperado, nomes);
         }
+    }
+
+    [Fact]
+    public void O_modulo_ContactCenter_da_etapa_4_existe_sem_Contracts_porque_ninguem_o_consome_ainda_e_o_Identity_ganhou_o_dele()
+    {
+        var nomes = Projetos.Select(p => p.Nome).ToHashSet();
+
+        foreach (var esperado in new[]
+        {
+            "IaBimeta.ContactCenter.Core", "IaBimeta.ContactCenter.Infrastructure", "IaBimeta.ContactCenter.Presentation",
+            "IaBimeta.Identity.Contracts",
+        })
+        {
+            Assert.Contains(esperado, nomes);
+        }
+
+        // PRJ-2: o Contracts só nasce com o primeiro consumidor. Nenhum módulo nem host consome o do ContactCenter ainda.
+        Assert.DoesNotContain("IaBimeta.ContactCenter.Contracts", nomes);
     }
 
     [Fact]

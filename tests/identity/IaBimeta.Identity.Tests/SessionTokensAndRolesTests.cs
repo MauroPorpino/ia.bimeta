@@ -95,7 +95,7 @@ public class RolePermissionsTests
     }
 
     [Fact]
-    public void Gestor_acrescenta_gerir_estrutura_ver_usuarios_ler_e_gerir_conversas_e_ler_canais()
+    public void Gestor_acrescenta_gerir_estrutura_ver_usuarios_ler_e_gerir_conversas_e_ler_canais_e_filas()
     {
         Assert.Equal(
             new HashSet<Permission>
@@ -107,8 +107,42 @@ public class RolePermissionsTests
                 Permission.ConversationRead,
                 Permission.ConversationManage,
                 Permission.ChannelRead,
+                Permission.QueueRead,
             },
             Permissoes(Role.Manager, Organizacao));
+    }
+
+    [Fact]
+    public void Usuario_comum_nao_le_nem_gere_filas()
+    {
+        var permissoes = Permissoes(Role.User, Organizacao);
+
+        Assert.DoesNotContain(Permission.QueueRead, permissoes);
+        Assert.DoesNotContain(Permission.QueueManage, permissoes);
+    }
+
+    [Fact]
+    public void Gestor_le_mas_nao_gere_filas_porque_quem_entra_em_cada_fila_muda_quem_atende_quem()
+    {
+        var permissoes = Permissoes(Role.Manager, Organizacao);
+
+        Assert.Contains(Permission.QueueRead, permissoes);
+        Assert.DoesNotContain(Permission.QueueManage, permissoes);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Administrador_le_e_gere_filas_e_o_escopo_segue_o_da_concessao(bool escopoDoTenant)
+    {
+        var escopo = escopoDoTenant ? (Guid?)null : Organizacao;
+
+        var filas = RolePermissions.Expand(Role.OrganizationAdmin, escopo)
+            .Where(p => p.Permission is Permission.QueueRead or Permission.QueueManage)
+            .ToList();
+
+        Assert.Equal(2, filas.Count);
+        Assert.All(filas, p => Assert.Equal(escopo, p.OrganizationId));
     }
 
     [Fact]

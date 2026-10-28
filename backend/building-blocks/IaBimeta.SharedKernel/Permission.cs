@@ -48,4 +48,10 @@ public enum Permission
 
     /// <summary>Cadastrar contas e números, definir credenciais, autorizar unidades, mudar padrões e a situação dos canais de uma organização.</summary>
     ChannelManage = 13,
+
+    /// <summary>Ler as filas de atendimento de uma organização e os atendentes de cada fila.</summary>
+    QueueRead = 14,
+
+    /// <summary>Criar filas, pausá-las ou retomá-las e gerir os atendentes de cada fila de uma organização.</summary>
+    QueueManage = 15,
 }

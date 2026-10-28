@@ -21,6 +21,9 @@
     <ProjectReference Include="..\..\modules\channels\IaBimeta.Channels.Core\IaBimeta.Channels.Core.csproj" />
     <ProjectReference Include="..\..\modules\channels\IaBimeta.Channels.Infrastructure\IaBimeta.Channels.Infrastructure.csproj" />
     <ProjectReference Include="..\..\modules\channels\IaBimeta.Channels.Presentation\IaBimeta.Channels.Presentation.csproj" />
+    <ProjectReference Include="..\..\modules\contact-center\IaBimeta.ContactCenter.Core\IaBimeta.ContactCenter.Core.csproj" />
+    <ProjectReference Include="..\..\modules\contact-center\IaBimeta.ContactCenter.Infrastructure\IaBimeta.ContactCenter.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\modules\contact-center\IaBimeta.ContactCenter.Presentation\IaBimeta.ContactCenter.Presentation.csproj" />
     <ProjectReference Include="..\..\modules\conversations\IaBimeta.Conversations.Contracts\IaBimeta.Conversations.Contracts.csproj" />
     <ProjectReference Include="..\..\modules\conversations\IaBimeta.Conversations.Core\IaBimeta.Conversations.Core.csproj" />
     <ProjectReference Include="..\..\modules\conversations\IaBimeta.Conversations.Infrastructure\IaBimeta.Conversations.Infrastructure.csproj" />
