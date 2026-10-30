@@ -27,7 +27,8 @@ internal sealed class QueueRepository : IQueueRepository
         }
         catch (DbUpdateException ex) when (PostgresErrors.IsUniqueViolation(ex, ServiceQueueConfiguration.UniqueNameIndex))
         {
-            _db.Entry(queue).State = EntityState.Detached;
+            // A gravação inteira falhou: o que foi guardado junto (a auditoria do sucesso) também não vale e não pode sobrar rastreado.
+            _db.ChangeTracker.Clear();
             throw new QueueNameInUseException();
         }
     }
@@ -49,8 +50,21 @@ internal sealed class QueueRepository : IQueueRepository
         return await consulta.OrderBy(q => q.Name).ThenBy(q => q.Id).ToListAsync(cancellationToken);
     }
 
+    public async Task<IReadOnlyList<ServiceQueue>> ListQueuesOfMemberAsync(Guid userId, CancellationToken cancellationToken) =>
+        await (from m in _db.Memberships.AsNoTracking()
+               where m.UserId == userId
+               join q in _db.Queues.AsNoTracking() on m.QueueId equals q.Id
+               orderby q.Name, q.Id
+               select q).ToListAsync(cancellationToken);
+
     public Task<QueueMembership?> FindMembershipAsync(Guid queueId, Guid userId, CancellationToken cancellationToken) =>
         _db.Memberships.FirstOrDefaultAsync(m => m.QueueId == queueId && m.UserId == userId, cancellationToken);
+
+    public Task<QueueMembership?> FindMembershipReadOnlyAsync(Guid queueId, Guid userId, CancellationToken cancellationToken) =>
+        _db.Memberships.AsNoTracking().FirstOrDefaultAsync(m => m.QueueId == queueId && m.UserId == userId, cancellationToken);
+
+    public async Task<IReadOnlyList<QueueMembership>> ListMembershipsOfUserAsync(Guid userId, CancellationToken cancellationToken) =>
+        await _db.Memberships.AsNoTracking().Where(m => m.UserId == userId).OrderBy(m => m.QueueId).ToListAsync(cancellationToken);
 
     public async Task AddMembershipAsync(QueueMembership membership, CancellationToken cancellationToken)
     {
@@ -61,8 +75,9 @@ internal sealed class QueueRepository : IQueueRepository
         }
         catch (DbUpdateException ex) when (ex.InnerException is Npgsql.PostgresException { SqlState: Npgsql.PostgresErrorCodes.UniqueViolation })
         {
-            // Outra requisição colocou o mesmo atendente na fila primeiro: quem repetir muda o papel do que já existe.
-            _db.Entry(membership).State = EntityState.Detached;
+            // Outra requisição colocou o mesmo atendente na fila primeiro: quem repetir muda o papel do que já existe. A gravação inteira
+            // falhou, então a auditoria guardada junto também não vale e não pode sobrar rastreada.
+            _db.ChangeTracker.Clear();
             throw new ContactCenterConflictException();
         }
     }

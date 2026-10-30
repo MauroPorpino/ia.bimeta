@@ -26,6 +26,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\backend\host\IaBimeta.Api\IaBimeta.Api.csproj" />
+    <ProjectReference Include="..\..\backend\host\IaBimeta.Worker\IaBimeta.Worker.csproj" />
+    <ProjectReference Include="..\..\backend\building-blocks\IaBimeta.Messaging\IaBimeta.Messaging.csproj" />
     <ProjectReference Include="..\..\backend\building-blocks\IaBimeta.SharedKernel\IaBimeta.SharedKernel.csproj" />
     <ProjectReference Include="..\..\backend\modules\tenancy\IaBimeta.Tenancy.Contracts\IaBimeta.Tenancy.Contracts.csproj" />
     <ProjectReference Include="..\..\backend\modules\tenancy\IaBimeta.Tenancy.Core\IaBimeta.Tenancy.Core.csproj" />

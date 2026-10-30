@@ -138,6 +138,13 @@ internal static class RegrasDeArquitetura
                     violacoes.Add(new Violacao("DEP-4", aresta));
                 }
 
+                // ARQ-20 e DEP-6: a implementação do Messaging só é referenciada pelas Infrastructure dos módulos e pelos hosts. O Core, o
+                // Contracts e o Presentation só conhecem as abstrações do SharedKernel (o evento, o publicador e o handler).
+                if (destino == "IaBimeta.Messaging" && de is { Tipo: TipoDeProjeto.Modulo, Camada: not "Infrastructure" })
+                {
+                    violacoes.Add(new Violacao("ARQ-20", aresta));
+                }
+
                 // O SharedKernel não referencia projeto algum.
                 if (projeto.Nome == "IaBimeta.SharedKernel" && para.Tipo != TipoDeProjeto.Teste)
                 {

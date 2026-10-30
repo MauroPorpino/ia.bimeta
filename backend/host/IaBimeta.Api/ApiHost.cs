@@ -1,10 +1,12 @@
 using IaBimeta.Api.Channels;
+using IaBimeta.Api.ContactCenter;
 using IaBimeta.Api.Development;
 using IaBimeta.Api.RequestContexts;
 using IaBimeta.Audit.Infrastructure;
 using IaBimeta.Audit.Presentation;
 using IaBimeta.Channels.Infrastructure;
 using IaBimeta.Channels.Presentation;
+using IaBimeta.ContactCenter.Application;
 using IaBimeta.ContactCenter.Infrastructure;
 using IaBimeta.ContactCenter.Presentation;
 using IaBimeta.Conversations.Application;
@@ -12,6 +14,7 @@ using IaBimeta.Conversations.Infrastructure;
 using IaBimeta.Conversations.Presentation;
 using IaBimeta.Identity.Infrastructure;
 using IaBimeta.Identity.Presentation;
+using IaBimeta.Messaging;
 using IaBimeta.SharedKernel;
 using IaBimeta.Tenancy.Infrastructure;
 using IaBimeta.Tenancy.Presentation;
@@ -56,8 +59,11 @@ public static class ApiHost
             provider => ConnectionStringOf(provider, "Identity"),
             opcoes => builder.Configuration.GetSection("Identity").Bind(opcoes));
 
-        // Etapa 3: o publicador de eventos é o dublê em memória (NÃO durável). O outbox transacional e o relay nascem na
-        // etapa 4 (BOUNDARIES.md §12.12) e entram aqui no lugar dele, sem mudar os módulos.
+        // Etapa 4: os eventos duráveis vão para o OUTBOX do módulo emissor, gravados na mesma transação da mudança de estado
+        // (BOUNDARIES.md §12.9). Quem os entrega aos consumidores (o relay) é o Worker, que roda como processo à parte: o Api
+        // só escreve. O dublê em memória continua registrado SÓ para o simulador de desenvolvimento enxergar os eventos
+        // recentes; ele não é durável e não entrega nada a ninguém.
+        builder.Services.AddMessaging(mensageria => builder.Configuration.GetSection("Messaging").Bind(mensageria));
         builder.Services.AddSingleton<InMemoryEventPublisher>();
         builder.Services.AddSingleton<IEventPublisher>(provider => provider.GetRequiredService<InMemoryEventPublisher>());
 
@@ -74,8 +80,11 @@ public static class ApiHost
         builder.Services.AddScoped<IChannelUnitAuthorization, ChannelsBackedUnitAuthorization>();
         builder.Services.AddConversations(provider => ConnectionStringOf(provider, "Conversations"));
 
-        // ContactCenter (etapa 4, primeira fatia): filas de atendimento e atendentes de cada fila. O roteamento, a atribuição e o
-        // handoff IA/humano ainda não existem.
+        // ContactCenter (etapa 4): filas, atendentes, entrada de conversas, atribuição, transferência e handoff IA/humano. O
+        // ContactCenter chama o Conversations por uma porta própria; a do host age com o contexto de sistema do mesmo tenant,
+        // depois de o ContactCenter decidir o acesso pela fila. Registrada ANTES do AddContactCenter, que só instala a padrão
+        // (a que usa o contexto de quem chamou) se não houver outra.
+        builder.Services.AddScoped<IConversationGateway, ElevatedConversationGateway>();
         builder.Services.AddContactCenter(provider => ConnectionStringOf(provider, "ContactCenter"));
 
         // Enums saem e entram como texto (por exemplo, "HumanAssisted"), não como número.

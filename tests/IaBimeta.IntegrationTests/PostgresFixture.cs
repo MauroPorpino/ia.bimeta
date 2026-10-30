@@ -1,13 +1,17 @@
 using System.Security.Cryptography;
 using IaBimeta.Api.Channels;
+using IaBimeta.Api.ContactCenter;
 using IaBimeta.Audit.Infrastructure;
 using IaBimeta.Channels.Infrastructure;
+using IaBimeta.ContactCenter.Application;
 using IaBimeta.ContactCenter.Infrastructure;
 using IaBimeta.Conversations.Application;
 using IaBimeta.Conversations.Infrastructure;
 using IaBimeta.Identity.Application;
 using IaBimeta.Identity.Domain;
 using IaBimeta.Identity.Infrastructure;
+using IaBimeta.IntegrationTests.Messaging;
+using IaBimeta.Messaging;
 using IaBimeta.SharedKernel;
 using IaBimeta.Tenancy.Application;
 using IaBimeta.Tenancy.Contracts;
@@ -45,6 +49,7 @@ public sealed class PostgresFixture : IAsyncLifetime
     private ServiceProvider? _servicos;
     private ServiceProvider? _servicosComCanaisReais;
     private ServiceProvider? _servicosComCanaisIndisponiveis;
+    private ServiceProvider? _servicosComMensageria;
 
     public string ConnectionString { get; } = TestDatabase.ConnectionString;
 
@@ -54,9 +59,16 @@ public sealed class PostgresFixture : IAsyncLifetime
     /// que o cadastro autoriza. No de "canais indisponíveis", é a mesma implementação do host, mas o banco do Channels não responde
     /// (um banco que não existe), enquanto o do Conversations e os demais funcionam: a falha da consulta de autorização, de verdade.
     /// </summary>
-    private ServiceProvider Compor(bool canaisReais, bool canaisIndisponiveis = false)
+    private ServiceProvider Compor(bool canaisReais, bool canaisIndisponiveis = false, bool mensageria = false)
     {
         var colecao = new ServiceCollection();
+        if (mensageria)
+        {
+            // O tempo só anda quando o teste manda: a espera entre tentativas e o vencimento do lease se provam sem esperar de verdade.
+            colecao.AddSingleton<TimeProvider>(RelogioDaMensageria);
+            colecao.AddLogging();
+        }
+
         colecao.AddScoped<RequestContextHolder>();
         colecao.AddScoped<IRequestContextAccessor>(provider => provider.GetRequiredService<RequestContextHolder>());
         colecao.AddAudit(_ => ConnectionString);
@@ -82,8 +94,32 @@ public sealed class PostgresFixture : IAsyncLifetime
             colecao.AddScoped<IChannelUnitAuthorization, AutorizaQualquerUnidade>();
         }
 
+        if (mensageria)
+        {
+            // O outbox durável: o escritor do Messaging faz os comandos do Conversations gravarem o evento na mesma transação do estado.
+            colecao.AddMessaging(opcoes =>
+            {
+                opcoes.MaxAttempts = 4;
+                opcoes.BaseBackoff = TimeSpan.FromSeconds(10);
+                opcoes.MaxBackoff = TimeSpan.FromMinutes(5);
+                opcoes.LeaseDuration = TimeSpan.FromMinutes(1);
+                opcoes.BatchSize = 20;
+                opcoes.ProcessedRetention = TimeSpan.FromDays(1);
+            });
+            colecao.AddSingleton<IMessagingScopeInitializer, EscopoDeEntregaDeTeste>();
+            colecao.AddEventHandler<ManipuladorDeTeste>();
+        }
+
         colecao.AddConversations(_ => ConnectionString);
+
+        // Como no host: o ContactCenter chama o Conversations pela porta que age com o contexto de sistema do mesmo tenant.
+        colecao.AddScoped<IConversationGateway, ElevatedConversationGateway>();
         colecao.AddContactCenter(_ => ConnectionString);
+        if (mensageria)
+        {
+            colecao.AddOutboxRelay<ConversationsDbContext>();
+        }
+
         return colecao.BuildServiceProvider(validateScopes: true);
     }
 
@@ -92,6 +128,7 @@ public sealed class PostgresFixture : IAsyncLifetime
         _servicos = Compor(canaisReais: false);
         _servicosComCanaisReais = Compor(canaisReais: true);
         _servicosComCanaisIndisponiveis = Compor(canaisReais: true, canaisIndisponiveis: true);
+        _servicosComMensageria = Compor(canaisReais: true, mensageria: true);
 
         await using var escopo = _servicos.CreateAsyncScope();
         await escopo.ServiceProvider.GetRequiredService<AuditDbContext>().Database.MigrateAsync();
@@ -100,7 +137,25 @@ public sealed class PostgresFixture : IAsyncLifetime
         await escopo.ServiceProvider.GetRequiredService<ConversationsDbContext>().Database.MigrateAsync();
         await escopo.ServiceProvider.GetRequiredService<ChannelsDbContext>().Database.MigrateAsync();
         await escopo.ServiceProvider.GetRequiredService<ContactCenterDbContext>().Database.MigrateAsync();
+
+        // O relay processa o outbox INTEIRO (todos os tenants): o que sobrou de execuções anteriores e dos testes da API (que gravam
+        // eventos e não rodam relay) é dado de outros testes. Marca-o como processado antes de começar, para os testes de entrega
+        // verem só o que eles mesmos geram.
+        await escopo.ServiceProvider.GetRequiredService<ConversationsDbContext>().Database.ExecuteSqlRawAsync(
+            "UPDATE conversations.outbox_message SET state = 3, processed_at = now(), lease_token = NULL, lease_owner = NULL, lease_expires_at = NULL WHERE state IN (1, 2)");
     }
+
+    /// <summary>O relógio da composição de mensageria, controlado pelo teste.</summary>
+    public RelogioDeTeste RelogioDaMensageria { get; } = new();
+
+    /// <summary>A composição de mensageria (outbox durável, relay e handlers, com o relógio de teste): a raiz de serviços, onde o relay vive como singleton.</summary>
+    public IServiceProvider ServicosComMensageria => _servicosComMensageria!;
+
+    /// <summary>Os eventos entregues em memória na composição de mensageria (o dublê continua registrado, como no host).</summary>
+    public InMemoryEventPublisher EventosComMensageria => _servicosComMensageria!.GetRequiredService<InMemoryEventPublisher>();
+
+    /// <summary>Como <see cref="NovoEscopo"/>, mas na composição de mensageria (o evento vai também para o outbox durável).</summary>
+    public AsyncServiceScope NovoEscopoComMensageria(RequestContext? contexto = null) => Abrir(_servicosComMensageria!, contexto);
 
     /// <summary>Os eventos publicados pelo Conversations (dublê em memória), para os testes conferirem o que sairia para os consumidores.</summary>
     public InMemoryEventPublisher Eventos => _servicos!.GetRequiredService<InMemoryEventPublisher>();
@@ -126,6 +181,11 @@ public sealed class PostgresFixture : IAsyncLifetime
         if (_servicosComCanaisIndisponiveis is not null)
         {
             await _servicosComCanaisIndisponiveis.DisposeAsync();
+        }
+
+        if (_servicosComMensageria is not null)
+        {
+            await _servicosComMensageria.DisposeAsync();
         }
     }
 

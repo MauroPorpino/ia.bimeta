@@ -25,7 +25,7 @@ public sealed class ServiceQueueService
     private readonly IUserDirectory _users;
     private readonly IRequestContextAccessor _context;
     private readonly TimeProvider _clock;
-    private readonly IAuditWriter _audit;
+    private readonly IDeferredAudit _audit;
 
     public ServiceQueueService(
         IQueueRepository repository,
@@ -35,7 +35,7 @@ public sealed class ServiceQueueService
         IUserDirectory users,
         IRequestContextAccessor context,
         TimeProvider clock,
-        IAuditWriter audit)
+        IDeferredAudit audit)
     {
         _repository = repository;
         _organizations = organizations;
@@ -78,9 +78,12 @@ public sealed class ServiceQueueService
         }
 
         var fila = ServiceQueue.Create(contexto.TenantId, organizationId, businessUnitId, departmentId, name, _clock.GetUtcNow());
-        await _repository.AddQueueAsync(fila, cancellationToken);
 
-        await _audit.WriteAsync(new AuditEntry("contact-center.queue.create", QueueResource, fila.Id.ToString(), AuditOutcome.Success), cancellationToken);
+        // A auditoria do sucesso é guardada na MESMA gravação da fila (a mudança e a intenção de auditá-la vivem ou somem juntas) e entregue
+        // à trilha depois da confirmação; se o processo cair no meio, a reconciliação a entrega.
+        _audit.Defer(new AuditEntry("contact-center.queue.create", QueueResource, fila.Id.ToString(), AuditOutcome.Success));
+        await _repository.AddQueueAsync(fila, cancellationToken);
+        await AuditedAccess.DeliverAsync(_audit, cancellationToken);
         return ServiceQueueView.From(fila);
     }
 
@@ -108,6 +111,18 @@ public sealed class ServiceQueueService
         return filas.Select(ServiceQueueView.From).ToList();
     }
 
+    /// <summary>
+    /// As filas em que o usuário autenticado é atendente. O atendente comum não lê as filas da organização (não tem
+    /// <see cref="Permission.QueueRead"/>), mas precisa saber em quais ele atende: a participação dele é o acesso.
+    /// </summary>
+    /// <exception cref="AuthenticationRequiredException">O contexto não tem usuário autenticado.</exception>
+    public async Task<IReadOnlyList<ServiceQueueView>> ListMineAsync(CancellationToken cancellationToken = default)
+    {
+        var usuario = _context.GetRequired().RequirePrincipal().UserId;
+        var filas = await _repository.ListQueuesOfMemberAsync(usuario, cancellationToken);
+        return filas.Select(ServiceQueueView.From).ToList();
+    }
+
     /// <summary>Pausa a fila (idempotente: repetir não muda nada nem grava auditoria).</summary>
     public Task<ServiceQueueView> PauseAsync(Guid id, CancellationToken cancellationToken = default) =>
         ChangeStatusAsync(id, "contact-center.queue.pause", (fila, agora) => fila.Pause(agora), cancellationToken);
@@ -123,8 +138,9 @@ public sealed class ServiceQueueService
 
         if (change(fila, _clock.GetUtcNow()))
         {
+            _audit.Defer(new AuditEntry(operation, QueueResource, fila.Id.ToString(), AuditOutcome.Success));
             await _repository.SaveChangesAsync(cancellationToken);
-            await _audit.WriteAsync(new AuditEntry(operation, QueueResource, fila.Id.ToString(), AuditOutcome.Success), cancellationToken);
+            await AuditedAccess.DeliverAsync(_audit, cancellationToken);
         }
 
         return ServiceQueueView.From(fila);
@@ -157,15 +173,17 @@ public sealed class ServiceQueueService
         if (existente is null)
         {
             var novo = QueueMembership.Create(contexto.TenantId, fila.Id, userId, role, contexto.Principal?.UserId, _clock.GetUtcNow());
+            _audit.Defer(new AuditEntry("contact-center.queue.member.add", MemberResource, recurso, AuditOutcome.Success));
             await _repository.AddMembershipAsync(novo, cancellationToken);
-            await _audit.WriteAsync(new AuditEntry("contact-center.queue.member.add", MemberResource, recurso, AuditOutcome.Success), cancellationToken);
+            await AuditedAccess.DeliverAsync(_audit, cancellationToken);
             return QueueMemberView.From(novo);
         }
 
         if (existente.ChangeRole(role))
         {
+            _audit.Defer(new AuditEntry("contact-center.queue.member.role", MemberResource, recurso, AuditOutcome.Success));
             await _repository.SaveChangesAsync(cancellationToken);
-            await _audit.WriteAsync(new AuditEntry("contact-center.queue.member.role", MemberResource, recurso, AuditOutcome.Success), cancellationToken);
+            await AuditedAccess.DeliverAsync(_audit, cancellationToken);
         }
 
         return QueueMemberView.From(existente);
@@ -183,8 +201,9 @@ public sealed class ServiceQueueService
             return false;
         }
 
+        _audit.Defer(new AuditEntry("contact-center.queue.member.remove", MemberResource, $"{fila.Id}:{userId}", AuditOutcome.Success));
         await _repository.RemoveMembershipAsync(existente, cancellationToken);
-        await _audit.WriteAsync(new AuditEntry("contact-center.queue.member.remove", MemberResource, $"{fila.Id}:{userId}", AuditOutcome.Success), cancellationToken);
+        await AuditedAccess.DeliverAsync(_audit, cancellationToken);
         return true;
     }
 

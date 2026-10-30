@@ -63,6 +63,40 @@ public class RegrasSinteticasTests
     }
 
     [Fact]
+    public void ARQ_20_acusa_o_Core_o_Contracts_e_o_Presentation_que_referenciam_a_implementacao_do_Messaging()
+    {
+        foreach (var projeto in new[] { "IaBimeta.Tenancy.Core", "IaBimeta.Tenancy.Contracts", "IaBimeta.Tenancy.Presentation" })
+        {
+            var grafo = GrafoBom().Where(p => p.Nome != projeto).ToList();
+            grafo.Add(P("IaBimeta.Messaging", new[] { "IaBimeta.SharedKernel" }));
+            grafo.Add(P(projeto, new[] { "IaBimeta.SharedKernel", "IaBimeta.Messaging" }));
+
+            Assert.Contains(Verificar(grafo), v => v.Regra == "ARQ-20" && v.Detalhe.Contains($"{projeto} -> IaBimeta.Messaging"));
+        }
+    }
+
+    [Fact]
+    public void ARQ_20_aceita_a_Infrastructure_e_os_hosts_referenciando_o_Messaging()
+    {
+        var grafo = GrafoBom();
+        grafo.Add(P("IaBimeta.Messaging", new[] { "IaBimeta.SharedKernel" }));
+        grafo.RemoveAll(p => p.Nome is "IaBimeta.Tenancy.Infrastructure" or "IaBimeta.Api");
+        grafo.Add(P("IaBimeta.Tenancy.Infrastructure", new[] { "IaBimeta.Tenancy.Core", "IaBimeta.Messaging" }, new[] { "Npgsql.EntityFrameworkCore.PostgreSQL" }));
+        grafo.Add(P("IaBimeta.Api", new[] { "IaBimeta.Tenancy.Infrastructure", "IaBimeta.Tenancy.Presentation", "IaBimeta.Identity.Core", "IaBimeta.Messaging" }));
+
+        Assert.DoesNotContain(Verificar(grafo), v => v.Regra is "ARQ-20" or "DEP-4");
+    }
+
+    [Fact]
+    public void O_bloco_Messaging_que_referencia_um_modulo_e_acusado_por_DEP_4()
+    {
+        var grafo = GrafoBom();
+        grafo.Add(P("IaBimeta.Messaging", new[] { "IaBimeta.SharedKernel", "IaBimeta.Tenancy.Contracts" }));
+
+        Assert.Contains(Verificar(grafo), v => v.Regra == "DEP-4" && v.Detalhe.Contains("IaBimeta.Messaging -> IaBimeta.Tenancy.Contracts"));
+    }
+
+    [Fact]
     public void ARQ_05_acusa_referencia_entre_modulos_que_nao_e_a_Contracts()
     {
         var grafo = Com(P("IaBimeta.Identity.Core", new[] { "IaBimeta.Tenancy.Core" }));

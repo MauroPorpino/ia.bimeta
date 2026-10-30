@@ -14,6 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\building-blocks\IaBimeta.Messaging\IaBimeta.Messaging.csproj" />
     <ProjectReference Include="..\..\building-blocks\IaBimeta.SharedKernel\IaBimeta.SharedKernel.csproj" />
     <ProjectReference Include="..\..\modules\audit\IaBimeta.Audit.Infrastructure\IaBimeta.Audit.Infrastructure.csproj" />
     <ProjectReference Include="..\..\modules\audit\IaBimeta.Audit.Presentation\IaBimeta.Audit.Presentation.csproj" />

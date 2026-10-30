@@ -22,6 +22,7 @@ internal sealed class CenarioDeConversas
         Dubles,
         Reais,
         Indisponiveis,
+        Mensageria,
     }
 
     private readonly Canais _canais;
@@ -45,11 +46,15 @@ internal sealed class CenarioDeConversas
     /// identificador. Verdadeiro: é a implementação do host sobre o Channels, e só as unidades que o cadastro do canal autoriza
     /// são aceitas (use <see cref="CriarCanalAsync"/> para cadastrar o número).
     /// </param>
-    public static async Task<CenarioDeConversas> CriarAsync(PostgresFixture banco, string prefixo, bool canaisReais = false)
+    /// <param name="mensageria">
+    /// Verdadeiro: a composição de mensageria (canais reais, outbox durável, relay e handlers, com o relógio de teste). Cada evento
+    /// de estado fica gravado no outbox na mesma transação da mudança, e o teste roda o relay quando quer a entrega.
+    /// </param>
+    public static async Task<CenarioDeConversas> CriarAsync(PostgresFixture banco, string prefixo, bool canaisReais = false, bool mensageria = false)
     {
         var tenant = await banco.RegistrarTenantAsync(prefixo);
         var organizacao = await banco.CriarOrganizacaoAsync(tenant, $"Organização {prefixo}");
-        return new CenarioDeConversas(banco, tenant, organizacao.Id, canaisReais ? Canais.Reais : Canais.Dubles);
+        return new CenarioDeConversas(banco, tenant, organizacao.Id, mensageria ? Canais.Mensageria : canaisReais ? Canais.Reais : Canais.Dubles);
     }
 
     /// <summary>
@@ -58,10 +63,14 @@ internal sealed class CenarioDeConversas
     /// </summary>
     public CenarioDeConversas ComCanaisIndisponiveis() => new(_banco, Tenant, OrganizacaoId, Canais.Indisponiveis);
 
+    /// <summary>O banco de testes que este cenário usa (para os testes de mensageria alcançarem a composição de mensageria).</summary>
+    internal PostgresFixture Banco => _banco;
+
     private AsyncServiceScope NovoEscopo(RequestContext? contexto) => _canais switch
     {
         Canais.Reais => _banco.NovoEscopoComCanaisReais(contexto),
         Canais.Indisponiveis => _banco.NovoEscopoComCanaisIndisponiveis(contexto),
+        Canais.Mensageria => _banco.NovoEscopoComMensageria(contexto),
         _ => _banco.NovoEscopo(contexto),
     };
 
@@ -69,6 +78,7 @@ internal sealed class CenarioDeConversas
     {
         Canais.Reais => _banco.EventosComCanaisReais,
         Canais.Indisponiveis => _banco.EventosComCanaisIndisponiveis,
+        Canais.Mensageria => _banco.EventosComMensageria,
         _ => _banco.Eventos,
     };
 

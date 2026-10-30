@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <OutputType>Exe</OutputType>
+    <!-- Segredos de desenvolvimento (string de conexão) ficam fora do repositório: dotnet user-secrets. -->
+    <UserSecretsId>7d1c2f4e-6a3b-4e8a-9c52-1b0f3a6d8e21</UserSecretsId>
+  </PropertyGroup>
+
+  <!-- Os testes de integração sobem o mesmo host (e a mesma composição) que o processo real. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="IaBimeta.IntegrationTests" />
+  </ItemGroup>
+
+  <!-- O Generic Host (Microsoft.Extensions.Hosting) vem do framework: nenhum pacote novo. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <!-- O SDK padrão não importa os espaços do Generic Host, como o SDK Worker faria. -->
+  <ItemGroup>
+    <Using Include="Microsoft.Extensions.Configuration" />
+    <Using Include="Microsoft.Extensions.DependencyInjection" />
+    <Using Include="Microsoft.Extensions.Hosting" />
+    <Using Include="Microsoft.Extensions.Logging" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\building-blocks\IaBimeta.Messaging\IaBimeta.Messaging.csproj" />
+    <ProjectReference Include="..\..\building-blocks\IaBimeta.SharedKernel\IaBimeta.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\modules\audit\IaBimeta.Audit.Infrastructure\IaBimeta.Audit.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\modules\channels\IaBimeta.Channels.Contracts\IaBimeta.Channels.Contracts.csproj" />
+    <ProjectReference Include="..\..\modules\channels\IaBimeta.Channels.Core\IaBimeta.Channels.Core.csproj" />
+    <ProjectReference Include="..\..\modules\channels\IaBimeta.Channels.Infrastructure\IaBimeta.Channels.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\modules\contact-center\IaBimeta.ContactCenter.Core\IaBimeta.ContactCenter.Core.csproj" />
+    <ProjectReference Include="..\..\modules\contact-center\IaBimeta.ContactCenter.Infrastructure\IaBimeta.ContactCenter.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\modules\conversations\IaBimeta.Conversations.Contracts\IaBimeta.Conversations.Contracts.csproj" />
+    <ProjectReference Include="..\..\modules\conversations\IaBimeta.Conversations.Core\IaBimeta.Conversations.Core.csproj" />
+    <ProjectReference Include="..\..\modules\conversations\IaBimeta.Conversations.Infrastructure\IaBimeta.Conversations.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\modules\identity\IaBimeta.Identity.Core\IaBimeta.Identity.Core.csproj" />
+    <ProjectReference Include="..\..\modules\identity\IaBimeta.Identity.Infrastructure\IaBimeta.Identity.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\modules\tenancy\IaBimeta.Tenancy.Contracts\IaBimeta.Tenancy.Contracts.csproj" />
+    <ProjectReference Include="..\..\modules\tenancy\IaBimeta.Tenancy.Core\IaBimeta.Tenancy.Core.csproj" />
+    <ProjectReference Include="..\..\modules\tenancy\IaBimeta.Tenancy.Infrastructure\IaBimeta.Tenancy.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

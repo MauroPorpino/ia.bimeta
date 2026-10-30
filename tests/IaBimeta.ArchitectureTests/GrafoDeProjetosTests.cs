@@ -104,19 +104,39 @@ public class GrafoDeProjetosTests
         // não precisa: o RequestContext já chega pronto do host. O Channels usa Tenancy (organização, unidade e setor) e Audit;
         // a matriz também permite Conversations (o Receiver, depois do PRV-2) e Identity, que ainda não são necessários. Não há
         // aresta Conversations -> Channels nem ContactCenter -> Channels: a lista de unidades autorizadas chega ao Conversations
-        // por uma porta dele, implementada pelo host sobre o Channels.Contracts (ADR 0008). O ContactCenter da etapa 4 (filas e
-        // atendentes) usa Tenancy (organização, unidade e setor), Identity (o usuário existe no tenant) e Audit; a matriz também
-        // permite Conversations, que só entra com o handoff. Aresta nova exige ADR e atualização desta lista.
+        // por uma porta dele, implementada pelo host sobre o Channels.Contracts (ADR 0008). O ContactCenter da etapa 4 usa
+        // Tenancy (organização, unidade e setor), Identity (o usuário existe no tenant), Audit e Conversations (a atribuição e o
+        // handoff IA/humano chamam o estado de atendimento pelos contratos dele; a aresta já estava na matriz). Aresta nova exige
+        // ADR e atualização desta lista.
         Assert.Equal(
             new[]
             {
                 ("Channels", "Audit"), ("Channels", "Tenancy"),
-                ("ContactCenter", "Audit"), ("ContactCenter", "Identity"), ("ContactCenter", "Tenancy"),
+                ("ContactCenter", "Audit"), ("ContactCenter", "Conversations"), ("ContactCenter", "Identity"), ("ContactCenter", "Tenancy"),
                 ("Conversations", "Audit"), ("Conversations", "Tenancy"),
                 ("Identity", "Audit"), ("Identity", "Tenancy"),
                 ("Tenancy", "Audit"),
             },
             arestas);
+    }
+
+    [Fact]
+    public void O_Worker_e_o_Messaging_da_etapa_4_existem_e_so_Infrastructure_e_hosts_referenciam_a_implementacao_do_Messaging()
+    {
+        var nomes = Projetos.Select(p => p.Nome).ToHashSet();
+        Assert.Contains("IaBimeta.Worker", nomes);
+        Assert.Contains("IaBimeta.Messaging", nomes);
+
+        // ARQ-20 tem o que verificar: a Infrastructure do Conversations e a do ContactCenter, e os dois hosts, o referenciam.
+        var quemReferencia = Projetos.Where(p => p.Referencias.Contains("IaBimeta.Messaging")).Select(p => p.Nome).ToList();
+        Assert.Contains("IaBimeta.Conversations.Infrastructure", quemReferencia);
+        Assert.Contains("IaBimeta.ContactCenter.Infrastructure", quemReferencia);
+        Assert.Contains("IaBimeta.Api", quemReferencia);
+        Assert.Contains("IaBimeta.Worker", quemReferencia);
+
+        // O Messaging é bloco: só referencia o SharedKernel (e nenhum módulo, DEP-4 e DEP-6).
+        Assert.Equal(new[] { "IaBimeta.SharedKernel" }, Projetos.Single(p => p.Nome == "IaBimeta.Messaging").Referencias.ToArray());
+        SemViolacoesDe("ARQ-20", "DEP-4", "HOST");
     }
 
     [Fact]

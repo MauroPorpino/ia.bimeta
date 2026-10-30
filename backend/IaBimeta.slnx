@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="../tests/audit/IaBimeta.Audit.Tests/IaBimeta.Audit.Tests.csproj" />
+  <Project Path="../tests/building-blocks/IaBimeta.Messaging.Tests/IaBimeta.Messaging.Tests.csproj" />
   <Project Path="../tests/building-blocks/IaBimeta.SharedKernel.Tests/IaBimeta.SharedKernel.Tests.csproj" />
   <Project Path="../tests/channels/IaBimeta.Channels.Tests/IaBimeta.Channels.Tests.csproj" />
   <Project Path="../tests/contact-center/IaBimeta.ContactCenter.Tests/IaBimeta.ContactCenter.Tests.csproj" />
@@ -8,8 +9,10 @@
   <Project Path="../tests/IaBimeta.IntegrationTests/IaBimeta.IntegrationTests.csproj" />
   <Project Path="../tests/identity/IaBimeta.Identity.Tests/IaBimeta.Identity.Tests.csproj" />
   <Project Path="../tests/tenancy/IaBimeta.Tenancy.Tests/IaBimeta.Tenancy.Tests.csproj" />
+  <Project Path="building-blocks/IaBimeta.Messaging/IaBimeta.Messaging.csproj" />
   <Project Path="building-blocks/IaBimeta.SharedKernel/IaBimeta.SharedKernel.csproj" />
   <Project Path="host/IaBimeta.Api/IaBimeta.Api.csproj" />
+  <Project Path="host/IaBimeta.Worker/IaBimeta.Worker.csproj" />
   <Project Path="modules/audit/IaBimeta.Audit.Contracts/IaBimeta.Audit.Contracts.csproj" />
   <Project Path="modules/audit/IaBimeta.Audit.Core/IaBimeta.Audit.Core.csproj" />
   <Project Path="modules/audit/IaBimeta.Audit.Infrastructure/IaBimeta.Audit.Infrastructure.csproj" />
