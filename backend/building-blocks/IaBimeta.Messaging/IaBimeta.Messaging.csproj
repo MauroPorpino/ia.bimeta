@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <!-- Os testes de integração exercitam o relay, a espera entre tentativas e a porta de idempotência direto nos componentes. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="IaBimeta.IntegrationTests" />
+    <InternalsVisibleTo Include="IaBimeta.Messaging.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Mesmas versões das Infrastructure dos módulos: a mecânica de filas roda dentro delas (BOUNDARIES.md §12.1). -->
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.14" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.14" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\IaBimeta.SharedKernel\IaBimeta.SharedKernel.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -114,7 +114,10 @@ internal static class ConversationMapping
             linha.EffectiveLocale,
             linha.LocaleSource,
             linha.ContactPreferredLocale,
-            s.DepartmentId);
+            s.DepartmentId,
+            s.LastMessageSeq,
+            s.HandlingPeriod,
+            s.PlacementEpoch);
     }
 
     public static SessionTransferView ToView(this SessionTransfer t) =>

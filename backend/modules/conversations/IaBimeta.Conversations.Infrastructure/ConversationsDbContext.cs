@@ -1,5 +1,6 @@
 using IaBimeta.Conversations.Domain;
 using IaBimeta.Conversations.Infrastructure.Configurations;
+using IaBimeta.Messaging;
 using IaBimeta.SharedKernel;
 using Microsoft.EntityFrameworkCore;
 
@@ -53,6 +54,9 @@ public sealed class ConversationsDbContext : DbContext
         modelBuilder.ApplyConfiguration(new HandlingTransitionConfiguration());
         modelBuilder.ApplyConfiguration(new MessageTranslationConfiguration());
         modelBuilder.ApplyConfiguration(new SessionTransferConfiguration());
+
+        // Outbox de eventos duráveis do módulo (BOUNDARIES.md §12.1): gravado na mesma transação da mudança de estado.
+        modelBuilder.ConfigureOutbox();
 
         modelBuilder.Entity<Contact>().HasQueryFilter(e => e.TenantId == TenantAtual);
         modelBuilder.Entity<ServiceSession>().HasQueryFilter(e => e.TenantId == TenantAtual);

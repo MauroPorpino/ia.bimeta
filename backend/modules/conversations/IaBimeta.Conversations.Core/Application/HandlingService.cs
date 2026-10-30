@@ -20,7 +20,6 @@ public sealed class HandlingService : IHandlingCommands
     private readonly IConversationStore _store;
     private readonly IRequestContextAccessor _context;
     private readonly TimeProvider _clock;
-    private readonly IEventPublisher _events;
     private readonly IAuditWriter _audit;
     private readonly IBusinessUnitDirectory _units;
     private readonly IDepartmentDirectory _departments;
@@ -30,7 +29,6 @@ public sealed class HandlingService : IHandlingCommands
         IConversationStore store,
         IRequestContextAccessor context,
         TimeProvider clock,
-        IEventPublisher events,
         IAuditWriter audit,
         IBusinessUnitDirectory units,
         IDepartmentDirectory departments,
@@ -39,7 +37,6 @@ public sealed class HandlingService : IHandlingCommands
         _store = store;
         _context = context;
         _clock = clock;
-        _events = events;
         _audit = audit;
         _units = units;
         _departments = departments;
@@ -65,36 +62,112 @@ public sealed class HandlingService : IHandlingCommands
 
         contexto.Require(Permission.ConversationManage, sessao.OrganizationId);
 
-        // Idempotência por TransitionId: repetir uma transição já aplicada devolve o mesmo resultado, sem mudar nada.
+        // A cerca de quem executa vale ANTES de qualquer outra regra, dentro da trava da sessão: quem perdeu a exclusividade (outro
+        // executor, com token maior, assumiu) não aplica nem repete nada, mesmo lendo o estado atual da sessão.
+        if (command.FenceToken is { } cerca && (cerca <= 0 || sessao.IsFencedOut(cerca)))
+        {
+            return new TransitionResult(TransitionOutcome.FencedOut, sessao.StateVersion);
+        }
+
+        // Idempotência por TransitionId: repetir uma transição já tratada (aplicada, ou avaliada sem mudar nada) devolve o mesmo
+        // resultado, sem mudar nada.
         var anterior = await trabalho.FindTransitionAsync(sessao.Id, command.TransitionId, cancellationToken);
         if (anterior is not null)
         {
-            return new TransitionResult(TransitionOutcome.AlreadyApplied, anterior.StateVersionAfter);
+            return new TransitionResult(TransitionOutcome.AlreadyApplied, anterior.StateVersionAfter, anterior.MessageSeqAt, anterior.HandlingPeriodAfter);
+        }
+
+        // A autorização de quem comanda foi dada sobre um estado (responsável e período): ela só vale para alterar ESTE estado, conferido aqui,
+        // na mesma trava e transação da gravação. Renovar a versão esperada não a renova: se o responsável já é outro, nada é gravado. Um
+        // comando que já encontra a sessão no estado pedido não altera nada e dispensa a condição (a repetição de um comando já aplicado foi
+        // reconhecida acima, antes dela).
+        if (command.Precondition is { } condicao
+            && sessao.IsOpen
+            && !(sessao.HandlingMode == command.To && sessao.ResponderRef == command.ResponderRef)
+            && !sessao.IsInHandlingState(condicao.Mode, condicao.ResponderRef, condicao.HandlingPeriod, condicao.PlacementEpoch))
+        {
+            return new TransitionResult(TransitionOutcome.HandlingChanged, sessao.StateVersion);
         }
 
         var de = sessao.HandlingMode;
         var resultado = sessao.Transition(command.To, command.ResponderRef, command.ExpectedStateVersion);
         if (resultado != TransitionOutcome.Applied)
         {
+            // A sessão JÁ estava no estado pedido (mesma versão esperada, mesmo modo e responsável): a operação não muda nada, mas o
+            // identificador fica registrado, para que uma repetição tardia (de um executor atrasado) não seja reavaliada contra o estado
+            // que a sessão tiver depois.
+            if (resultado == TransitionOutcome.InvalidTransition && sessao.IsOpen && sessao.HandlingMode == command.To && sessao.ResponderRef == command.ResponderRef
+                && command.ExpectedStateVersion == sessao.StateVersion)
+            {
+                // A fronteira fica DESCONHECIDA (nula), na primeira resposta e em toda repetição: quem mudou o estado antes foi outra
+                // operação, em outro instante, e a sequência de agora não é a dessa mudança.
+                AdvanceFence(sessao, command.FenceToken);
+                trabalho.Add(HandlingTransition.Create(contexto.TenantId, sessao.Id, command.TransitionId, sessao.StateVersion, null, null, _clock.GetUtcNow()));
+                await trabalho.CommitAsync(cancellationToken);
+                return new TransitionResult(resultado, sessao.StateVersion);
+            }
+
             return new TransitionResult(resultado, sessao.StateVersion);
         }
 
         var agora = _clock.GetUtcNow();
-        trabalho.Add(HandlingTransition.Create(contexto.TenantId, sessao.Id, command.TransitionId, sessao.StateVersion, agora));
-        await trabalho.CommitAsync(cancellationToken);
-
-        await _events.PublishAsync(
+        AdvanceFence(sessao, command.FenceToken);
+        trabalho.Add(HandlingTransition.Create(contexto.TenantId, sessao.Id, command.TransitionId, sessao.StateVersion, sessao.LastMessageSeq, sessao.HandlingPeriod, agora));
+        await trabalho.CommitAsync(
             new[]
             {
                 ConversationEventFactory.Create(
                     contexto.TenantId,
                     sessao.Id,
                     ConversationEventTypes.HandlingModeChanged,
-                    new HandlingModeChangedV1(sessao.Id, de, sessao.HandlingMode, sessao.ResponderRef, sessao.StateVersion, command.TransitionId),
+                    new HandlingModeChangedV1(
+                        sessao.Id, de, sessao.HandlingMode, sessao.ResponderRef, sessao.StateVersion, command.TransitionId, sessao.LastMessageSeq,
+                        sessao.HandlingPeriod, sessao.PlacementEpoch),
                     agora),
             },
             cancellationToken);
-        return new TransitionResult(TransitionOutcome.Applied, sessao.StateVersion);
+        return new TransitionResult(TransitionOutcome.Applied, sessao.StateVersion, sessao.LastMessageSeq, sessao.HandlingPeriod);
+    }
+
+    // A cerca só é guardada junto de uma gravação que será confirmada.
+    private static void AdvanceFence(ServiceSession sessao, long? token)
+    {
+        if (token is { } cerca)
+        {
+            sessao.AdvanceFence(cerca);
+        }
+    }
+
+    public async Task<FenceHandlingResult> FenceHandlingAsync(FenceHandlingCommand command, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        var contexto = _context.GetRequired();
+        if (command.FenceToken <= 0)
+        {
+            throw new ConversationsValidationException("A cerca do executor precisa de um token positivo.");
+        }
+
+        await using (var trabalho = await _store.BeginAsync(cancellationToken))
+        {
+            var sessao = await trabalho.LockSessionAsync(command.SessionId, cancellationToken);
+            if (sessao is null || !contexto.IsAllowed(Permission.ConversationRead, sessao.OrganizationId))
+            {
+                return new FenceHandlingResult(FenceOutcome.SessionNotFound, null);
+            }
+
+            contexto.Require(Permission.ConversationManage, sessao.OrganizationId);
+
+            if (!sessao.TryAdvanceFence(command.FenceToken))
+            {
+                return new FenceHandlingResult(FenceOutcome.FencedOut, null);
+            }
+
+            await trabalho.CommitAsync(cancellationToken);
+        }
+
+        // A cerca já vale (confirmada): o que um executor mais antigo conseguiu gravar veio antes dela, então esta leitura o inclui.
+        var linha = await _store.FindSessionAsync(command.SessionId, cancellationToken);
+        return linha is null ? new FenceHandlingResult(FenceOutcome.SessionNotFound, null) : new FenceHandlingResult(FenceOutcome.Fenced, linha.ToView());
     }
 
     public async Task<SetLocaleResult> SetConversationLocaleAsync(SetConversationLocaleCommand command, CancellationToken cancellationToken = default)
@@ -138,10 +211,8 @@ public sealed class HandlingService : IHandlingCommands
 
         // O idioma entra no estado versionado: a resposta de um turno em andamento, escrita no idioma anterior, é recusada.
         sessao.AdvanceStateVersion();
-        await trabalho.CommitAsync(cancellationToken);
-
         var agora = _clock.GetUtcNow();
-        await _events.PublishAsync(
+        await trabalho.CommitAsync(
             new[]
             {
                 ConversationEventFactory.Create(
@@ -212,16 +283,37 @@ public sealed class HandlingService : IHandlingCommands
         // Autorização explícita: encaminhar a conversa é gerir a conversa na organização dela.
         contexto.Require(Permission.ConversationManage, sessao.OrganizationId);
 
-        // Idempotência por TransferId: repetir um encaminhamento já aplicado devolve o mesmo resultado, sem mudar nada.
+        // A cerca de quem executa vale antes de qualquer outra regra (ver TransitionHandlingModeAsync).
+        if (command.FenceToken is { } cerca && (cerca <= 0 || sessao.IsFencedOut(cerca)))
+        {
+            return new TransferSessionResult(TransferOutcome.FencedOut, sessao.StateVersion);
+        }
+
+        // Idempotência por TransferId: repetir um encaminhamento já aplicado devolve o mesmo resultado, sem mudar nada. O que foi
+        // avaliado e não mudou nada (a sessão já estava na unidade pedida) também fica registrado, junto das transições, e vale igual.
         var anterior = await trabalho.FindTransferAsync(sessao.Id, command.TransferId, cancellationToken);
         if (anterior is not null)
         {
             return new TransferSessionResult(TransferOutcome.AlreadyApplied, anterior.StateVersionAfter);
         }
 
+        if (await trabalho.FindTransitionAsync(sessao.Id, command.TransferId, cancellationToken) is { } semMudanca)
+        {
+            return new TransferSessionResult(TransferOutcome.AlreadyApplied, semMudanca.StateVersionAfter);
+        }
+
         if (!sessao.IsOpen)
         {
             return new TransferSessionResult(TransferOutcome.SessionClosed, sessao.StateVersion);
+        }
+
+        // A autorização foi dada sobre um responsável e um período: vale só para alterar esse estado (ver TransitionHandlingModeAsync). Quem já
+        // encontra a sessão na unidade e no setor pedidos não altera nada e dispensa a condição.
+        if (command.Precondition is { } condicao
+            && !(sessao.BusinessUnitId == command.TargetBusinessUnitId && sessao.DepartmentId == command.TargetDepartmentId)
+            && !sessao.IsInHandlingState(condicao.Mode, condicao.ResponderRef, condicao.HandlingPeriod, condicao.PlacementEpoch))
+        {
+            return new TransferSessionResult(TransferOutcome.HandlingChanged, sessao.StateVersion);
         }
 
         if (command.ExpectedStateVersion != sessao.StateVersion)
@@ -247,25 +339,31 @@ public sealed class HandlingService : IHandlingCommands
 
         var deUnidade = sessao.BusinessUnitId;
         var deSetor = sessao.DepartmentId;
+        var deGeracao = sessao.PlacementEpoch; // capturada ANTES de a colocação mudar: a geração da qual a sessão sai
         if (!sessao.TransferTo(command.TargetBusinessUnitId, command.TargetDepartmentId))
         {
+            // Nada mudou e nenhum rastro de encaminhamento é criado, mas o identificador fica registrado (e a cerca, confirmada).
+            AdvanceFence(sessao, command.FenceToken);
+            trabalho.Add(HandlingTransition.Create(contexto.TenantId, sessao.Id, command.TransferId, sessao.StateVersion, null, null, _clock.GetUtcNow()));
+            await trabalho.CommitAsync(cancellationToken);
             return new TransferSessionResult(TransferOutcome.Unchanged, sessao.StateVersion);
         }
 
         var agora = _clock.GetUtcNow();
+        AdvanceFence(sessao, command.FenceToken);
         trabalho.Add(SessionTransfer.Create(
             contexto.TenantId, sessao.Id, command.TransferId, deUnidade, deSetor,
             command.TargetBusinessUnitId, command.TargetDepartmentId, contexto.Principal?.UserId, motivo, sessao.StateVersion, agora));
-        await trabalho.CommitAsync(cancellationToken);
-
-        await _events.PublishAsync(
+        await trabalho.CommitAsync(
             new[]
             {
                 ConversationEventFactory.Create(
                     contexto.TenantId,
                     sessao.Id,
                     ConversationEventTypes.SessionTransferred,
-                    new SessionTransferredV1(sessao.Id, command.TransferId, deUnidade, deSetor, command.TargetBusinessUnitId, command.TargetDepartmentId, sessao.StateVersion),
+                    new SessionTransferredV1(
+                        sessao.Id, command.TransferId, deUnidade, deSetor, command.TargetBusinessUnitId, command.TargetDepartmentId, sessao.StateVersion, sessao.LastMessageSeq,
+                        deGeracao, sessao.PlacementEpoch),
                     agora),
             },
             cancellationToken);
@@ -296,11 +394,11 @@ public sealed class HandlingService : IHandlingCommands
             return new CloseSessionResult(true, false, sessao.StateVersion);
         }
 
-        await trabalho.CommitAsync(cancellationToken);
-        await _events.PublishAsync(
+        await trabalho.CommitAsync(
             new[]
             {
-                ConversationEventFactory.Create(contexto.TenantId, sessao.Id, ConversationEventTypes.SessionClosed, new SessionClosedV1(sessao.Id, motivo), agora),
+                ConversationEventFactory.Create(
+                    contexto.TenantId, sessao.Id, ConversationEventTypes.SessionClosed, new SessionClosedV1(sessao.Id, motivo, sessao.LastMessageSeq), agora),
             },
             cancellationToken);
         return new CloseSessionResult(true, true, sessao.StateVersion);
@@ -366,11 +464,10 @@ public sealed class HandlingService : IHandlingCommands
         var agora = _clock.GetUtcNow();
         var novo = Message.CreateResend(original, sessao.NextOutboundSeq(agora), command.RequestId, autor.UserId, agora);
         trabalho.Add(novo);
-        await trabalho.CommitAsync(cancellationToken);
 
         // O reenvio só publica a solicitação de saída (consumida pelo Channels): não cria turno de IA e não altera a
         // cobertura. O operation_id do envio deriva do requestId (EFX).
-        await _events.PublishAsync(
+        await trabalho.CommitAsync(
             new[]
             {
                 ConversationEventFactory.Create(

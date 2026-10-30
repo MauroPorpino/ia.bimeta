@@ -13,7 +13,8 @@ public sealed record MessageCursor(DateTimeOffset OccurredAt, long MessageSeq);
 /// <param name="OrganizationIds">As organizações visíveis ao usuário, ou <c>null</c> para todas (contexto de sistema ou concessão de tenant).</param>
 public sealed record SessionListFilter(IReadOnlySet<Guid>? OrganizationIds, SessionStatus? Status, SessionCursor? After, int Take);
 
-public sealed record MessagePageFilter(HistoryOrder Order, MessageCursor? After, int Take);
+/// <param name="ThroughMessageSeq">Só as mensagens com <c>MessageSeq</c> até este valor (a fronteira de um período), aplicado antes da paginação.</param>
+public sealed record MessagePageFilter(HistoryOrder Order, MessageCursor? After, int Take, long? ThroughMessageSeq = null);
 
 /// <param name="ContactPreferredLocale">A preferência de idioma do contato, se houver.</param>
 /// <param name="EffectiveLocale">O idioma efetivo da conversa da sessão e a origem da escolha.</param>
@@ -50,6 +51,12 @@ public interface IConversationStore
 
     /// <summary>O rastro de encaminhamentos da sessão, do mais antigo para o mais novo.</summary>
     Task<IReadOnlyList<SessionTransfer>> ListTransfersAsync(Guid sessionId, CancellationToken cancellationToken);
+
+    /// <summary>O registro da transição (ou da operação avaliada sem efeito) pelo identificador, sem rastreamento e sem trava; nulo se não existe.</summary>
+    Task<HandlingTransition?> FindTransitionReadOnlyAsync(Guid sessionId, Guid transitionId, CancellationToken cancellationToken);
+
+    /// <summary>O registro do encaminhamento pelo identificador, sem rastreamento e sem trava; nulo se não existe.</summary>
+    Task<SessionTransfer?> FindTransferReadOnlyAsync(Guid sessionId, Guid transferId, CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -113,4 +120,12 @@ public interface IConversationUnitOfWork : IAsyncDisposable
 
     /// <exception cref="DuplicateProviderEventException">Outra transação gravou o mesmo evento do provedor no mesmo instante.</exception>
     Task CommitAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Confirma a unidade COM os eventos que a mudança de estado produziu: o evento é gravado no outbox do módulo na MESMA
+    /// transação (BOUNDARIES.md §12.9), então ele existe se, e somente se, a mudança existe. Só depois da confirmação os eventos
+    /// seguem para quem os consome (o relay do outbox, ou o publicador em memória do desenvolvimento).
+    /// </summary>
+    /// <exception cref="DuplicateProviderEventException">Outra transação gravou o mesmo evento do provedor no mesmo instante.</exception>
+    Task CommitAsync(IReadOnlyCollection<EventEnvelope> events, CancellationToken cancellationToken);
 }

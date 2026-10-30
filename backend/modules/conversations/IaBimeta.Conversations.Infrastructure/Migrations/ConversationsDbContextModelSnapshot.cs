@@ -137,6 +137,14 @@ namespace IaBimeta.Conversations.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("applied_at");
 
+                    b.Property<long?>("HandlingPeriodAfter")
+                        .HasColumnType("bigint")
+                        .HasColumnName("handling_period_after");
+
+                    b.Property<long?>("MessageSeqAt")
+                        .HasColumnType("bigint")
+                        .HasColumnName("message_seq_at");
+
                     b.Property<long>("StateVersionAfter")
                         .HasColumnType("bigint")
                         .HasColumnName("state_version_after");
@@ -416,9 +424,21 @@ namespace IaBimeta.Conversations.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("department_id");
 
+                    b.Property<long>("HandlingFenceToken")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L)
+                        .HasColumnName("handling_fence_token");
+
                     b.Property<short>("HandlingMode")
                         .HasColumnType("smallint")
                         .HasColumnName("handling_mode");
+
+                    b.Property<long>("HandlingPeriod")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L)
+                        .HasColumnName("handling_period");
 
                     b.Property<long>("LastInboundSeq")
                         .HasColumnType("bigint")
@@ -443,6 +463,12 @@ namespace IaBimeta.Conversations.Infrastructure.Migrations
                     b.Property<Guid>("OrganizationId")
                         .HasColumnType("uuid")
                         .HasColumnName("organization_id");
+
+                    b.Property<long>("PlacementEpoch")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L)
+                        .HasColumnName("placement_epoch");
 
                     b.Property<bool>("ReplyDeliveryFailed")
                         .HasColumnType("boolean")
@@ -547,6 +573,119 @@ namespace IaBimeta.Conversations.Infrastructure.Migrations
                             t.HasCheckConstraint("ck_session_transfers_departments", "(from_department_id IS NULL OR from_business_unit_id IS NOT NULL) AND (to_department_id IS NULL OR to_business_unit_id IS NOT NULL)");
 
                             t.HasCheckConstraint("ck_session_transfers_state_version", "state_version_after >= 2");
+                        });
+                });
+
+            modelBuilder.Entity("IaBimeta.Messaging.OutboxMessage", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer")
+                        .HasColumnName("attempts");
+
+                    b.Property<Guid?>("CausationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("causation_id");
+
+                    b.Property<Guid>("CorrelationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("correlation_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("DeadReason")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("dead_reason");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("event_type");
+
+                    b.Property<int>("EventVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("event_version");
+
+                    b.Property<long>("IngestSeq")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("ingest_seq");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityAlwaysColumn(b.Property<long>("IngestSeq"));
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("last_error");
+
+                    b.Property<DateTimeOffset?>("LeaseExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("lease_expires_at");
+
+                    b.Property<string>("LeaseOwner")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("lease_owner");
+
+                    b.Property<Guid?>("LeaseToken")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lease_token");
+
+                    b.Property<DateTimeOffset>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("next_attempt_at");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("occurred_at");
+
+                    b.Property<string>("OrderingKey")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("ordering_key");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("payload");
+
+                    b.Property<DateTimeOffset?>("ProcessedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("processed_at");
+
+                    b.Property<short>("State")
+                        .HasColumnType("smallint")
+                        .HasColumnName("state");
+
+                    b.HasKey("TenantId", "Id");
+
+                    b.HasIndex("State", "NextAttemptAt", "IngestSeq")
+                        .HasDatabaseName("ix_outbox_message_state_next_attempt_at_ingest_seq")
+                        .HasFilter("state IN (1, 2)");
+
+                    b.HasIndex("TenantId", "OrderingKey", "IngestSeq")
+                        .HasDatabaseName("ix_outbox_message_tenant_id_ordering_key_ingest_seq")
+                        .HasFilter("state IN (1, 2)");
+
+                    b.ToTable("outbox_message", "conversations", t =>
+                        {
+                            t.HasCheckConstraint("ck_outbox_message_attempts", "attempts >= 0");
+
+                            t.HasCheckConstraint("ck_outbox_message_lease", "(state = 2) = (lease_token IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_outbox_message_state", "state IN (1, 2, 3, 4)");
                         });
                 });
 

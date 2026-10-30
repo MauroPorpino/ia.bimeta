@@ -65,6 +65,34 @@ public sealed class ServiceSession : ITenantOwned
 
     public long LastLeaseToken { get; private set; }
 
+    /// <summary>
+    /// O maior token de cerca (<c>fencing token</c>) já visto de quem executa operações do ContactCenter sobre esta sessão. É validado AQUI,
+    /// dentro da trava da sessão: um executor que perdeu a exclusividade (a trava do banco que ele tinha se perdeu, outro executor
+    /// assumiu) leva um token menor e é recusado, mesmo lendo o estado atual da sessão ou usando outra conexão. É separado do
+    /// <see cref="LastLeaseToken"/> (que cerca os turnos de IA): são exclusividades diferentes.
+    /// </summary>
+    public long HandlingFenceToken { get; private set; }
+
+    /// <summary>
+    /// A identidade do período de atendimento humano: um contador que AVANÇA a cada vez que a sessão ENTRA em atendimento humano vindo de
+    /// outro modo (IA para humano). Trocar o responsável dentro do atendimento humano não o muda; humano → IA → humano o avança UMA vez
+    /// (de 1 para 2): a ida para a IA não mexe no contador, e a volta ao humano é uma nova entrada, OUTRO período mesmo que o modo seja
+    /// de novo o humano. Quem foi autorizado a ler a conversa por um período
+    /// (o item do ContactCenter) guarda este número e só continua autorizado enquanto a sessão estiver nele. Sessão criada já em
+    /// atendimento humano começa no período 1; em IA, no 0.
+    /// </summary>
+    public long HandlingPeriod { get; private set; }
+
+    /// <summary>
+    /// A identidade DURÁVEL da colocação da sessão: uma geração monotônica que AVANÇA, na mesma transação, a cada vez que a unidade ou o setor
+    /// mudam (<see cref="TransferTo"/>), e só então. Diz de qual intervalo CONTÍNUO de colocação se fala: A → B → A é a geração 1, 2 e 3, e nunca
+    /// volta à 1, mesmo que a unidade e o setor sejam de novo os de antes e o atendimento humano (<see cref="HandlingPeriod"/>) continue o mesmo.
+    /// É independente do período de atendimento, da <c>StateVersion</c> (que muda por motivos alheios à colocação) e da entrega de eventos a quem
+    /// quer que seja: quem foi autorizado a ler por uma colocação a guarda e só continua autorizado enquanto a sessão estiver NELA. Sessão criada
+    /// começa na geração 1.
+    /// </summary>
+    public long PlacementEpoch { get; private set; }
+
     public DateTimeOffset? LastReplyAcceptedAt { get; private set; }
 
     public bool ReplyDeliveryFailed { get; private set; }
@@ -115,6 +143,7 @@ public sealed class ServiceSession : ITenantOwned
             ChannelInstanceId = channelInstanceId,
             Status = SessionStatus.Open,
             HandlingMode = HandlingMode.AiAutonomous,
+            PlacementEpoch = 1,
             StateVersion = 1,
             CreatedAt = now,
             LastMessageAt = now,
@@ -248,7 +277,44 @@ public sealed class ServiceSession : ITenantOwned
         LastReplyAcceptedAt = now;
     }
 
+    // Cerca de quem executa
+
+    /// <summary>
+    /// Registra a cerca de um executor: devolve <c>false</c> (sem registrar) se o token é MENOR que o maior já visto, que é quem perdeu a
+    /// exclusividade. Token igual é o mesmo executor repetindo; maior assume. Chamado com a linha da sessão travada.
+    /// </summary>
+    public bool TryAdvanceFence(long token)
+    {
+        if (IsFencedOut(token))
+        {
+            return false;
+        }
+
+        AdvanceFence(token);
+        return true;
+    }
+
+    /// <summary>O executor com este token perdeu a exclusividade (há um token maior)? Não altera nada.</summary>
+    public bool IsFencedOut(long token) => token < HandlingFenceToken;
+
+    /// <summary>Guarda o token (nunca o diminui). Quem chama só o faz junto de uma gravação que será confirmada.</summary>
+    public void AdvanceFence(long token)
+    {
+        if (token > HandlingFenceToken)
+        {
+            HandlingFenceToken = token;
+        }
+    }
+
     // Estado de atendimento
+
+    /// <summary>
+    /// A sessão está no modo <paramref name="mode"/>, no período <paramref name="handlingPeriod"/>, com o responsável <paramref name="responderRef"/>
+    /// (nulo = esperando atendente, ou com a IA)? É a conferência da condição sobre a qual quem comanda autorizou uma operação
+    /// (<c>HandlingPrecondition</c>): vale só com a linha travada, junto da gravação.
+    /// </summary>
+    public bool IsInHandlingState(HandlingMode mode, Guid? responderRef, long handlingPeriod, long? placementEpoch = null) =>
+        HandlingMode == mode && HandlingPeriod == handlingPeriod && ResponderRef == responderRef && (placementEpoch is not { } geracao || PlacementEpoch == geracao);
 
     /// <summary>
     /// Transição de modo. Exige sessão aberta, modo suportado, combinação válida e a versão esperada. Não toca no turno ativo:
@@ -284,6 +350,12 @@ public sealed class ServiceSession : ITenantOwned
         if (to == HandlingMode && responderRef == ResponderRef)
         {
             return TransitionOutcome.InvalidTransition;
+        }
+
+        // Entrar em atendimento humano vindo de outro modo abre um período NOVO; trocar o responsável dentro do humano não.
+        if (to == HandlingMode.HumanAssisted && HandlingMode != HandlingMode.HumanAssisted)
+        {
+            HandlingPeriod++;
         }
 
         HandlingMode = to;
@@ -325,6 +397,7 @@ public sealed class ServiceSession : ITenantOwned
 
         BusinessUnitId = businessUnitId;
         DepartmentId = departmentId;
+        PlacementEpoch++;
         StateVersion++;
         return true;
     }

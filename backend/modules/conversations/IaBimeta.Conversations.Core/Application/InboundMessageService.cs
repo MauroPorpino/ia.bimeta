@@ -22,7 +22,6 @@ public sealed class InboundMessageService : IConversationIngestion
     private readonly ITenantSettings _tenantSettings;
     private readonly IRequestContextAccessor _context;
     private readonly TimeProvider _clock;
-    private readonly IEventPublisher _events;
     private readonly IChannelUnitAuthorization _channelUnits;
 
     public InboundMessageService(
@@ -33,7 +32,6 @@ public sealed class InboundMessageService : IConversationIngestion
         ITenantSettings tenantSettings,
         IRequestContextAccessor context,
         TimeProvider clock,
-        IEventPublisher events,
         IChannelUnitAuthorization channelUnits)
     {
         _store = store;
@@ -43,7 +41,6 @@ public sealed class InboundMessageService : IConversationIngestion
         _tenantSettings = tenantSettings;
         _context = context;
         _clock = clock;
-        _events = events;
         _channelUnits = channelUnits;
     }
 
@@ -180,9 +177,7 @@ public sealed class InboundMessageService : IConversationIngestion
             var mensagem = Message.CreateInbound(
                 contexto.TenantId, sessao.Id, conversa.Id, command.ChannelInstanceId, registro, evento, command.ProviderTimestamp, command.Kind, command.Text, agora, command.MessageLocale);
             trabalho.Add(mensagem);
-            await trabalho.CommitAsync(cancellationToken);
-
-            await _events.PublishAsync(
+            await trabalho.CommitAsync(
                 new[]
                 {
                     ConversationEventFactory.Create(
@@ -220,8 +215,7 @@ public sealed class InboundMessageService : IConversationIngestion
             return new ContentChangeResult(resultado, mensagem.ContentState);
         }
 
-        await trabalho.CommitAsync(cancellationToken);
-        await _events.PublishAsync(
+        await trabalho.CommitAsync(
             new[]
             {
                 ConversationEventFactory.Create(
@@ -254,8 +248,7 @@ public sealed class InboundMessageService : IConversationIngestion
             return new ContentChangeResult(resultado, mensagem.ContentState);
         }
 
-        await trabalho.CommitAsync(cancellationToken);
-        await _events.PublishAsync(
+        await trabalho.CommitAsync(
             new[]
             {
                 ConversationEventFactory.Create(
@@ -316,11 +309,8 @@ public sealed class InboundMessageService : IConversationIngestion
             sessao.ClearReplyDeliveryFailed();
         }
 
-        await trabalho.CommitAsync(cancellationToken);
-        if (eventos.Count > 0)
-        {
-            await _events.PublishAsync(eventos, cancellationToken);
-        }
+        // Os eventos (se houver) entram no outbox na mesma transação da mudança de estado.
+        await trabalho.CommitAsync(eventos, cancellationToken);
 
         return new DeliveryStatusResult(DeliveryStatusOutcome.Applied, mensagem.DeliveryState);
     }

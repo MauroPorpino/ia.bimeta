@@ -2,6 +2,7 @@ using IaBimeta.Conversations.Application;
 using IaBimeta.Conversations.Contracts;
 using IaBimeta.Conversations.Domain;
 using IaBimeta.Conversations.Infrastructure.Configurations;
+using IaBimeta.Messaging;
 using IaBimeta.SharedKernel;
 using Microsoft.EntityFrameworkCore;
 
@@ -14,14 +15,27 @@ namespace IaBimeta.Conversations.Infrastructure;
 internal sealed class ConversationStore : IConversationStore
 {
     private readonly ConversationsDbContext _db;
+    private readonly IEventPublisher? _publisher;
+    private readonly IOutboxWriter? _outbox;
+    private readonly TimeProvider _clock;
 
-    public ConversationStore(ConversationsDbContext db)
+    /// <param name="publisher">
+    /// Entrega em memória, DEPOIS da confirmação, dos eventos da unidade (o dublê do desenvolvimento e dos testes). Opcional.
+    /// </param>
+    /// <param name="outbox">
+    /// O escritor do outbox durável: com ele, cada evento é gravado na mesma transação da mudança de estado e o relay o entrega
+    /// aos consumidores. Opcional: sem ele (os testes que não exercitam a entrega), os eventos só vão para o publicador.
+    /// </param>
+    public ConversationStore(ConversationsDbContext db, TimeProvider clock, IEventPublisher? publisher = null, IOutboxWriter? outbox = null)
     {
         _db = db;
+        _clock = clock;
+        _publisher = publisher;
+        _outbox = outbox;
     }
 
     public async Task<IConversationUnitOfWork> BeginAsync(CancellationToken cancellationToken) =>
-        await ConversationUnitOfWork.StartAsync(_db, cancellationToken);
+        await ConversationUnitOfWork.StartAsync(_db, _clock, _publisher, _outbox, cancellationToken);
 
     public async Task<SessionRow?> FindSessionAsync(Guid sessionId, CancellationToken cancellationToken)
     {
@@ -93,6 +107,13 @@ internal sealed class ConversationStore : IConversationStore
     {
         var mensagens = _db.Messages.AsNoTracking().Where(m => m.SessionId == sessionId);
 
+        // O limite do período vale na própria consulta, ANTES da paginação: a ordem de exibição (OccurredAt) e a de ingestão (MessageSeq) não
+        // são a mesma, então um corte feito depois de paginar omitiria mensagens válidas ou deixaria entrar as de fora.
+        if (filter.ThroughMessageSeq is { } ate)
+        {
+            mensagens = mensagens.Where(m => m.MessageSeq <= ate);
+        }
+
         if (filter.Order == HistoryOrder.OldestFirst)
         {
             if (filter.After is { } apos)
@@ -128,6 +149,12 @@ internal sealed class ConversationStore : IConversationStore
             .Where(t => t.SessionId == sessionId)
             .OrderBy(t => t.StateVersionAfter).ThenBy(t => t.TransferredAt)
             .ToListAsync(cancellationToken);
+
+    public Task<HandlingTransition?> FindTransitionReadOnlyAsync(Guid sessionId, Guid transitionId, CancellationToken cancellationToken) =>
+        _db.Transitions.AsNoTracking().FirstOrDefaultAsync(t => t.SessionId == sessionId && t.TransitionId == transitionId, cancellationToken);
+
+    public Task<SessionTransfer?> FindTransferReadOnlyAsync(Guid sessionId, Guid transferId, CancellationToken cancellationToken) =>
+        _db.Transfers.AsNoTracking().FirstOrDefaultAsync(t => t.SessionId == sessionId && t.TransferId == transferId, cancellationToken);
 }
 
 /// <summary>
@@ -140,20 +167,28 @@ internal sealed class ConversationUnitOfWork : IConversationUnitOfWork
 {
     private readonly ConversationsDbContext _db;
     private readonly Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction _transacao;
+    private readonly TimeProvider _clock;
+    private readonly IEventPublisher? _publisher;
+    private readonly IOutboxWriter? _outbox;
     private bool _confirmada;
 
-    private ConversationUnitOfWork(ConversationsDbContext db, Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transacao)
+    private ConversationUnitOfWork(
+        ConversationsDbContext db, Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transacao, TimeProvider clock, IEventPublisher? publisher, IOutboxWriter? outbox)
     {
         _db = db;
         _transacao = transacao;
+        _clock = clock;
+        _publisher = publisher;
+        _outbox = outbox;
     }
 
-    public static async Task<ConversationUnitOfWork> StartAsync(ConversationsDbContext db, CancellationToken cancellationToken)
+    public static async Task<ConversationUnitOfWork> StartAsync(
+        ConversationsDbContext db, TimeProvider clock, IEventPublisher? publisher, IOutboxWriter? outbox, CancellationToken cancellationToken)
     {
         // Cada unidade começa sem entidades rastreadas: nenhum valor lido antes da trava pode sobreviver a ela.
         db.ChangeTracker.Clear();
         var transacao = await db.Database.BeginTransactionAsync(cancellationToken);
-        return new ConversationUnitOfWork(db, transacao);
+        return new ConversationUnitOfWork(db, transacao, clock, publisher, outbox);
     }
 
     public async Task<Contact> GetOrCreateContactAsync(ChannelInstanceId channelInstanceId, string externalRef, string? displayName, DateTimeOffset now, CancellationToken cancellationToken)
@@ -174,14 +209,17 @@ internal sealed class ConversationUnitOfWork : IConversationUnitOfWork
         var tenant = _db.CurrentTenantValue;
         var id = Guid.CreateVersion7();
         var modo = (short)initialHandlingMode;
+
+        // Sessão que nasce já em atendimento humano começa no período 1 (o primeiro período humano); em IA, no 0.
+        var periodo = initialHandlingMode == HandlingMode.HumanAssisted ? 1L : 0L;
         await _db.Database.ExecuteSqlInterpolatedAsync(
             $@"INSERT INTO conversations.service_sessions
                  (tenant_id, id, organization_id, business_unit_id, department_id, contact_id, channel_instance_id, status, handling_mode, responder_ref, state_version,
                   last_message_seq, last_inbound_seq, answered_through_seq, active_turn_id, turn_epoch, last_lease_token, last_reply_accepted_at,
-                  reply_delivery_failed, attention_raised_for_seq, created_at, last_message_at, closed_at)
+                  reply_delivery_failed, attention_raised_for_seq, created_at, last_message_at, closed_at, handling_period)
                VALUES
                  ({tenant}, {id}, {organizationId}, {businessUnitId}, {departmentId}, {contact.Id}, {contact.ChannelInstanceId.Value}, 1, {modo}, NULL, 1,
-                  0, 0, 0, NULL, 0, 0, NULL, FALSE, NULL, {now}, {now}, NULL)
+                  0, 0, 0, NULL, 0, 0, NULL, FALSE, NULL, {now}, {now}, NULL, {periodo})
                ON CONFLICT (tenant_id, contact_id) WHERE status = 1 DO NOTHING",
             cancellationToken);
 
@@ -300,10 +338,20 @@ internal sealed class ConversationUnitOfWork : IConversationUnitOfWork
 
     public void Add(MessageTranslation translation) => _db.Translations.Add(translation);
 
-    public async Task CommitAsync(CancellationToken cancellationToken)
+    public Task CommitAsync(CancellationToken cancellationToken) => CommitAsync(Array.Empty<EventEnvelope>(), cancellationToken);
+
+    public async Task CommitAsync(IReadOnlyCollection<EventEnvelope> events, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(events);
+
         try
         {
+            // O outbox entra no MESMO SaveChanges da mudança de estado: ou os dois são confirmados, ou nenhum (BOUNDARIES.md §12.9).
+            if (events.Count > 0 && _outbox is not null)
+            {
+                _outbox.Stage(_db, events, new TenantId(_db.CurrentTenantValue), _clock.GetUtcNow());
+            }
+
             await _db.SaveChangesAsync(cancellationToken);
             await _transacao.CommitAsync(cancellationToken);
             _confirmada = true;
@@ -311,6 +359,12 @@ internal sealed class ConversationUnitOfWork : IConversationUnitOfWork
         catch (DbUpdateException ex) when (PostgresErrors.IsUniqueViolation(ex, MessageConfiguration.ProviderEventIndex))
         {
             throw new DuplicateProviderEventException();
+        }
+
+        // Só depois da confirmação: o publicador em memória nunca vê evento de uma mudança que não aconteceu.
+        if (events.Count > 0 && _publisher is not null)
+        {
+            await _publisher.PublishAsync(events, cancellationToken);
         }
     }
 

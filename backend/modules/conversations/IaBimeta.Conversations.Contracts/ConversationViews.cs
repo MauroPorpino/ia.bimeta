@@ -5,7 +5,12 @@ namespace IaBimeta.Conversations.Contracts;
 /// <summary>Uma página de resultados. O <see cref="NextCursor"/> é opaco e nulo na última página.</summary>
 public sealed record Page<T>(IReadOnlyList<T> Items, string? NextCursor);
 
-/// <summary>Visão de uma sessão de atendimento (nunca a entidade). Não expõe época nem token de lane.</summary>
+/// <summary>
+/// Visão de uma sessão de atendimento (nunca a entidade). Não expõe época nem token de lane. <c>LastMessageSeq</c>, <c>HandlingPeriod</c> e
+/// <c>PlacementEpoch</c> são só para quem chama em processo (o ContactCenter, para a fronteira do histórico, para a identidade do período de
+/// atendimento a que um acesso está preso e para a identidade da colocação, a geração monotônica que avança a cada mudança de unidade ou setor
+/// e prova a continuidade do vínculo entre a sessão e o lugar onde um acesso foi autorizado) e não fazem parte do JSON da API HTTP.
+/// </summary>
 public sealed record SessionView(
     Guid Id,
     Guid OrganizationId,
@@ -26,7 +31,10 @@ public sealed record SessionView(
     Locale? EffectiveLocale = null,
     LocaleSource? LocaleSource = null,
     Locale? ContactPreferredLocale = null,
-    Guid? DepartmentId = null);
+    Guid? DepartmentId = null,
+    [property: System.Text.Json.Serialization.JsonIgnore] long LastMessageSeq = 0,
+    [property: System.Text.Json.Serialization.JsonIgnore] long HandlingPeriod = 0,
+    [property: System.Text.Json.Serialization.JsonIgnore] long PlacementEpoch = 0);
 
 /// <summary>
 /// Visão de uma mensagem para quem lê o histórico (usuário autorizado). O texto de conteúdo que ainda não está pronto é

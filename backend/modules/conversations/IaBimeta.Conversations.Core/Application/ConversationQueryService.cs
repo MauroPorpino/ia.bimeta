@@ -69,7 +69,12 @@ public sealed class ConversationQueryService : IConversationQueries
             return null;
         }
 
-        var mensagens = await _store.ListMessagesAsync(query.SessionId, new MessagePageFilter(query.Order, depois, take + 1), cancellationToken);
+        if (query.ThroughMessageSeq is < 0)
+        {
+            throw new ConversationsValidationException("O limite de sequência do histórico é inválido.");
+        }
+
+        var mensagens = await _store.ListMessagesAsync(query.SessionId, new MessagePageFilter(query.Order, depois, take + 1, query.ThroughMessageSeq), cancellationToken);
         var pagina = mensagens.Take(take).ToList();
         var proximo = mensagens.Count > take ? CursorCodec.Encode(new MessageCursor(pagina[^1].OccurredAt, pagina[^1].MessageSeq)) : null;
         return new Page<MessageView>(pagina.Select(m => m.ToView()).ToList(), proximo);
@@ -107,6 +112,47 @@ public sealed class ConversationQueryService : IConversationQueries
 
         var rastro = await _store.ListTransfersAsync(sessionId, cancellationToken);
         return rastro.Select(t => t.ToView()).ToList();
+    }
+
+    public async Task<EffectView> GetEffectAsync(GetEffectQuery query, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        var contexto = _context.GetRequired();
+        if (query.OperationId == Guid.Empty || !Enum.IsDefined(query.Kind))
+        {
+            throw new ConversationsValidationException("A consulta de efeito precisa do tipo e do identificador da operação.");
+        }
+
+        // Sessão inexistente, de outro tenant ou fora do alcance do contexto: o efeito também "não existe" (TEN-2). Nada é escrito nem travado.
+        var linha = await _store.FindSessionAsync(query.SessionId, cancellationToken);
+        if (linha is null || !contexto.IsAllowed(Permission.ConversationRead, linha.Session.OrganizationId))
+        {
+            return new EffectView(EffectOutcome.NotFound);
+        }
+
+        if (query.Kind == EffectKind.Transfer)
+        {
+            if (await _store.FindTransferReadOnlyAsync(query.SessionId, query.OperationId, cancellationToken) is { } encaminhamento)
+            {
+                return new EffectView(EffectOutcome.Applied, encaminhamento.StateVersionAfter);
+            }
+
+            // O encaminhamento que foi avaliado e não mudou nada fica registrado junto das transições: há registro, mas ele não prova uma mudança.
+            return await _store.FindTransitionReadOnlyAsync(query.SessionId, query.OperationId, cancellationToken) is { } semMudanca
+                ? new EffectView(EffectOutcome.Indeterminate, semMudanca.StateVersionAfter)
+                : new EffectView(EffectOutcome.NotFound);
+        }
+
+        if (await _store.FindTransitionReadOnlyAsync(query.SessionId, query.OperationId, cancellationToken) is not { } transicao)
+        {
+            return new EffectView(EffectOutcome.NotFound);
+        }
+
+        // A fronteira só existe quando a operação MUDOU o estado (ou no registro posterior a ela): sem ela, o registro é de uma operação sem efeito, ou
+        // anterior ao campo, e não prova mudança alguma. O período pode faltar no registro anterior a ele: a identidade fica desconhecida, nunca inventada.
+        return transicao.MessageSeqAt is null
+            ? new EffectView(EffectOutcome.Indeterminate, transicao.StateVersionAfter)
+            : new EffectView(EffectOutcome.Applied, transicao.StateVersionAfter, transicao.MessageSeqAt, transicao.HandlingPeriodAfter);
     }
 
     private static int ValidateTake(int take)

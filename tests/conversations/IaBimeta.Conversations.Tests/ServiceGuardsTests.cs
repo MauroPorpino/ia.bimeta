@@ -36,6 +36,10 @@ public class ServiceGuardsTests
         public Task<IReadOnlyList<MessageTranslation>> ListTranslationsAsync(Guid messageId, CancellationToken cancellationToken) => throw Tocado();
 
         public Task<IReadOnlyList<SessionTransfer>> ListTransfersAsync(Guid sessionId, CancellationToken cancellationToken) => throw Tocado();
+
+        public Task<HandlingTransition?> FindTransitionReadOnlyAsync(Guid sessionId, Guid transitionId, CancellationToken cancellationToken) => throw Tocado();
+
+        public Task<SessionTransfer?> FindTransferReadOnlyAsync(Guid sessionId, Guid transferId, CancellationToken cancellationToken) => throw Tocado();
     }
 
     private sealed class ConfiguracoesDoTenant : ITenantSettings
@@ -70,11 +74,10 @@ public class ServiceGuardsTests
     private sealed class Montagem
     {
         public RequestContextHolder Holder { get; } = new();
-        public InMemoryEventPublisher Eventos { get; } = new();
 
-        public InboundMessageService Ingestao => new(new StoreProibido(), new Organizacoes(), new Unidades(), new Setores(), new ConfiguracoesDoTenant(), Holder, TimeProvider.System, Eventos, new DenyAllChannelUnitAuthorization());
-        public TurnService Turnos => new(new StoreProibido(), Holder, TimeProvider.System, Eventos);
-        public HandlingService Atendimento => new(new StoreProibido(), Holder, TimeProvider.System, Eventos, new AuditoriaNula(), new Unidades(), new Setores(), new DenyAllChannelUnitAuthorization());
+        public InboundMessageService Ingestao => new(new StoreProibido(), new Organizacoes(), new Unidades(), new Setores(), new ConfiguracoesDoTenant(), Holder, TimeProvider.System, new DenyAllChannelUnitAuthorization());
+        public TurnService Turnos => new(new StoreProibido(), Holder, TimeProvider.System);
+        public HandlingService Atendimento => new(new StoreProibido(), Holder, TimeProvider.System, new AuditoriaNula(), new Unidades(), new Setores(), new DenyAllChannelUnitAuthorization());
         public ConversationQueryService Consultas => new(new StoreProibido(), Holder);
 
         public void ComoSistema() => Holder.Set(new RequestContext(Tenant, "development-header"));
@@ -143,8 +146,6 @@ public class ServiceGuardsTests
             var falha = await Assert.ThrowsAsync<AccessDeniedException>(chamada);
             Assert.Equal(Permission.SystemOperation, falha.Permission);
         }
-
-        Assert.Empty(m.Eventos.Published);
     }
 
     [Fact]

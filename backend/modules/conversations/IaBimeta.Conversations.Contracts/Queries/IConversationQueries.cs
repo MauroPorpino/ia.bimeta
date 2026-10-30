@@ -28,6 +28,13 @@ public interface IConversationQueries
     /// não é visível.
     /// </summary>
     Task<IReadOnlyList<SessionTransferView>?> GetTransfersAsync(Guid sessionId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Se um efeito (transição ou encaminhamento) já foi aplicado, pelo identificador que a intenção do chamador guardou. SOMENTE LEITURA: nada é gravado
+    /// nem travado, e nenhuma cerca é registrada, então serve a quem não tem (ou perdeu) a autoridade de escrever e só precisa reconhecer o que já aconteceu.
+    /// Sessão inexistente ou não visível responde <see cref="EffectOutcome.NotFound"/> (TEN-2).
+    /// </summary>
+    Task<EffectView> GetEffectAsync(GetEffectQuery query, CancellationToken cancellationToken = default);
 }
 
 /// <param name="Take">De 1 a 100.</param>
@@ -36,4 +43,9 @@ public interface IConversationQueries
 public sealed record ListSessionsQuery(int Take, string? Cursor, SessionStatus? Status);
 
 /// <param name="SessionId">Uma única sessão: nenhuma consulta aceita várias (TEN-5).</param>
-public sealed record GetHistoryQuery(Guid SessionId, int Take, string? Cursor, HistoryOrder Order);
+/// <param name="ThroughMessageSeq">
+/// Se informado, só as mensagens cuja sequência de ingestão (<c>MessageSeq</c>) é menor ou igual a ela. O filtro vale na própria consulta,
+/// ANTES da paginação, então as páginas e os cursores continuam consistentes (a ordem de exibição é por <c>OccurredAt</c>, e a de
+/// ingestão não é a mesma: nenhuma mensagem válida é omitida e nenhuma de fora aparece).
+/// </param>
+public sealed record GetHistoryQuery(Guid SessionId, int Take, string? Cursor, HistoryOrder Order, long? ThroughMessageSeq = null);

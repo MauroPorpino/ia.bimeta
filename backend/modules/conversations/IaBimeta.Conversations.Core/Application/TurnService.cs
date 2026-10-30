@@ -19,14 +19,12 @@ public sealed class TurnService : ITurnCommands
     private readonly IConversationStore _store;
     private readonly IRequestContextAccessor _context;
     private readonly TimeProvider _clock;
-    private readonly IEventPublisher _events;
 
-    public TurnService(IConversationStore store, IRequestContextAccessor context, TimeProvider clock, IEventPublisher events)
+    public TurnService(IConversationStore store, IRequestContextAccessor context, TimeProvider clock)
     {
         _store = store;
         _context = context;
         _clock = clock;
-        _events = events;
     }
 
     public async Task<BeginTurnResult> BeginTurnAsync(BeginTurnCommand command, CancellationToken cancellationToken = default)
@@ -180,9 +178,7 @@ public sealed class TurnService : ITurnCommands
             command.BasedOnInboundSeq, command.Text, command.AiRequestIds, agora, conversa.EffectiveLocale);
         sessao.AcceptAiReply(command.BasedOnInboundSeq, agora);
         trabalho.Add(resposta);
-        await trabalho.CommitAsync(cancellationToken);
-
-        await _events.PublishAsync(
+        await trabalho.CommitAsync(
             new[]
             {
                 ConversationEventFactory.Create(
@@ -227,8 +223,7 @@ public sealed class TurnService : ITurnCommands
             return new RaiseSessionAttentionResult(resultado);
         }
 
-        await trabalho.CommitAsync(cancellationToken);
-        await _events.PublishAsync(
+        await trabalho.CommitAsync(
             new[]
             {
                 ConversationEventFactory.Create(

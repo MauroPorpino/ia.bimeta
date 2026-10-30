@@ -70,6 +70,9 @@ internal sealed class ServiceSessionConfiguration : IEntityTypeConfiguration<Ser
         builder.Property(s => s.ActiveTurnId).HasColumnName("active_turn_id");
         builder.Property(s => s.TurnEpoch).HasColumnName("turn_epoch");
         builder.Property(s => s.LastLeaseToken).HasColumnName("last_lease_token");
+        builder.Property(s => s.HandlingFenceToken).HasColumnName("handling_fence_token").HasDefaultValue(0L);
+        builder.Property(s => s.HandlingPeriod).HasColumnName("handling_period").HasDefaultValue(0L);
+        builder.Property(s => s.PlacementEpoch).HasColumnName("placement_epoch").HasDefaultValue(1L);
         builder.Property(s => s.LastReplyAcceptedAt).HasColumnName("last_reply_accepted_at");
         builder.Property(s => s.ReplyDeliveryFailed).HasColumnName("reply_delivery_failed");
         builder.Property(s => s.AttentionRaisedForSeq).HasColumnName("attention_raised_for_seq");
@@ -130,6 +133,8 @@ internal sealed class HandlingTransitionConfiguration : IEntityTypeConfiguration
         builder.Property(t => t.SessionId).HasColumnName("session_id");
         builder.Property(t => t.TransitionId).HasColumnName("transition_id");
         builder.Property(t => t.StateVersionAfter).HasColumnName("state_version_after");
+        builder.Property(t => t.MessageSeqAt).HasColumnName("message_seq_at");
+        builder.Property(t => t.HandlingPeriodAfter).HasColumnName("handling_period_after");
         builder.Property(t => t.AppliedAt).HasColumnName("applied_at");
 
         builder.HasOne<ServiceSession>().WithMany().HasForeignKey(t => new { t.TenantId, t.SessionId }).OnDelete(DeleteBehavior.Restrict);

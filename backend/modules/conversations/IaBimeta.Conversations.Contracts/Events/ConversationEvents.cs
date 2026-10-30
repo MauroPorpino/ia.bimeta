@@ -37,15 +37,32 @@ public sealed record MessageContentReadyV1(Guid SessionId, Guid MessageId, long 
 
 public sealed record MessageContentFailedV1(Guid SessionId, Guid MessageId, long InboundSeq, string Reason);
 
+/// <param name="MessageSeq">
+/// A sequência da última mensagem da sessão no instante da transição: quem projeta o fim de um atendimento usa-a como fronteira
+/// estável do que ele pôde ver (não o instante em que o evento foi processado). Ausente em eventos anteriores a este campo.
+/// </param>
+/// <param name="HandlingPeriod">
+/// O período de atendimento humano da sessão (<c>SessionView.HandlingPeriod</c>) DEPOIS desta transição, capturado na mesma transação que a gravou. Para
+/// uma transição que leva à IA é o período do atendimento que ACABOU (o período só avança ao entrar em humano vindo de outro modo); para a que leva ao
+/// humano, vindo da IA, é o do atendimento NOVO. Ausente em eventos anteriores a este campo: a identidade é DESCONHECIDA, e quem a usa nunca a inventa.
+/// </param>
+/// <param name="PlacementEpoch">
+/// A geração da colocação da sessão (<c>SessionView.PlacementEpoch</c>) no instante da transição (a transição não a muda). Ausente em eventos anteriores a
+/// este campo: desconhecida.
+/// </param>
 public sealed record HandlingModeChangedV1(
     Guid SessionId,
     HandlingMode From,
     HandlingMode To,
     Guid? ResponderRef,
     long StateVersion,
-    Guid TransitionId);
+    Guid TransitionId,
+    long? MessageSeq = null,
+    long? HandlingPeriod = null,
+    long? PlacementEpoch = null);
 
-public sealed record SessionClosedV1(Guid SessionId, string Reason);
+/// <param name="LastMessageSeq">A sequência da última mensagem da sessão ao encerrar (nenhuma chega depois). Ausente em eventos anteriores a este campo.</param>
+public sealed record SessionClosedV1(Guid SessionId, string Reason, long? LastMessageSeq = null);
 
 /// <summary>
 /// Saída liberada para envio. Consumido pelo Channels. O <c>OperationId</c> é a chave de idempotência do efeito externo
@@ -80,6 +97,17 @@ public sealed record SessionAttentionRaisedV1(Guid SessionId, SessionAttentionRe
 /// andamento, montado para a unidade anterior) e pelo ContactCenter (refaz a fila). O rastro completo está na própria
 /// sessão (<c>GetTransfersAsync</c>). Não carrega conteúdo de mensagem.
 /// </summary>
+/// <param name="MessageSeq">
+/// A sequência da última mensagem da sessão no instante do encaminhamento: a fronteira estável do que a unidade (e a fila) de origem pôde ver.
+/// O que chegar depois é da unidade de destino. Quem projeta o encaminhamento a usa para limitar o histórico de quem ficou para trás. Ausente
+/// em eventos anteriores a este campo: a fronteira é desconhecida, e quem a usa fecha o histórico em vez de abri-lo.
+/// </param>
+/// <param name="FromPlacementEpoch">
+/// A geração da colocação da sessão ANTES do encaminhamento, capturada na mesma transação que o gravou: a geração da qual a sessão SAIU. É a origem do
+/// limite de histórico (<paramref name="MessageSeq"/>): só quem estava preso a esta geração pode usá-lo. Ausente em eventos anteriores a este campo: a
+/// origem é desconhecida, e o limite não pode ser certificado.
+/// </param>
+/// <param name="ToPlacementEpoch">A geração da colocação DEPOIS do encaminhamento (a anterior mais uma). Ausente em eventos anteriores a este campo.</param>
 public sealed record SessionTransferredV1(
     Guid SessionId,
     Guid TransferId,
@@ -87,7 +115,10 @@ public sealed record SessionTransferredV1(
     Guid? FromDepartmentId,
     Guid ToBusinessUnitId,
     Guid? ToDepartmentId,
-    long StateVersion);
+    long StateVersion,
+    long? MessageSeq = null,
+    long? FromPlacementEpoch = null,
+    long? ToPlacementEpoch = null);
 
 public sealed record ConversationLocaleChangedV1(
     Guid SessionId,
