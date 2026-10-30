@@ -9,7 +9,7 @@ namespace IaBimeta.Audit.Application;
 /// Grava na trilha. Tenant, ator e origem vêm do contexto confiável e a data vem do relógio: o chamador só informa
 /// o que aconteceu.
 /// </summary>
-public sealed class AuditWriter : IAuditWriter
+public sealed class AuditWriter : IAuditWriter, IAuditRecoveryWriter
 {
     public const string AuthenticationOrigin = "authentication";
 
@@ -29,6 +29,17 @@ public sealed class AuditWriter : IAuditWriter
         var contexto = _context.GetRequired();
 
         var evento = AuditEvent.Create(contexto.TenantId, contexto.Principal?.UserId, contexto.Origin, entry, _clock.GetUtcNow());
+        await _eventos.AddAsync(evento, cancellationToken);
+    }
+
+    public async Task WriteRecoveredAsync(AuditEntry entry, AuditProvenance provenance, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        ArgumentNullException.ThrowIfNull(provenance);
+
+        // O tenant é o do contexto confiável; o ator, a origem e o instante são os da operação original (a validação de formato é a de sempre).
+        var contexto = _context.GetRequired();
+        var evento = AuditEvent.Create(contexto.TenantId, provenance.ActorUserId, provenance.ActorOrigin, entry, provenance.OccurredAt);
         await _eventos.AddAsync(evento, cancellationToken);
     }
 

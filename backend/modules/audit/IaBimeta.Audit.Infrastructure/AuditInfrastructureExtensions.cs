@@ -26,6 +26,8 @@ public static class AuditInfrastructureExtensions
         services.AddScoped<IAuditRepository, AuditRepository>();
         // TryAdd: quem registrou um escritor antes (os testes de falha de auditoria) continua valendo.
         services.TryAddScoped<IAuditWriter, AuditWriter>();
+        // A entrega, com a autoria e o instante originais, do que um outbox de módulo guardou (capacidade à parte do escritor comum).
+        services.TryAddScoped<IAuditRecoveryWriter, AuditWriter>();
         services.AddScoped<AuditQueryService>();
 
         return services;

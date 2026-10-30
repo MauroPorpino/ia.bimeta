@@ -93,7 +93,14 @@ public sealed class AuditEvent : ITenantOwned
             throw new AuditValidationException("O resultado da auditoria é inválido.");
         }
 
-        return new AuditEvent(Guid.CreateVersion7(), tenantId, now, actorUserId, actorOrigin, entry.Operation, entry.ResourceType, entry.ResourceId, entry.Outcome);
+        if (entry.IdempotencyKey == Guid.Empty)
+        {
+            throw new AuditValidationException("A chave de idempotência da auditoria não pode ser vazia.");
+        }
+
+        // A chave de idempotência é o próprio identificador do evento: a chave primária (tenant, id) é quem impede a duplicidade.
+        return new AuditEvent(
+            entry.IdempotencyKey ?? Guid.CreateVersion7(), tenantId, now, actorUserId, actorOrigin, entry.Operation, entry.ResourceType, entry.ResourceId, entry.Outcome);
     }
 
     private static bool IsValidName(string? valor, int tamanhoMaximo) =>
