@@ -88,6 +88,29 @@ public enum DeliveryState
     SendUnknown = 10,
 }
 
+/// <summary>
+/// De onde vem a evidência de um status de envio ou entrega (ADR 0011, seção F; ADR 0014, seção E). A origem diz o que o status prova: só a do provedor,
+/// ligada à tentativa, prova envio, entrega ou falha definitiva; a declaração humana nunca prova falha (EFX-3).
+/// </summary>
+public enum EvidenceSource
+{
+    /// <summary>Status do provedor com o identificador da própria mensagem. É a origem padrão e preserva o comportamento anterior.</summary>
+    ProviderStatus = 1,
+
+    /// <summary>Consulta ao provedor pelo identificador da própria mensagem (por exemplo, a busca de uma mensagem enviada).</summary>
+    ProviderLookup = 2,
+
+    /// <summary>Rejeição definitiva do provedor ligada a esta tentativa.</summary>
+    ProviderRejection = 3,
+
+    /// <summary>
+    /// Declaração humana ("conferi e a mensagem foi enviada"), com permissão, justificativa e auditoria (DP-08). Só pode CONFIRMAR o envio
+    /// (<see cref="DeliveryState.Sent"/>): nunca produz falha definitiva nem entrega, e nunca provoca reenvio nem habilita duplicidade. O Conversations
+    /// recusa as demais combinações com <c>DeliveryStatusOutcome.EvidenceNotAllowed</c>.
+    /// </summary>
+    Manual = 4,
+}
+
 public enum TurnEndReason
 {
     Superseded = 1,

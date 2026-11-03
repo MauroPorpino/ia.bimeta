@@ -61,6 +61,11 @@ public interface IConversationIngestion
 /// modo dela, e só <c>TransitionHandlingMode</c> o muda. Quem decide o modo (a configuração do número, do agente ou da fila) é
 /// de outro módulo; aqui ele só é aplicado de forma atômica na criação, sem uma janela em que a IA responderia por engano.
 /// </param>
+/// <param name="ChannelData">
+/// Metadados opacos e versionados do canal (por exemplo, o tipo e o identificador de uma mídia no provedor). Validado na forma antes de qualquer acesso ao
+/// armazenamento. Enquanto não houver onde guardá-lo (fatia A3), um <c>ChannelData</c> não nulo é RECUSADO: nunca é descartado em silêncio. Omitido, não
+/// muda nada: os chamadores anteriores seguem válidos.
+/// </param>
 public sealed record IngestInboundMessageCommand(
     ChannelInstanceId ChannelInstanceId,
     string ContactExternalRef,
@@ -75,7 +80,8 @@ public sealed record IngestInboundMessageCommand(
     Locale? MessageLocale = null,
     Guid? DepartmentId = null,
     Locale? ChannelDefaultLocale = null,
-    HandlingMode InitialHandlingMode = HandlingMode.AiAutonomous);
+    HandlingMode InitialHandlingMode = HandlingMode.AiAutonomous,
+    ChannelData? ChannelData = null);
 
 public enum IngestOutcome
 {
@@ -117,7 +123,12 @@ public enum ContentChangeOutcome
 
 public sealed record ContentChangeResult(ContentChangeOutcome Outcome, ContentState? ContentState);
 
-public sealed record RecordDeliveryStatusCommand(Guid MessageId, DeliveryState State, string? FailureReason);
+/// <param name="Evidence">
+/// De onde vem a evidência deste status. O padrão é a do provedor, e o comportamento de quem não a informa não muda. A declaração humana
+/// (<see cref="EvidenceSource.Manual"/>) só pode confirmar o envio (<see cref="DeliveryState.Sent"/>): qualquer outro estado com ela é recusado
+/// (<see cref="DeliveryStatusOutcome.EvidenceNotAllowed"/>), e nunca produz falha definitiva.
+/// </param>
+public sealed record RecordDeliveryStatusCommand(Guid MessageId, DeliveryState State, string? FailureReason, EvidenceSource Evidence = EvidenceSource.ProviderStatus);
 
 public enum DeliveryStatusOutcome
 {
@@ -130,6 +141,12 @@ public enum DeliveryStatusOutcome
 
     /// <summary>A mensagem não é de saída.</summary>
     NotAnOutboundMessage = 4,
+
+    /// <summary>
+    /// A origem da evidência não pode produzir este estado: a declaração humana (<see cref="EvidenceSource.Manual"/>) só confirma o envio (<c>Sent</c>) e
+    /// nunca falha, expira, entrega nem lê. Nada foi lido nem gravado.
+    /// </summary>
+    EvidenceNotAllowed = 5,
 }
 
 public sealed record DeliveryStatusResult(DeliveryStatusOutcome Outcome, DeliveryState? CurrentState);

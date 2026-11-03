@@ -196,6 +196,145 @@ public class ServiceGuardsTests
         Assert.Null(resultado.NewMessageId);
     }
 
+    // Metadados do canal (ChannelData) e evidência de entrega (EvidenceSource): fatia A1. Tudo é recusado ANTES de qualquer acesso ao armazenamento.
+
+    private static ChannelData DadosDoCanal() => new(1, new Dictionary<string, string> { ["media.kind"] = "image", ["media.mime"] = "image/jpeg" });
+
+    [Fact]
+    public async Task ChannelData_valido_e_recusado_como_nao_suportado_e_nunca_descartado_em_silencio()
+    {
+        var m = new Montagem();
+        m.ComoSistema();
+
+        // O armazenamento explodiria se fosse tocado: a recusa é uma ConversationsValidationException, e nada foi lido nem gravado.
+        var falha = await Assert.ThrowsAsync<ConversationsValidationException>(() => m.Ingestao.IngestInboundMessageAsync(Entrada() with { ChannelData = DadosDoCanal() }));
+
+        Assert.Contains("ainda não são suportados", falha.Message);
+        Assert.Contains("não foi registrada", falha.Message);
+    }
+
+    [Fact]
+    public async Task ChannelData_invalido_e_recusado_pela_forma_e_nao_pela_falta_de_suporte()
+    {
+        var m = new Montagem();
+        m.ComoSistema();
+        var invalidos = new[]
+        {
+            new ChannelData(0, new Dictionary<string, string>()),
+            new ChannelData(1, new Dictionary<string, string> { ["Chave Invalida"] = "v" }),
+            new ChannelData(1, new Dictionary<string, string> { ["k"] = new string('v', ConversationLimits.ChannelDataValueMaxLength + 1) }),
+            new ChannelData(1, Enumerable.Range(0, ConversationLimits.ChannelDataMaxEntries + 1).ToDictionary(i => $"k{i}", _ => "v")),
+        };
+
+        foreach (var dados in invalidos)
+        {
+            var falha = await Assert.ThrowsAsync<ConversationsValidationException>(() => m.Ingestao.IngestInboundMessageAsync(Entrada() with { ChannelData = dados }));
+            Assert.DoesNotContain("ainda não são suportados", falha.Message);
+        }
+    }
+
+    [Fact]
+    public async Task Sem_ChannelData_a_ingestao_segue_o_caminho_de_antes_ate_o_armazenamento()
+    {
+        var m = new Montagem();
+        m.ComoSistema();
+
+        // Sem metadados a recusa não existe: a validação passa e a ingestão chega ao armazenamento, que aqui explode.
+        await Assert.ThrowsAsync<InvalidOperationException>(() => m.Ingestao.IngestInboundMessageAsync(Entrada()));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => m.Ingestao.IngestInboundMessageAsync(Entrada() with { ChannelData = null }));
+    }
+
+    [Fact]
+    public async Task ChannelData_nao_abre_a_ingestao_a_quem_nao_e_de_sistema()
+    {
+        var m = new Montagem();
+        m.ComoUsuarioComTudo();
+
+        var falha = await Assert.ThrowsAsync<AccessDeniedException>(() => m.Ingestao.IngestInboundMessageAsync(Entrada() with { ChannelData = DadosDoCanal() }));
+
+        Assert.Equal(Permission.SystemOperation, falha.Permission);
+    }
+
+    [Theory]
+    [InlineData(DeliveryState.Requested)]
+    [InlineData(DeliveryState.Queued)]
+    [InlineData(DeliveryState.Sending)]
+    [InlineData(DeliveryState.SendUnknown)]
+    [InlineData(DeliveryState.Delivered)]
+    [InlineData(DeliveryState.Read)]
+    [InlineData(DeliveryState.Failed)]
+    [InlineData(DeliveryState.Expired)]
+    [InlineData(DeliveryState.Dead)]
+    public async Task Evidencia_manual_so_confirma_o_envio_e_qualquer_outro_estado_e_recusado_sem_tocar_o_armazenamento(DeliveryState estado)
+    {
+        var m = new Montagem();
+        m.ComoSistema();
+
+        var resultado = await m.Ingestao.RecordDeliveryStatusAsync(new RecordDeliveryStatusCommand(Guid.NewGuid(), estado, "motivo-curto", EvidenceSource.Manual));
+
+        Assert.Equal(DeliveryStatusOutcome.EvidenceNotAllowed, resultado.Outcome);
+        Assert.Null(resultado.CurrentState);
+    }
+
+    [Fact]
+    public async Task A_recusa_da_evidencia_manual_vem_antes_da_validacao_do_motivo_pois_nao_depende_dele()
+    {
+        var m = new Montagem();
+        m.ComoSistema();
+
+        var semMotivo = await m.Ingestao.RecordDeliveryStatusAsync(new RecordDeliveryStatusCommand(Guid.NewGuid(), DeliveryState.Failed, null, EvidenceSource.Manual));
+        var motivoLivre = await m.Ingestao.RecordDeliveryStatusAsync(new RecordDeliveryStatusCommand(Guid.NewGuid(), DeliveryState.Dead, "Texto Livre", EvidenceSource.Manual));
+
+        Assert.Equal(DeliveryStatusOutcome.EvidenceNotAllowed, semMotivo.Outcome);
+        Assert.Equal(DeliveryStatusOutcome.EvidenceNotAllowed, motivoLivre.Outcome);
+    }
+
+    [Fact]
+    public async Task Evidencia_manual_com_Sent_passa_pela_cerca_e_chega_ao_armazenamento()
+    {
+        var m = new Montagem();
+        m.ComoSistema();
+
+        // Não é recusada: o que acontece depois é do armazenamento, que aqui explode.
+        await Assert.ThrowsAsync<InvalidOperationException>(() => m.Ingestao.RecordDeliveryStatusAsync(new RecordDeliveryStatusCommand(Guid.NewGuid(), DeliveryState.Sent, null, EvidenceSource.Manual)));
+    }
+
+    [Theory]
+    [InlineData(EvidenceSource.ProviderStatus)]
+    [InlineData(EvidenceSource.ProviderLookup)]
+    [InlineData(EvidenceSource.ProviderRejection)]
+    public async Task As_evidencias_do_provedor_mantem_o_comportamento_de_antes(EvidenceSource origem)
+    {
+        var m = new Montagem();
+        m.ComoSistema();
+
+        // Estado de envio: chega ao armazenamento. Falha definitiva sem motivo: a mesma ConversationsValidationException de antes. Nenhuma é "EvidenceNotAllowed".
+        await Assert.ThrowsAsync<InvalidOperationException>(() => m.Ingestao.RecordDeliveryStatusAsync(new RecordDeliveryStatusCommand(Guid.NewGuid(), DeliveryState.Sent, null, origem)));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => m.Ingestao.RecordDeliveryStatusAsync(new RecordDeliveryStatusCommand(Guid.NewGuid(), DeliveryState.Failed, "recipient-unreachable", origem)));
+        await Assert.ThrowsAsync<ConversationsValidationException>(() => m.Ingestao.RecordDeliveryStatusAsync(new RecordDeliveryStatusCommand(Guid.NewGuid(), DeliveryState.Failed, null, origem)));
+    }
+
+    [Fact]
+    public async Task Origem_de_evidencia_inexistente_e_recusada()
+    {
+        var m = new Montagem();
+        m.ComoSistema();
+
+        await Assert.ThrowsAsync<ConversationsValidationException>(() => m.Ingestao.RecordDeliveryStatusAsync(new RecordDeliveryStatusCommand(Guid.NewGuid(), DeliveryState.Sent, null, (EvidenceSource)99)));
+        await Assert.ThrowsAsync<ConversationsValidationException>(() => m.Ingestao.RecordDeliveryStatusAsync(new RecordDeliveryStatusCommand(Guid.NewGuid(), DeliveryState.Sent, null, (EvidenceSource)0)));
+    }
+
+    [Fact]
+    public async Task Evidencia_manual_so_e_aceita_de_contexto_de_sistema()
+    {
+        var m = new Montagem();
+        m.ComoUsuarioComTudo();
+
+        var falha = await Assert.ThrowsAsync<AccessDeniedException>(() => m.Ingestao.RecordDeliveryStatusAsync(new RecordDeliveryStatusCommand(Guid.NewGuid(), DeliveryState.Sent, null, EvidenceSource.Manual)));
+
+        Assert.Equal(Permission.SystemOperation, falha.Permission);
+    }
+
     // Consultas
 
     [Fact]
@@ -232,6 +371,59 @@ public class ServiceGuardsTests
         await Assert.ThrowsAsync<ConversationsValidationException>(() => m.Consultas.ListSessionsAsync(new ListSessionsQuery(10, "cursor-adulterado", null)));
         await Assert.ThrowsAsync<ConversationsValidationException>(() => m.Consultas.GetHistoryAsync(new GetHistoryQuery(Guid.NewGuid(), 10, "cursor-adulterado", HistoryOrder.NewestFirst)));
         await Assert.ThrowsAsync<ConversationsValidationException>(() => m.Consultas.GetHistoryAsync(new GetHistoryQuery(Guid.NewGuid(), 10, null, (HistoryOrder)0)));
+    }
+
+    // Consulta de efeito: só a transição e o encaminhamento são respondidos; os tipos reservados e os desconhecidos falham fechado, antes de tocar o armazenamento.
+
+    [Theory]
+    [InlineData(EffectKind.HumanReply)]
+    [InlineData(EffectKind.SessionClose)]
+    public async Task A_consulta_de_efeito_recusa_os_tipos_reservados_ainda_nao_suportados_sem_tocar_o_armazenamento(EffectKind tipo)
+    {
+        var m = new Montagem();
+        m.ComoSistema();
+
+        // O armazenamento explodiria se fosse tocado: a recusa é uma ConversationsValidationException, e nada foi lido.
+        var falha = await Assert.ThrowsAsync<ConversationsValidationException>(() => m.Consultas.GetEffectAsync(new GetEffectQuery(Guid.NewGuid(), tipo, Guid.NewGuid())));
+
+        Assert.Contains("ainda não suporta", falha.Message);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(5)]
+    [InlineData(99)]
+    [InlineData(-1)]
+    public async Task A_consulta_de_efeito_com_tipo_desconhecido_falha_fechada_sem_tocar_o_armazenamento(int valor)
+    {
+        var m = new Montagem();
+        m.ComoSistema();
+
+        var falha = await Assert.ThrowsAsync<ConversationsValidationException>(() => m.Consultas.GetEffectAsync(new GetEffectQuery(Guid.NewGuid(), (EffectKind)valor, Guid.NewGuid())));
+
+        Assert.DoesNotContain("ainda não suporta", falha.Message);
+    }
+
+    [Theory]
+    [InlineData(EffectKind.Transition)]
+    [InlineData(EffectKind.Transfer)]
+    public async Task A_consulta_de_efeito_da_transicao_e_do_encaminhamento_segue_ate_o_armazenamento_como_antes(EffectKind tipo)
+    {
+        var m = new Montagem();
+        m.ComoSistema();
+
+        // Não são recusados: a consulta chega ao armazenamento (que aqui explode). O identificador vazio continua recusado para todos os tipos.
+        await Assert.ThrowsAsync<InvalidOperationException>(() => m.Consultas.GetEffectAsync(new GetEffectQuery(Guid.NewGuid(), tipo, Guid.NewGuid())));
+        await Assert.ThrowsAsync<ConversationsValidationException>(() => m.Consultas.GetEffectAsync(new GetEffectQuery(Guid.NewGuid(), tipo, Guid.Empty)));
+    }
+
+    [Fact]
+    public async Task A_consulta_de_efeito_continua_exigindo_o_contexto_de_tenant_antes_de_qualquer_recusa()
+    {
+        var m = new Montagem();
+
+        await Assert.ThrowsAsync<TenantContextRequiredException>(() => m.Consultas.GetEffectAsync(new GetEffectQuery(Guid.NewGuid(), EffectKind.HumanReply, Guid.NewGuid())));
+        await Assert.ThrowsAsync<TenantContextRequiredException>(() => m.Consultas.GetEffectAsync(new GetEffectQuery(Guid.NewGuid(), EffectKind.Transition, Guid.NewGuid())));
     }
 
     [Fact]

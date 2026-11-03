@@ -1,11 +1,22 @@
 namespace IaBimeta.Conversations.Contracts.Queries;
 
-/// <summary>Qual efeito se pergunta: a transição de atendimento (<c>TransitionId</c>) ou o encaminhamento de unidade (<c>TransferId</c>).</summary>
+/// <summary>
+/// Qual efeito se pergunta: a transição de atendimento (<c>TransitionId</c>), o encaminhamento de unidade (<c>TransferId</c>) e, previstos pelas emendas do
+/// ADR 0009, a resposta humana (7ª operação) e o encerramento delegado (9ª operação). Os dois últimos são RESERVADOS: a consulta de efeito os RECUSA
+/// (<c>ConversationsValidationException</c>, antes de ler qualquer coisa) até serem respondidos, junto das operações (fatias A4 e A6). Só a transição e o
+/// encaminhamento têm consulta hoje, e qualquer outro valor falha fechado.
+/// </summary>
 public enum EffectKind
 {
     Transition = 1,
 
     Transfer = 2,
+
+    /// <summary>O <c>OperationId</c> da resposta humana (ADR 0014, seção A). Reservado até a fatia A4.</summary>
+    HumanReply = 3,
+
+    /// <summary>O <c>OperationId</c> do encerramento delegado (ADR 0009, item 10). Reservado até a fatia A6.</summary>
+    SessionClose = 4,
 }
 
 /// <summary>

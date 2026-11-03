@@ -123,6 +123,14 @@ public sealed class ConversationQueryService : IConversationQueries
             throw new ConversationsValidationException("A consulta de efeito precisa do tipo e do identificador da operação.");
         }
 
+        // Só a transição e o encaminhamento têm consulta de efeito hoje. HumanReply e SessionClose já existem no contrato (ADR 0009 e ADR 0014), mas só passam a ser
+        // respondidos junto das operações (fatias A4 e A6): até lá são RECUSADOS, e antes de ler qualquer coisa, em vez de tratados como transição. Qualquer valor
+        // que não seja um dos dois tratados abaixo falha fechado, inclusive um tipo futuro que alguém defina sem tratá-lo aqui.
+        if (query.Kind is not (EffectKind.Transition or EffectKind.Transfer))
+        {
+            throw new ConversationsValidationException("A consulta de efeito ainda não suporta este tipo de efeito: só a transição e o encaminhamento.");
+        }
+
         // Sessão inexistente, de outro tenant ou fora do alcance do contexto: o efeito também "não existe" (TEN-2). Nada é escrito nem travado.
         var linha = await _store.FindSessionAsync(query.SessionId, cancellationToken);
         if (linha is null || !contexto.IsAllowed(Permission.ConversationRead, linha.Session.OrganizationId))
@@ -143,6 +151,7 @@ public sealed class ConversationQueryService : IConversationQueries
                 : new EffectView(EffectOutcome.NotFound);
         }
 
+        // EffectKind.Transition: o único tipo que sobra depois da recusa acima e do encaminhamento.
         if (await _store.FindTransitionReadOnlyAsync(query.SessionId, query.OperationId, cancellationToken) is not { } transicao)
         {
             return new EffectView(EffectOutcome.NotFound);

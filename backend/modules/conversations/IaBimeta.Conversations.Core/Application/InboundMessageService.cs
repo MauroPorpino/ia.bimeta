@@ -75,6 +75,15 @@ public sealed class InboundMessageService : IConversationIngestion
             throw new ConversationsValidationException("O momento da mensagem no provedor é obrigatório.");
         }
 
+        // Metadados do canal: validados na forma e, enquanto não houver onde guardá-los (fatia A3, migração 6), RECUSADOS antes de qualquer acesso ao
+        // armazenamento. Nunca são descartados em silêncio: o chamador sabe que a mensagem não foi registrada.
+        if (command.ChannelData is { } dadosDoCanal)
+        {
+            ConversationLimits.ValidateChannelData(dadosDoCanal);
+            throw new ConversationsValidationException(
+                "Os dados do canal (ChannelData) ainda não são suportados: serão guardados numa fatia seguinte, e a mensagem não foi registrada.");
+        }
+
         // Caminho rápido da duplicata: o mesmo evento do provedor já gravado devolve o resultado original, sem travar nada.
         var existente = await _store.FindMessageByProviderEventAsync(command.ChannelInstanceId, evento, cancellationToken);
         if (existente is not null)
@@ -273,6 +282,18 @@ public sealed class InboundMessageService : IConversationIngestion
             throw new ConversationsValidationException("O estado de entrega é inválido.");
         }
 
+        if (!Enum.IsDefined(command.Evidence))
+        {
+            throw new ConversationsValidationException("A origem da evidência do status é inválida.");
+        }
+
+        // A declaração humana só CONFIRMA o envio (DP-08; ADR 0011, seção F): nunca produz falha, expiração, entrega nem leitura. A recusa vem antes de ler ou
+        // gravar qualquer coisa, e a máquina de estados do envio não muda: a origem padrão do provedor segue exatamente como era.
+        if (!IsEvidenceAllowed(command.Evidence, command.State))
+        {
+            return new DeliveryStatusResult(DeliveryStatusOutcome.EvidenceNotAllowed, null);
+        }
+
         var motivo = DeliveryStateRules.IsDefinitiveFailure(command.State) ? ConversationLimits.ValidateReason(command.FailureReason) : null;
 
         await using var trabalho = await _store.BeginAsync(cancellationToken);
@@ -314,6 +335,10 @@ public sealed class InboundMessageService : IConversationIngestion
 
         return new DeliveryStatusResult(DeliveryStatusOutcome.Applied, mensagem.DeliveryState);
     }
+
+    /// <summary>Só a declaração humana tem restrição: ela confirma <see cref="DeliveryState.Sent"/> e nada mais.</summary>
+    private static bool IsEvidenceAllowed(EvidenceSource evidence, DeliveryState state) =>
+        evidence != EvidenceSource.Manual || state == DeliveryState.Sent;
 
     public async Task<RecordTranslationResult> RecordMessageTranslationAsync(RecordMessageTranslationCommand command, CancellationToken cancellationToken = default)
     {

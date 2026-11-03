@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using IaBimeta.Conversations.Contracts;
 
 namespace IaBimeta.Conversations.Domain;
 
@@ -17,8 +18,19 @@ public static class ConversationLimits
     public const int DefaultSnapshotMessages = 50;
     public const int MaxSnapshotMessages = 200;
 
+    // Limites estruturais do bloco opaco de metadados do canal (ChannelData). São FIXOS: não dependem de configuração mutável nem de tenant, então uma
+    // repetição de um pedido não quebra por mudança de limite (ADR 0014, seção A, passo 1). O contrato os documenta em `ChannelData`.
+    public const int ChannelDataMinVersion = 1;
+    public const int ChannelDataMaxEntries = 32;
+    public const int ChannelDataKeyMaxLength = 64;
+    public const int ChannelDataValueMaxLength = 1024;
+    public const int ChannelDataMaxTotalLength = 8192;
+
     /// <summary>Motivos são códigos curtos (<c>manual</c>, <c>chatty-burst</c>), sem espaços: nada de texto livre que possa carregar segredo.</summary>
     private static readonly Regex ReasonPattern = new("^[a-z0-9][a-z0-9_.-]*$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    /// <summary>Chaves de <c>ChannelData</c>: o mesmo formato dos códigos curtos, mas ancorado em <c>\z</c>, para que uma quebra de linha no fim não passe.</summary>
+    private static readonly Regex ChannelDataKeyPattern = new("^[a-z0-9][a-z0-9_.-]*\\z", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     /// <exception cref="ConversationsValidationException">O motivo está fora do formato.</exception>
     public static string ValidateReason(string? reason)
@@ -41,5 +53,61 @@ public static class ConversationLimits
         }
 
         return provenance;
+    }
+
+    /// <summary>
+    /// Confere a FORMA do bloco de metadados do canal: versão de 1 em diante, no máximo <see cref="ChannelDataMaxEntries"/> entradas, chaves no formato dos códigos
+    /// curtos, valores sem caractere de controle, e os limites de tamanho de chave, de valor e do total (chaves mais valores). Não interpreta nenhum valor.
+    /// </summary>
+    /// <exception cref="ConversationsValidationException">O bloco está fora dos limites ou do formato.</exception>
+    public static void ValidateChannelData(ChannelData data)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+
+        if (data.Version < ChannelDataMinVersion)
+        {
+            throw new ConversationsValidationException($"A versão dos dados do canal deve ser {ChannelDataMinVersion} ou maior.");
+        }
+
+        if (data.Values is null)
+        {
+            throw new ConversationsValidationException("Os dados do canal precisam de um conjunto de valores (pode ser vazio).");
+        }
+
+        if (data.Values.Count > ChannelDataMaxEntries)
+        {
+            throw new ConversationsValidationException($"Os dados do canal aceitam no máximo {ChannelDataMaxEntries} entradas.");
+        }
+
+        var total = 0;
+        foreach (var (chave, valor) in data.Values)
+        {
+            if (string.IsNullOrEmpty(chave) || chave.Length > ChannelDataKeyMaxLength || !ChannelDataKeyPattern.IsMatch(chave))
+            {
+                throw new ConversationsValidationException(
+                    $"Cada chave dos dados do canal deve ter de 1 a {ChannelDataKeyMaxLength} caracteres: letras minúsculas, números e '_.-', começando por letra ou número.");
+            }
+
+            if (valor is null)
+            {
+                throw new ConversationsValidationException("Os valores dos dados do canal não podem ser nulos.");
+            }
+
+            if (valor.Length > ChannelDataValueMaxLength)
+            {
+                throw new ConversationsValidationException($"Cada valor dos dados do canal aceita no máximo {ChannelDataValueMaxLength} caracteres.");
+            }
+
+            if (valor.Any(char.IsControl))
+            {
+                throw new ConversationsValidationException("Os valores dos dados do canal não podem ter caractere de controle.");
+            }
+
+            total += chave.Length + valor.Length;
+            if (total > ChannelDataMaxTotalLength)
+            {
+                throw new ConversationsValidationException($"Os dados do canal aceitam no máximo {ChannelDataMaxTotalLength} caracteres somando chaves e valores.");
+            }
+        }
     }
 }
