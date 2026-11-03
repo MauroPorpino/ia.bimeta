@@ -210,7 +210,7 @@ Nunca inventar código de exame, cobertura, preço, disponibilidade ou interpret
 3. Conversation Engine + Context Manager com testes de isolamento Mauro/Pedro.
 4. Central de atendimento, filas, roteamento e handoff IA/humano.
 5. WhatsApp e webhooks com testes seguros.
-6. AI Provider Gateway BYOK, agente e conhecimento aprovado.
+6. AI Provider Gateway BYOK, agente e conhecimento aprovado, em duas partes (faseamento aprovado pelo decisor em 03/11/2026; formalizado no ADR 0017, aceito em 03/11/2026): **6a (MVP, em paralelo à etapa 5)**, com AiGateway e Agents mínimos para o atendimento inicial por IA (OpenAI e Anthropic, BYOK, instruções e FAQ publicados por tenant); e **6b**, com o Knowledge Engine e os agentes ampliados, depois do MVP.
 7. Workflow Engine e Capability Execution Engine.
 8. Conector LabNet, documentos, orçamento e agendamento com homologação.
 9. Employee AI Workspace (Assistente IA interno), inicialmente somente leitura, com catálogo inicial de capacidades LabNet homologadas (seção 15).

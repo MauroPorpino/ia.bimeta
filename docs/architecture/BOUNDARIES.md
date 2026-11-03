@@ -28,9 +28,9 @@
 | Conversations | Conversation Engine e Context Manager | Contact, ServiceSession, Conversation, Message, Attachment, **estado e modo de atendimento** | 3 |
 | ContactCenter | Central de Atendimento e Routing/Escalation | ServiceQueue, QueueMembership, RoutingPolicy, SchedulePolicy, atribuição e histórico de handoff | 4 |
 | Channels | Channel Gateway/Registry | ChannelAccount (conta no provedor), ChannelInstance (número), unidades autorizadas de cada número, ChannelRoute (rota de entrada) e credenciais por referência (**cadastro**, entregue em 28/10/2026); eventos brutos de webhook (Inbox) | 5 (cadastro antecipado; Receiver, Inbox e Sender seguem na etapa 5) |
-| AiGateway | AI Provider Gateway | AiProviderCredentialReference, AiRequest | 6 |
-| Knowledge | Knowledge Engine | KnowledgeSource, KnowledgeItem, KnowledgeRevision, KnowledgeApproval | 6 |
-| Agents | AI Agent Runtime | AgentDefinition | 6 e 7 |
+| AiGateway | AI Provider Gateway | AiProviderCredentialReference, AiRequest | 6a (MVP, em paralelo à 5; ADR 0017) |
+| Knowledge | Knowledge Engine | KnowledgeSource, KnowledgeItem, KnowledgeRevision, KnowledgeApproval | 6b |
+| Agents | AI Agent Runtime | AgentDefinition | 6a (mínimo; ADR 0017), 6b e 7 |
 | Capabilities | Capability Execution Engine | IntegrationDefinition, Capability, CapabilityExecution | 7 |
 | Workflows | Workflow Engine | WorkflowDefinition, WorkflowVersion, WorkflowInstance, WorkflowState | 7 |
 | EmployeeAssistant | Employee AI Workspace | EmployeeAssistantSession | 9 |
@@ -73,11 +73,11 @@ tests/
 
 `Audit` e os projetos `Infrastructure` entraram na 2b, e o `Conversations` (`Contracts`, `Core`, `Infrastructure` e `Presentation`) na etapa 3. Os projetos globais antigos (`Domain`, `Application`, `Infrastructure`) e o `Domain.Tests` já não fazem parte da solução: saíram nos commits `72e94e2` e `5b6c8ac`.
 
-O `Channels` (`Contracts`, `Core`, `Infrastructure` e `Presentation`) nasceu em 28/10/2026 só com o **cadastro**: conta, número, unidades autorizadas, rota de entrada e credenciais por referência. O `Channels.Contracts` existe porque o host o consome (adaptador da porta de autorização de unidade do `Conversations`, ADR 0008). O Receiver, o Inbox, o Sender e a integração com a Meta **não existem** e continuam na etapa 5, sob o gate PRV-2 (§12.11). Os testes do módulo ficam em `tests/channels/` e em `tests/IaBimeta.IntegrationTests/Channels/`.
+O `Channels` (`Contracts`, `Core`, `Infrastructure` e `Presentation`) nasceu em 28/10/2026 só com o **cadastro**: conta, número, unidades autorizadas, rota de entrada e credenciais por referência. O `Channels.Contracts` existe porque o host o consome (adaptador da porta de autorização de unidade do `Conversations`, ADR 0008). O Receiver, o Inbox, o Sender e a integração com a Meta **não existem** e continuam na etapa 5, sob o gate PRV-2 (§12.11), cumprido para o WhatsApp em 03/11/2026 (ADR 0011, A.2). Os testes do módulo ficam em `tests/channels/` e em `tests/IaBimeta.IntegrationTests/Channels/`.
 
 O `Identity.Contracts` nasceu em 28/10/2026, porque o `ContactCenter` o consome (`IUserDirectory`: o usuário existe no tenant). O `ContactCenter` (`Core`, `Infrastructure` e `Presentation`) nasceu na etapa 4 **sem `Contracts`**: nenhum módulo ou adaptador o consome ainda (PRJ-2), e um teste de arquitetura afirma essa ausência até o primeiro consumidor (o `Agents`, que só pede `RequestHandoff`). Ele cobre filas e atendentes, a entrada de conversas, a atribuição, a transferência, o handoff IA/humano, o roteamento, o horário de atendimento e a prioridade. A aresta `ContactCenter` → `Conversations` já constava da matriz e passou a ser usada, e a matriz não mudou. Os testes ficam em `tests/contact-center/` e em `tests/IaBimeta.IntegrationTests/ContactCenter/`.
 
-**Divergência registrada:** a REC-2 (§12.2) descreve a resolução do canal por uma projeção local `channels.channel_account`, e o cadastro implementado resolve a rota de entrada por `channels.channel_routes` (provedor e identificador externo). A REC-2 não foi alterada: a conciliação é **obrigatória antes da implementação do Receiver da Meta**, sob o gate PRV-2, e será registrada no ADR do `Channels` (ver ADR 0008, Pendências).
+**Divergência conciliada (v0.4.7):** a REC-2 (§12.2) descrevia a resolução do canal por uma projeção local `channels.channel_account`, e o cadastro implementado resolve a rota de entrada por `channels.channel_routes` (provedor e identificador externo). A conciliação do ADR 0011, A.1, foi aprovada em 03/11/2026 e a REC-1, a REC-2, a REC-3, a REC-4 e a REC-6 foram ajustadas (§12.2 e histórico): **não existe tabela `channel_account` paralela**.
 
 O `IaBimeta.Worker` e o bloco `IaBimeta.Messaging` nascem na etapa 4, com o primeiro processamento assíncrono durável. O `Messaging` é implementado progressivamente, sem antecipar funcionalidade sem necessidade comprovada (§12.12).
 
@@ -323,12 +323,12 @@ Cada tabela pertence ao esquema do módulo dono (DAD-1 e DAD-2). O bloco `IaBime
 
 ### 12.2 Receiver
 
-- **REC-1 (ordem das etapas):** ler o corpo bruto → localizar o canal pelo identificador opaco da URL → verificar a assinatura sobre o corpo bruto, com comparação em tempo constante e **antes de interpretar o conteúdo** → identificar o tenant pelo `ChannelAccount` → separar o lote em eventos → gravar no Inbox (`INSERT … ON CONFLICT DO NOTHING`) numa transação → commit → HTTP 200.
-- **REC-2 (resolução segura, sem chamada externa):** canal, tenant e unidade vêm de uma **projeção local do `Channels`** (tabela `channels.channel_account`, com cache em memória e invalidação). Ela guarda o identificador do provedor, o tenant, a unidade, o estado (ativa ou pausada) e a referência ao segredo de assinatura. É montada e validada **na administração do canal**, quando o `Channels` consulta `Tenancy.Contracts`, e nunca durante o webhook. O segredo é resolvido sem chamada remota lenta por requisição (cache com validade e invalidação).
-- **REC-3 (respostas):** identificador de canal desconhecido ou inativo na URL: **404**, sem detalhe. Assinatura inválida: **401**, e nada é gravado. Assinatura válida, mas conta desconhecida dentro do payload: descarta o evento, conta na métrica e responde 200, para evitar tempestade de reenvios. Falha de gravação: **5xx**.
-- **REC-4 (só gravar):** nenhum processamento de negócio e nenhuma chamada a outro módulo, à IA ou ao provedor (ARQ-19). Sem conteúdo de mensagem em log, e com limite de tamanho do corpo.
+- **REC-1 (ordem das etapas, em duas etapas de resolução):** ler o corpo bruto (limite de tamanho compatível com o lote do provedor) → localizar a **conta** e o segredo de assinatura pelo identificador opaco da URL, **sem ler o corpo** → verificar a assinatura sobre o corpo bruto, com comparação em tempo constante e **antes de interpretar o conteúdo** → separar o lote em eventos → resolver cada evento em `channels.channel_routes` e conferi-lo contra a conta da URL (instância de outra conta ou de outro tenant: descartar e contar) → gravar no Inbox (`INSERT … ON CONFLICT DO NOTHING`), só de instância `Active`, numa transação → commit → HTTP 200.
+- **REC-2 (resolução segura, sem chamada externa):** conta, instância, tenant e unidade vêm de duas leituras locais da base do próprio `Channels`: a **conta** (identificador opaco de webhook, estado e referência ao segredo de assinatura) e **`channels.channel_routes`** (provedor e identificador externo → instância e tenant), que já é o cadastro e é a projeção do segundo passo. **Não existe tabela `channel_account` paralela.** Ambas são montadas e validadas **na administração do canal**, quando o `Channels` consulta `Tenancy.Contracts`, e nunca durante o webhook; o Receiver as lê por cache em memória com validade e invalidação, sem chamada remota lenta por requisição. O segredo de assinatura (`AppSecret`) pertence ao **aplicativo** do provedor: contas do mesmo aplicativo podem compartilhar o valor, e o que as distingue é o identificador opaco da URL e a rota. A separação de responsabilidades não muda: o `Channels` resolve, autentica e grava no Inbox; o `Conversations` não conhece provedor, assinatura nem rota.
+- **REC-3 (respostas):** identificador de conta desconhecido ou inativo na URL: **404**, sem detalhe. Assinatura inválida: **401**, e nada é gravado. Assinatura válida, mas número ou conta desconhecidos (ou de outra conta) dentro do payload: descarta o evento, conta na métrica e responde 200, para evitar tempestade de reenvios. Instância `Inactive` ou `Suspended` em payload válido: o evento não é gravado, responde-se 200 e conta-se a métrica `inactive_channel`. Falha de gravação: **5xx**. O pedido de verificação do provedor (GET com desafio) é atendido pelo mesmo identificador opaco.
+- **REC-4 (só gravar):** nenhum processamento de negócio e nenhuma chamada a outro módulo, à IA ou ao provedor (ARQ-19). Sem conteúdo de mensagem em log, e com limite de tamanho do corpo que admite o lote do provedor (parâmetro, PRV-1).
 - **REC-5 (tempo):** cada evento grava `provider_timestamp` (do payload), `received_at` (relógio do servidor) e `ingest_seq` (sequência crescente de ingestão).
-- **REC-6:** os parâmetros do provedor (assinatura, reenvios, limites) estão sujeitos à confirmação da seção 12.11.
+- **REC-6:** os parâmetros do provedor (assinatura, reenvios, limites) estão sujeitos à confirmação da seção 12.11, cujo resultado para o WhatsApp (03/11/2026) está registrado no ADR 0011, A.2.
 
 ### 12.3 Processing
 
@@ -413,24 +413,24 @@ Usa `System.Diagnostics.Metrics` e `ActivitySource` do .NET, **sem pacote novo**
 - **Provedor indisponível:** a fila de envio acumula com backoff e disjuntor por conta. O Receiver não é afetado.
 - **Nós indisponíveis:** se o Receiver falhar, o provedor reenvia conforme a política dele. Fora dessa janela a mensagem se perde, por isso o alerta de taxa de erro do webhook é crítico. Ao voltar, o acúmulo é absorvido pelos limites por tenant.
 
-**Parâmetros sujeitos à confirmação** (leitura por extrator em 26/10/2026, não texto integral):
+**Parâmetros sujeitos à confirmação** (valores indicados em leitura por extrator de 26/10/2026; **situação** conforme a consulta à documentação oficial da Meta de 03/11/2026, com fontes registradas no ADR 0011, A.2). A situação do WhatsApp **não** vale para os demais canais:
 
-| Parâmetro | Valor indicado | Situação |
+| Parâmetro | Valor indicado | Situação (WhatsApp, 03/11/2026) |
 |---|---|---|
-| Reenvio do webhook sem HTTP 200 | por até 7 dias, com frequência decrescente; pode duplicar | a confirmar |
-| Tempo máximo para responder 200 | não consta na página lida | a confirmar |
-| Assinatura `X-Hub-Signature-256` | não consta na página lida | a confirmar |
-| Ordem de entrega dos eventos | não consta na página lida | a confirmar |
-| Vazão por número | 80 mensagens por segundo por padrão | a confirmar |
-| Limite por par (empresa e usuário) | 1 mensagem a cada 6 s, rajada de 45 em 6 s com empréstimo; erro 131056 | a confirmar |
-| Erros a retentar com espera | 130429, 131056, 131000 | a confirmar |
-| Erros sem retentativa automática | 131047, 131049, 131026, 131048 | a confirmar |
-| Erros de conta | 190, 368 | a confirmar |
-| Janela de 24 horas e uso de templates | não consta na página lida (o erro 131047 indica template) | a confirmar |
-| Chave de idempotência no envio e `biz_opaque_callback_data` | não consta na página lida | a confirmar |
+| Reenvio do webhook sem HTTP 200 | por até 7 dias, com frequência decrescente; pode duplicar | confirmado |
+| Tempo máximo para responder 200 | não consta na documentação oficial consultada | **não documentado**; meta interna configurável, sem garantia atribuída ao provedor |
+| Assinatura `X-Hub-Signature-256` | SHA-256 do corpo com o App Secret do aplicativo | confirmado |
+| Ordem de entrega dos eventos | não consta na documentação oficial consultada | **não documentado**; nenhuma premissa de ordem (ORD-5 e ORD-6) |
+| Vazão por número | 80 mensagens por segundo por padrão | confirmado |
+| Limite por par (empresa e usuário) | 1 mensagem a cada 6 s, rajada de 45 em 6 s com empréstimo; erro 131056 | confirmado |
+| Erros a retentar com espera | 130429, 131056, 131000 | confirmado |
+| Erros sem retentativa automática | 131047, 131049, 131026, 131048 | confirmado |
+| Erros de conta | 190, 368 | confirmado |
+| Janela de 24 horas e uso de templates | fora da janela, só template aprovado | confirmado |
+| Chave de idempotência no envio e `biz_opaque_callback_data` | campo opaco devolvido nos status; chave de idempotência de envio não encontrada | **parcial**; estratégia (c) e `SendUnknown` mantidos |
 
 - **PRV-1:** esses valores são **parâmetros de configuração**, não constantes de código.
-- **PRV-2 (gate):** nenhuma implementação do `Channels` (etapa 5) começa sem confirmar cada item na documentação oficial e registrar data e fonte no ADR do `Channels`.
+- **PRV-2 (gate):** nenhuma implementação do `Channels` (etapa 5) começa sem confirmar cada item na documentação oficial e registrar data e fonte no ADR do `Channels`. **Cumprida para o WhatsApp em 03/11/2026** (ADR 0011, A.2): oito itens confirmados, dois não documentados (resolvidos por projeto, por emenda formal do decisor) e um parcial (estratégia conservadora). A PRV-2 dos demais canais continua por adaptador.
 
 ### 12.12 Faseamento (só com necessidade comprovada)
 
@@ -439,7 +439,8 @@ Usa `System.Diagnostics.Metrics` e `ActivitySource` do .NET, **sem pacote novo**
 | 3 | contratos de eventos no `SharedKernel` e dublê em memória; nenhum outbox real |
 | 4 | `Worker` e `Messaging` v0, com o primeiro processamento assíncrono durável: o `ContactCenter` consome `HandlingModeChangedV1` (outbox, relay e inbox do consumidor). Sem escalonador justo nem lanes avançadas |
 | 5 | Receiver, Inbox, ingestão por lane e Sender; confirmação dos parâmetros do provedor; limites por tenant no primeiro processamento concorrente |
-| 6 e 7 | turno de IA por lane, falha permanente com handoff, limites de IA e de conectores |
+| 6a (MVP, em paralelo à 5; ADR 0017) | turno de IA por lane, falha permanente com handoff e limites de IA, só no necessário ao atendimento inicial por IA (AiGateway e Agents mínimos) |
+| 6b e 7 | Knowledge, agentes ampliados, limites de conectores |
 | sob demanda, comprovada por teste | escalonamento justo avançado, limitador distribuído, particionamento, `LISTEN/NOTIFY`, broker |
 
 O `Messaging` cresce só até onde a necessidade foi comprovada. Funcionalidade antecipada é rejeitada na revisão.
@@ -486,3 +487,5 @@ Todos usam o PostgreSQL 17 local (porta 5433) com dados sintéticos e dublês: u
 | 29/10/2026 | 0.4.4 | §6: registra, para a coordenação do modo IA/humano, a pré-condição atômica opcional dos comandos de transição e de encaminhamento (modo, período e responsável), a base persistida na intenção, a conclusão em parte da operação composta confirmada só em parte, a convergência da projeção durante operação pendente e a fronteira histórica depois da saída do escopo. Contratos aditivos dentro de arestas já permitidas; nenhuma aresta nova na matriz | Mauro Porpino | 0009 e 0010 (propostos, aguardam aprovação) |
 | 29/10/2026 | 0.4.5 | §6: registra a identidade durável da colocação da sessão (`PlacementEpoch`, geração monotônica no Conversations que avança a cada mudança de unidade ou setor), a geração opcional da pré-condição, o vínculo dela ao item derivado da autorização, a conferência na leitura, na revalidação e no encerramento, e que período ou geração desconhecidos nunca autorizam. Contratos aditivos dentro de arestas já permitidas; nenhuma aresta nova na matriz | Mauro Porpino | 0009 e 0010 (propostos, aguardam aprovação) |
 | 30/10/2026 | 0.4.6 | §6: registra as provas de identidade (`ScopeProof`), a obrigação de ressincronização explícita e a liquidação (inclusive a não verificada do legado sem prova), a proveniência certificada das fronteiras de histórico (colunas `history_limit_origin_epoch` e `boundary_model`), os campos de identidade aditivos nos eventos de atendimento e a **consulta de efeito somente leitura**, sexta operação da porta do ContactCenter (a superfície fechada passa de cinco para seis operações, a sexta sem escrita nem cerca). Contratos aditivos dentro de arestas já permitidas; nenhuma aresta nova na matriz | Mauro Porpino | 0009 e 0010 (propostos, aguardam aprovação) |
+| 03/11/2026 | 0.4.7 | §12.2: REC-1, REC-2, REC-3, REC-4 e REC-6 conciliadas com o cadastro (ADR 0011, A.1): resolução em duas etapas (conta pelo identificador opaco da URL, rota por `channels.channel_routes`), assinatura sobre o corpo bruto antes de interpretar o payload, validação de conta, tenant e estado da instância, ausência de tabela `channel_account` paralela, segredo de assinatura pertencente ao aplicativo do provedor. §12.11: resultado da PRV-2 do WhatsApp (ADR 0011, A.2): oito itens confirmados, dois não documentados e um parcial. §1 e §12.12: faseamento 6a/6b (AiGateway e Agents mínimos para o MVP, ADR 0017); §1, divergência da REC-2 conciliada. Nenhuma aresta nova na matriz | Mauro Porpino | 0011 (aceito parcialmente) e 0017 (proposto) |
+| 03/11/2026 | 0.4.8 | Registro: o ADR 0017 (etapa 6a, AiGateway e Agents mínimos) foi **aceito** pelo decisor, e os projetos da seção 1 que ele prevê foram aprovados como planejamento (nenhum criado). Nenhuma regra, camada, aresta ou texto normativo mudou; a matriz não mudou | Mauro Porpino | 0017 (aceito) |
