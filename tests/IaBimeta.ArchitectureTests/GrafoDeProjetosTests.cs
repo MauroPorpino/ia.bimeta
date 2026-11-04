@@ -154,21 +154,55 @@ public class GrafoDeProjetosTests
     }
 
     [Fact]
-    public void O_modulo_ContactCenter_da_etapa_4_existe_sem_Contracts_porque_ninguem_o_consome_ainda_e_o_Identity_ganhou_o_dele()
+    public void O_modulo_ContactCenter_ganhou_o_Contracts_so_para_o_RequestHandoff_do_Agents_e_nenhum_outro_modulo_o_referencia()
     {
         var nomes = Projetos.Select(p => p.Nome).ToHashSet();
 
         foreach (var esperado in new[]
         {
-            "IaBimeta.ContactCenter.Core", "IaBimeta.ContactCenter.Infrastructure", "IaBimeta.ContactCenter.Presentation",
+            "IaBimeta.ContactCenter.Contracts", "IaBimeta.ContactCenter.Core", "IaBimeta.ContactCenter.Infrastructure", "IaBimeta.ContactCenter.Presentation",
             "IaBimeta.Identity.Contracts",
         })
         {
             Assert.Contains(esperado, nomes);
         }
 
-        // PRJ-2: o Contracts só nasce com o primeiro consumidor. Nenhum módulo nem host consome o do ContactCenter ainda.
-        Assert.DoesNotContain("IaBimeta.ContactCenter.Contracts", nomes);
+        // PRJ-2 e ADR 0017 (seção B): o Contracts do ContactCenter nasceu porque o Agents é o primeiro consumidor, e só tem o RequestHandoff. Fora do próprio
+        // módulo (e dos testes), só o Agents o pode referenciar; nenhum host nem outro módulo.
+        var consumidores = Projetos.Where(p => p.Referencias.Contains("IaBimeta.ContactCenter.Contracts")).ToList();
+        Assert.NotEmpty(consumidores); // a regra tem o que verificar: o Core do próprio módulo o referencia
+
+        foreach (var consumidor in consumidores)
+        {
+            var classe = Classe(consumidor);
+            var permitido = classe.Tipo == TipoDeProjeto.Teste || (classe.Tipo == TipoDeProjeto.Modulo && classe.Modulo is "ContactCenter" or "Agents");
+            Assert.True(permitido, $"{consumidor.Nome} não pode referenciar o IaBimeta.ContactCenter.Contracts (só o próprio módulo e o Agents).");
+        }
+
+        var contratos = Assert.Single(Projetos, p => p.Nome == "IaBimeta.ContactCenter.Contracts");
+        Assert.Empty(contratos.Referencias);
+    }
+
+    [Fact]
+    public void O_modulo_AiGateway_nasce_com_Contracts_e_Core_sem_aresta_nova_na_matriz_e_sem_provedor_no_grafo()
+    {
+        var nomes = Projetos.Select(p => p.Nome).ToHashSet();
+
+        // ADR 0017 (seção B), fatias C1.1 a C1.3: só Contracts e Core. Infrastructure e Presentation nascem em C1.4 e C1.5; os adaptadores de provedor, na C4 e na C6.
+        Assert.Contains("IaBimeta.AiGateway.Contracts", nomes);
+        Assert.Contains("IaBimeta.AiGateway.Core", nomes);
+        Assert.DoesNotContain("IaBimeta.AiGateway.Infrastructure", nomes);
+        Assert.DoesNotContain("IaBimeta.AiGateway.Presentation", nomes);
+
+        // Nenhuma referência do AiGateway a outro módulo: ele usa só o SharedKernel (o tenant vem do contexto). A matriz não mudou.
+        var doModulo = Projetos.Where(p => p.Nome.StartsWith("IaBimeta.AiGateway.", StringComparison.Ordinal) && !p.Nome.EndsWith("Tests", StringComparison.Ordinal)).ToList();
+        Assert.Equal(2, doModulo.Count);
+        foreach (var projeto in doModulo)
+        {
+            Assert.All(projeto.Referencias, r => Assert.True(r is "IaBimeta.SharedKernel" or "IaBimeta.AiGateway.Contracts", $"{projeto.Nome} -> {r}"));
+        }
+
+        Assert.Equal(new[] { "Audit", "Identity", "Tenancy" }, Matriz["AiGateway"].OrderBy(m => m, StringComparer.Ordinal).ToArray());
     }
 
     [Fact]

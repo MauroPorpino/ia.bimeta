@@ -1,4 +1,5 @@
 using IaBimeta.ContactCenter.Application;
+using IaBimeta.ContactCenter.Contracts;
 using IaBimeta.Messaging;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -38,6 +39,7 @@ public static class ContactCenterInfrastructureExtensions
         services.AddScoped<ServiceQueueService>();
         services.AddScoped<HandlingExecutor>();
         services.AddScoped<QueueItemService>();
+        services.AddScoped<IHandoffRequests, HandoffRequests>();
 
         // Consumo durável do estado de atendimento do Conversations (etapa 4): o inbox do módulo e os handlers. Quem entrega os
         // eventos é o relay do Worker; o Api só registra os handlers (nenhum é chamado fora do relay).

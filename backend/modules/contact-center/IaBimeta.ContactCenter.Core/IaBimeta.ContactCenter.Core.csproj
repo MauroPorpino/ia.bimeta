@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\building-blocks\IaBimeta.SharedKernel\IaBimeta.SharedKernel.csproj" />
+    <ProjectReference Include="..\IaBimeta.ContactCenter.Contracts\IaBimeta.ContactCenter.Contracts.csproj" />
     <ProjectReference Include="..\..\conversations\IaBimeta.Conversations.Contracts\IaBimeta.Conversations.Contracts.csproj" />
     <ProjectReference Include="..\..\identity\IaBimeta.Identity.Contracts\IaBimeta.Identity.Contracts.csproj" />
     <ProjectReference Include="..\..\tenancy\IaBimeta.Tenancy.Contracts\IaBimeta.Tenancy.Contracts.csproj" />

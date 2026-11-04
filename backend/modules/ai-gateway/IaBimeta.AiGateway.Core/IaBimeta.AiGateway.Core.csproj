@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <!-- Os testes de unidade exercitam as regras do catálogo, do custo, dos limites e da política de erro. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="IaBimeta.AiGateway.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\building-blocks\IaBimeta.SharedKernel\IaBimeta.SharedKernel.csproj" />
+    <ProjectReference Include="..\IaBimeta.AiGateway.Contracts\IaBimeta.AiGateway.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>
