@@ -176,6 +176,14 @@ namespace IaBimeta.Conversations.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("author_ref");
 
+                    b.Property<string>("ChannelDataValues")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("channel_data");
+
+                    b.Property<int?>("ChannelDataVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("channel_data_version");
+
                     b.Property<Guid>("ChannelInstanceId")
                         .HasColumnType("uuid")
                         .HasColumnName("channel_instance_id");
@@ -317,6 +325,8 @@ namespace IaBimeta.Conversations.Infrastructure.Migrations
 
                     b.ToTable("messages", "conversations", t =>
                         {
+                            t.HasCheckConstraint("ck_messages_channel_data", "(channel_data IS NULL AND channel_data_version IS NULL) OR (channel_data IS NOT NULL AND channel_data_version IS NOT NULL AND channel_data_version >= 1 AND jsonb_typeof(channel_data) = 'object')");
+
                             t.HasCheckConstraint("ck_messages_direction_shape", "(direction = 1 AND inbound_seq IS NOT NULL AND provider_event_id IS NOT NULL AND author = 1 AND delivery_state IS NULL) OR (direction = 2 AND inbound_seq IS NULL AND delivery_state IS NOT NULL AND author IN (2, 3))");
 
                             t.HasCheckConstraint("ck_messages_locale", "(locale IS NULL AND locale_origin IS NULL) OR (locale IS NOT NULL AND locale_origin IS NOT NULL AND locale_origin IN (1, 2) AND locale ~ '^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$')");

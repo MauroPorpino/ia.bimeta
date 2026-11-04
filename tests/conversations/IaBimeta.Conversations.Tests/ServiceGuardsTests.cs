@@ -201,16 +201,14 @@ public class ServiceGuardsTests
     private static ChannelData DadosDoCanal() => new(1, new Dictionary<string, string> { ["media.kind"] = "image", ["media.mime"] = "image/jpeg" });
 
     [Fact]
-    public async Task ChannelData_valido_e_recusado_como_nao_suportado_e_nunca_descartado_em_silencio()
+    public async Task ChannelData_valido_nao_e_mais_recusado_e_a_ingestao_segue_ate_o_armazenamento_que_o_guarda()
     {
         var m = new Montagem();
         m.ComoSistema();
 
-        // O armazenamento explodiria se fosse tocado: a recusa é uma ConversationsValidationException, e nada foi lido nem gravado.
-        var falha = await Assert.ThrowsAsync<ConversationsValidationException>(() => m.Ingestao.IngestInboundMessageAsync(Entrada() with { ChannelData = DadosDoCanal() }));
-
-        Assert.Contains("ainda não são suportados", falha.Message);
-        Assert.Contains("não foi registrada", falha.Message);
+        // A3: o bloco válido é guardado com a mensagem. Nada o recusa mais (nem o descarta): a ingestão chega ao armazenamento, que aqui explode (InvalidOperationException),
+        // e não à ConversationsValidationException de "ainda não suportado" que a A1 lançava. A gravação e a leitura com PostgreSQL estão nos testes de integração.
+        await Assert.ThrowsAsync<InvalidOperationException>(() => m.Ingestao.IngestInboundMessageAsync(Entrada() with { ChannelData = DadosDoCanal() }));
     }
 
     [Fact]
@@ -224,6 +222,7 @@ public class ServiceGuardsTests
             new ChannelData(1, new Dictionary<string, string> { ["Chave Invalida"] = "v" }),
             new ChannelData(1, new Dictionary<string, string> { ["k"] = new string('v', ConversationLimits.ChannelDataValueMaxLength + 1) }),
             new ChannelData(1, Enumerable.Range(0, ConversationLimits.ChannelDataMaxEntries + 1).ToDictionary(i => $"k{i}", _ => "v")),
+            new ChannelData(1, new Dictionary<string, string> { ["k"] = "sozinho\uD83D" }), // substituto UTF-16 sem par: não pode ser guardado como JSON (construído aqui, fora de InlineData)
         };
 
         foreach (var dados in invalidos)

@@ -83,6 +83,22 @@ public sealed class Message : ITenantOwned
     /// <summary>De onde veio <see cref="Locale"/>; é nulo exatamente quando o idioma é desconhecido.</summary>
     public MessageLocaleOrigin? LocaleOrigin { get; private set; }
 
+    /// <summary>
+    /// A versão do bloco opaco de metadados do canal (<see cref="IaBimeta.Conversations.Contracts.ChannelData"/>), ou <c>null</c> se a mensagem não trouxe nenhum. Anda sempre
+    /// junto de <see cref="ChannelDataValues"/>: os dois são nulos ou os dois são preenchidos (o banco recusa o contrário).
+    /// </summary>
+    public int? ChannelDataVersion { get; private set; }
+
+    /// <summary>
+    /// Os pares chave/valor do bloco de metadados do canal, exatamente como o adaptador os entregou (o Conversations não os interpreta), ou <c>null</c> se a mensagem não trouxe
+    /// nenhum. É uma CÓPIA imutável: o dicionário do chamador, que pode mudar depois, não é guardado. Nasce com a mensagem e nunca muda.
+    /// </summary>
+    public IReadOnlyDictionary<string, string>? ChannelDataValues { get; private set; }
+
+    /// <summary>O bloco de metadados do canal reconstruído a partir da versão e dos pares guardados, ou <c>null</c> se a mensagem não trouxe nenhum. Não é uma coluna.</summary>
+    public IaBimeta.Conversations.Contracts.ChannelData? ChannelData =>
+        ChannelDataVersion is { } versao && ChannelDataValues is { } valores ? new IaBimeta.Conversations.Contracts.ChannelData(versao, valores) : null;
+
     public static void ValidateText(string? text, MessageKind kind, bool required)
     {
         if (required && string.IsNullOrWhiteSpace(text))
@@ -112,11 +128,18 @@ public sealed class Message : ITenantOwned
         MessageKind kind,
         string? text,
         DateTimeOffset receivedAt,
-        Locale? declaredLocale = null)
+        Locale? declaredLocale = null,
+        IaBimeta.Conversations.Contracts.ChannelData? channelData = null)
     {
         ArgumentNullException.ThrowIfNull(tenantId);
 
         var evento = ConversationLimits.ValidateProviderEventId(providerEventId);
+
+        // Defesa em profundidade: o serviço já valida o bloco antes de qualquer acesso ao armazenamento, mas a mensagem não nasce com um que fuja dos limites.
+        if (channelData is not null)
+        {
+            ConversationLimits.ValidateChannelData(channelData);
+        }
 
         if (!Enum.IsDefined(kind))
         {
@@ -153,8 +176,14 @@ public sealed class Message : ITenantOwned
             CreatedAt = receivedAt,
             Locale = declaredLocale,
             LocaleOrigin = declaredLocale is null ? null : MessageLocaleOrigin.ProviderDeclared,
+            ChannelDataVersion = channelData?.Version,
+            ChannelDataValues = channelData is null ? null : SnapshotOf(channelData.Values),
         };
     }
+
+    /// <summary>Uma cópia imutável dos pares: o dicionário do chamador pode mudar depois, e o que a mensagem guarda não pode.</summary>
+    private static IReadOnlyDictionary<string, string> SnapshotOf(IReadOnlyDictionary<string, string> valores) =>
+        new System.Collections.ObjectModel.ReadOnlyDictionary<string, string>(new Dictionary<string, string>(valores, StringComparer.Ordinal));
 
     /// <summary>Resposta da IA aceita: já nasce liberada para envio (<see cref="DeliveryState.Requested"/>) e cobre logicamente até <paramref name="coveredThroughSeq"/>.</summary>
     public static Message CreateAiReply(

@@ -83,13 +83,11 @@ public sealed class InboundMessageService : IConversationIngestion
             throw new ConversationsValidationException("O momento da mensagem no provedor é obrigatório.");
         }
 
-        // Metadados do canal: validados na forma e, enquanto não houver onde guardá-los (fatia A3, migração 6), RECUSADOS antes de qualquer acesso ao
-        // armazenamento. Nunca são descartados em silêncio: o chamador sabe que a mensagem não foi registrada.
+        // Metadados do canal (A3): validados na forma ANTES de qualquer acesso ao armazenamento, e guardados com a mensagem (versão e pares, sem interpretá-los). Uma duplicata
+        // não os regrava: a primeira gravação vale, e a repetição devolve a mensagem que já existe.
         if (command.ChannelData is { } dadosDoCanal)
         {
             ConversationLimits.ValidateChannelData(dadosDoCanal);
-            throw new ConversationsValidationException(
-                "Os dados do canal (ChannelData) ainda não são suportados: serão guardados numa fatia seguinte, e a mensagem não foi registrada.");
         }
 
         // Caminho rápido da duplicata: o mesmo evento do provedor já gravado devolve o resultado original, sem travar nada.
@@ -192,7 +190,8 @@ public sealed class InboundMessageService : IConversationIngestion
 
             var registro = sessao.RegisterInbound(command.ProviderTimestamp, agora);
             var mensagem = Message.CreateInbound(
-                contexto.TenantId, sessao.Id, conversa.Id, command.ChannelInstanceId, registro, evento, command.ProviderTimestamp, command.Kind, command.Text, agora, command.MessageLocale);
+                contexto.TenantId, sessao.Id, conversa.Id, command.ChannelInstanceId, registro, evento, command.ProviderTimestamp, command.Kind, command.Text, agora, command.MessageLocale,
+                command.ChannelData);
             trabalho.Add(mensagem);
             await trabalho.CommitAsync(
                 new[]

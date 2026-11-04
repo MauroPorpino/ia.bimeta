@@ -63,8 +63,8 @@ public interface IConversationIngestion
 /// </param>
 /// <param name="ChannelData">
 /// Metadados opacos e versionados do canal (por exemplo, o tipo e o identificador de uma mídia no provedor). Validado na forma antes de qualquer acesso ao
-/// armazenamento. Enquanto não houver onde guardá-lo (fatia A3), um <c>ChannelData</c> não nulo é RECUSADO: nunca é descartado em silêncio. Omitido, não
-/// muda nada: os chamadores anteriores seguem válidos.
+/// armazenamento e guardado com a mensagem (versão e pares, sem interpretação); um bloco inválido recusa a ingestão sem gravar nada. Numa repetição do mesmo
+/// evento do provedor vale o bloco da primeira gravação. Omitido, não muda nada: os chamadores anteriores seguem válidos.
 /// </param>
 /// <param name="AssociationMode">
 /// Como a mensagem se associa a uma sessão (ADR 0012, seção B). Hoje só existe <see cref="AssociationMode.Contact"/>, o padrão: os chamadores anteriores seguem válidos

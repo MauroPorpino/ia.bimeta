@@ -25,6 +25,11 @@ internal sealed class MessageConfiguration : IEntityTypeConfiguration<Message>
             table.HasCheckConstraint(
                 "ck_messages_locale",
                 $"(locale IS NULL AND locale_origin IS NULL) OR (locale IS NOT NULL AND locale_origin IS NOT NULL AND locale_origin IN (1, 2) AND locale ~ {LocaleConverter.SqlPattern})");
+
+            // O bloco opaco de metadados do canal (A3): a versão e os pares andam juntos, ou nenhum dos dois existe. Com bloco, a versão é de 1 em diante e os pares são um objeto JSON.
+            table.HasCheckConstraint(
+                "ck_messages_channel_data",
+                "(channel_data IS NULL AND channel_data_version IS NULL) OR (channel_data IS NOT NULL AND channel_data_version IS NOT NULL AND channel_data_version >= 1 AND jsonb_typeof(channel_data) = 'object')");
         });
 
         // TEN-3: a chave composta começa por tenant_id. O filtro global por tenant é aplicado no DbContext.
@@ -59,6 +64,11 @@ internal sealed class MessageConfiguration : IEntityTypeConfiguration<Message>
         builder.Property(m => m.CreatedAt).HasColumnName("created_at");
         builder.Property(m => m.Locale).HasColumnName("locale").HasMaxLength(Locale.MaxLength).HasConversion(typeof(LocaleConverter));
         builder.Property(m => m.LocaleOrigin).HasColumnName("locale_origin").HasConversion<short?>();
+
+        // Metadados opacos do canal (A3): a versão e os pares chave/valor (objeto jsonb de texto para texto), ou nenhum dos dois. O bloco reconstruído (ChannelData) não é coluna.
+        builder.Property(m => m.ChannelDataVersion).HasColumnName("channel_data_version");
+        builder.Property(m => m.ChannelDataValues).HasColumnName("channel_data").HasColumnType("jsonb").HasConversion(new ChannelDataValuesConverter(), new ChannelDataValuesComparer());
+        builder.Ignore(m => m.ChannelData);
 
         // As referências carregam o tenant: o banco recusa mensagem ligada à sessão ou conversa de outro tenant.
         builder.HasOne<ServiceSession>().WithMany().HasForeignKey(m => new { m.TenantId, m.SessionId }).OnDelete(DeleteBehavior.Restrict);

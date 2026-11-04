@@ -131,11 +131,42 @@ public static class ConversationLimits
                 throw new ConversationsValidationException("Os valores dos dados do canal não podem ter caractere de controle.");
             }
 
+            // O bloco é GUARDADO como JSON (A3): um substituto UTF-16 sem par não é texto Unicode válido, e o banco o recusaria na gravação. Recusar aqui, antes de
+            // qualquer acesso ao armazenamento, é o que mantém a falha limpa em vez de um erro do banco depois da trava da sessão.
+            if (HasUnpairedSurrogate(valor))
+            {
+                throw new ConversationsValidationException("Os valores dos dados do canal precisam ser texto Unicode válido (sem substituto UTF-16 sem par).");
+            }
+
             total += chave.Length + valor.Length;
             if (total > ChannelDataMaxTotalLength)
             {
                 throw new ConversationsValidationException($"Os dados do canal aceitam no máximo {ChannelDataMaxTotalLength} caracteres somando chaves e valores.");
             }
         }
+    }
+
+    /// <summary>Há um substituto UTF-16 alto sem o baixo que o segue, ou um baixo sem o alto que o precede? Um par válido (por exemplo, um emoji) não conta.</summary>
+    private static bool HasUnpairedSurrogate(string texto)
+    {
+        for (var i = 0; i < texto.Length; i++)
+        {
+            var c = texto[i];
+            if (char.IsHighSurrogate(c))
+            {
+                if (i + 1 >= texto.Length || !char.IsLowSurrogate(texto[i + 1]))
+                {
+                    return true;
+                }
+
+                i++;
+            }
+            else if (char.IsLowSurrogate(c))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
