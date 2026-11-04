@@ -66,6 +66,11 @@ public interface IConversationIngestion
 /// armazenamento. Enquanto não houver onde guardá-lo (fatia A3), um <c>ChannelData</c> não nulo é RECUSADO: nunca é descartado em silêncio. Omitido, não
 /// muda nada: os chamadores anteriores seguem válidos.
 /// </param>
+/// <param name="AssociationMode">
+/// Como a mensagem se associa a uma sessão (ADR 0012, seção B). Hoje só existe <see cref="AssociationMode.Contact"/>, o padrão: os chamadores anteriores seguem válidos
+/// e o comportamento não muda. Um valor que não seja <see cref="AssociationMode.Contact"/> (inclusive um número fora do enum) é RECUSADO antes de qualquer acesso ao
+/// armazenamento: nunca é rebaixado para <see cref="AssociationMode.Contact"/>.
+/// </param>
 public sealed record IngestInboundMessageCommand(
     ChannelInstanceId ChannelInstanceId,
     string ContactExternalRef,
@@ -81,7 +86,8 @@ public sealed record IngestInboundMessageCommand(
     Guid? DepartmentId = null,
     Locale? ChannelDefaultLocale = null,
     HandlingMode InitialHandlingMode = HandlingMode.AiAutonomous,
-    ChannelData? ChannelData = null);
+    ChannelData? ChannelData = null,
+    AssociationMode AssociationMode = AssociationMode.Contact);
 
 public enum IngestOutcome
 {

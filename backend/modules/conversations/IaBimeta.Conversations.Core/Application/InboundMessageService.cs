@@ -51,11 +51,12 @@ public sealed class InboundMessageService : IConversationIngestion
         contexto.Require(Permission.SystemOperation);
 
         // Valida a forma antes de qualquer consulta ou gravação (as regras de formato moram no domínio).
-        var evento = (command.ProviderEventId ?? string.Empty).Trim();
         if (command.ChannelInstanceId.IsEmpty)
         {
             throw new ConversationsValidationException("A instância de canal é obrigatória.");
         }
+
+        var evento = ConversationLimits.ValidateProviderEventId(command.ProviderEventId);
 
         var contato = Contact.Create(contexto.TenantId, command.ChannelInstanceId, command.ContactExternalRef, command.ContactDisplayName, DateTimeOffset.UnixEpoch);
         if (!Enum.IsDefined(command.Kind))
@@ -67,6 +68,13 @@ public sealed class InboundMessageService : IConversationIngestion
         if (!Enum.IsDefined(command.InitialHandlingMode) || command.InitialHandlingMode == HandlingMode.AiSupervised)
         {
             throw new ConversationsValidationException("O modo inicial deve ser IA autônoma ou atendimento humano; o modo híbrido ainda não está especificado.");
+        }
+
+        // O modo de associação: hoje só existe o do contato (chat). Qualquer outro valor é RECUSADO antes de ler ou gravar qualquer coisa, e nunca rebaixado
+        // para o contato: rebaixar trataria uma mensagem de outro tipo de associação (a thread de e-mail, de uma fatia posterior) como chat (ADR 0012, seção B).
+        if (command.AssociationMode != AssociationMode.Contact)
+        {
+            throw new ConversationsValidationException("O modo de associação informado ainda não é suportado: só a associação por contato (chat).");
         }
 
         Message.ValidateText(command.Text, command.Kind, required: command.Kind == MessageKind.Text);
@@ -148,7 +156,7 @@ public sealed class InboundMessageService : IConversationIngestion
 
             var contato = await trabalho.GetOrCreateContactAsync(command.ChannelInstanceId, referenciaDoContato, command.ContactDisplayName, agora, cancellationToken);
             var sessaoId = await trabalho.GetOrCreateOpenSessionIdAsync(
-                contato, command.OrganizationId, unidadeId, command.DepartmentId, command.InitialHandlingMode, agora, cancellationToken);
+                contato, command.OrganizationId, unidadeId, command.DepartmentId, command.InitialHandlingMode, command.AssociationMode, agora, cancellationToken);
             var sessao = await trabalho.LockSessionAsync(sessaoId, cancellationToken);
             if (sessao is null || !sessao.IsOpen)
             {

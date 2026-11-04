@@ -48,8 +48,8 @@ namespace IaBimeta.Conversations.Infrastructure.Migrations
 
                     b.Property<string>("ExternalRef")
                         .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)")
+                        .HasMaxLength(254)
+                        .HasColumnType("character varying(254)")
                         .HasColumnName("external_ref");
 
                     b.Property<string>("PreferredLocale")
@@ -239,8 +239,8 @@ namespace IaBimeta.Conversations.Infrastructure.Migrations
                         .HasColumnName("occurred_at");
 
                     b.Property<string>("ProviderEventId")
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
                         .HasColumnName("provider_event_id");
 
                     b.Property<DateTimeOffset?>("ProviderTimestamp")
@@ -396,6 +396,12 @@ namespace IaBimeta.Conversations.Infrastructure.Migrations
                         .HasColumnType("bigint")
                         .HasColumnName("answered_through_seq");
 
+                    b.Property<short>("AssociationMode")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("smallint")
+                        .HasDefaultValue((short)1)
+                        .HasColumnName("association_mode");
+
                     b.Property<long?>("AttentionRaisedForSeq")
                         .HasColumnType("bigint")
                         .HasColumnName("attention_raised_for_seq");
@@ -486,6 +492,10 @@ namespace IaBimeta.Conversations.Infrastructure.Migrations
                         .HasColumnType("smallint")
                         .HasColumnName("status");
 
+                    b.Property<string>("ThreadKey")
+                        .HasColumnType("text")
+                        .HasColumnName("thread_key");
+
                     b.Property<long>("TurnEpoch")
                         .HasColumnType("bigint")
                         .HasColumnName("turn_epoch");
@@ -494,14 +504,16 @@ namespace IaBimeta.Conversations.Infrastructure.Migrations
 
                     b.HasIndex("TenantId", "ContactId")
                         .IsUnique()
-                        .HasDatabaseName("ix_service_sessions_one_open_per_contact")
-                        .HasFilter("status = 1");
+                        .HasDatabaseName("ux_service_sessions_open_chat")
+                        .HasFilter("status = 1 AND thread_key IS NULL");
 
                     b.HasIndex("TenantId", "OrganizationId", "LastMessageAt")
                         .HasDatabaseName("ix_service_sessions_tenant_id_organization_id_last_message_at");
 
                     b.ToTable("service_sessions", "conversations", t =>
                         {
+                            t.HasCheckConstraint("ck_service_sessions_association", "association_mode = 1 AND thread_key IS NULL");
+
                             t.HasCheckConstraint("ck_service_sessions_department", "department_id IS NULL OR business_unit_id IS NOT NULL");
 
                             t.HasCheckConstraint("ck_service_sessions_responder", "handling_mode = 3 OR responder_ref IS NULL");

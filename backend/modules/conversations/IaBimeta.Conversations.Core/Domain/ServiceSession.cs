@@ -37,6 +37,18 @@ public sealed class ServiceSession : ITenantOwned
 
     public ChannelInstanceId ChannelInstanceId { get; private set; }
 
+    /// <summary>
+    /// Como as mensagens se associam a esta sessão (ADR 0012, seção B). Hoje só existe <see cref="IaBimeta.Conversations.Contracts.AssociationMode.Contact"/>: a sessão aberta é a do contato
+    /// na instância de canal. Nasce com a sessão e nunca muda. O banco recusa qualquer outra combinação (<c>ck_service_sessions_association</c>).
+    /// </summary>
+    public AssociationMode AssociationMode { get; private set; }
+
+    /// <summary>
+    /// A chave da thread de e-mail (ADR 0012), reservada para uma fatia posterior: hoje é SEMPRE nula, e o banco recusa um valor. Faz parte do predicado do índice de chat
+    /// (<c>ux_service_sessions_open_chat</c>), que só vale para sessão sem chave.
+    /// </summary>
+    public string? ThreadKey { get; private set; }
+
     public SessionStatus Status { get; private set; }
 
     public HandlingMode HandlingMode { get; private set; }
@@ -141,6 +153,7 @@ public sealed class ServiceSession : ITenantOwned
             DepartmentId = departmentId,
             ContactId = contactId,
             ChannelInstanceId = channelInstanceId,
+            AssociationMode = AssociationMode.Contact,
             Status = SessionStatus.Open,
             HandlingMode = HandlingMode.AiAutonomous,
             PlacementEpoch = 1,

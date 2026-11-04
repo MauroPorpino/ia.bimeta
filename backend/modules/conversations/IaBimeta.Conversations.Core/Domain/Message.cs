@@ -116,11 +116,7 @@ public sealed class Message : ITenantOwned
     {
         ArgumentNullException.ThrowIfNull(tenantId);
 
-        var evento = (providerEventId ?? string.Empty).Trim();
-        if (evento.Length == 0 || evento.Length > ConversationLimits.ProviderEventIdMaxLength)
-        {
-            throw new ConversationsValidationException($"O id do evento do provedor deve ter de 1 a {ConversationLimits.ProviderEventIdMaxLength} caracteres.");
-        }
+        var evento = ConversationLimits.ValidateProviderEventId(providerEventId);
 
         if (!Enum.IsDefined(kind))
         {

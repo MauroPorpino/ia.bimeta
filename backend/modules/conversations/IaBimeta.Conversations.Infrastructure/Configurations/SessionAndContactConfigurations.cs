@@ -33,7 +33,15 @@ internal sealed class ContactConfiguration : IEntityTypeConfiguration<Contact>
 
 internal sealed class ServiceSessionConfiguration : IEntityTypeConfiguration<ServiceSession>
 {
-    public const string OneOpenPerContactIndex = "ix_service_sessions_one_open_per_contact";
+    /// <summary>
+    /// A unicidade da sessão ABERTA de chat: no máximo uma por (tenant, contato), e só entre as sessões SEM chave de thread. Substitui o índice anterior
+    /// (<c>ix_service_sessions_one_open_per_contact</c>, sem o predicado de <c>thread_key</c>). O <c>ON CONFLICT</c> do <c>ConversationStore</c> repete este alvo e
+    /// este predicado exatamente: mudar um sem o outro quebra a criação de sessão (ADR 0012, seção A).
+    /// </summary>
+    public const string OpenChatIndex = "ux_service_sessions_open_chat";
+
+    /// <summary>O predicado do índice de chat. Fonte única: o EF o usa no filtro, e um teste confere que o <c>ON CONFLICT</c> do armazenamento o repete.</summary>
+    public const string OpenChatIndexFilter = "status = 1 AND thread_key IS NULL";
 
     public void Configure(EntityTypeBuilder<ServiceSession> builder)
     {
@@ -49,6 +57,10 @@ internal sealed class ServiceSessionConfiguration : IEntityTypeConfiguration<Ser
 
             // Um setor só existe dentro de uma unidade.
             table.HasCheckConstraint("ck_service_sessions_department", "department_id IS NULL OR business_unit_id IS NOT NULL");
+
+            // A associação por thread (e-mail) não existe ainda: toda sessão é de chat (modo 1, Contact) e não tem chave de thread. É ESTRITO de propósito: a fatia que
+            // criar a thread troca esta restrição pela de ADR 0012, seção B ((association_mode = Thread) = (thread_key IS NOT NULL)), em migração própria.
+            table.HasCheckConstraint("ck_service_sessions_association", "association_mode = 1 AND thread_key IS NULL");
         });
 
         // TEN-3: a chave composta começa por tenant_id. O filtro global por tenant é aplicado no DbContext.
@@ -60,6 +72,10 @@ internal sealed class ServiceSessionConfiguration : IEntityTypeConfiguration<Ser
         builder.Property(s => s.DepartmentId).HasColumnName("department_id");
         builder.Property(s => s.ContactId).HasColumnName("contact_id");
         builder.Property(s => s.ChannelInstanceId).HasColumnName("channel_instance_id").HasConversion(new ChannelInstanceIdConverter());
+
+        // O valor padrão (1 = Contact) existe para as linhas anteriores à migração e para quem insere sem informar a coluna: é o único valor que o CHECK aceita.
+        builder.Property(s => s.AssociationMode).HasColumnName("association_mode").HasConversion<short>().HasDefaultValue(AssociationMode.Contact);
+        builder.Property(s => s.ThreadKey).HasColumnName("thread_key");
         builder.Property(s => s.Status).HasColumnName("status").HasConversion<short>();
         builder.Property(s => s.HandlingMode).HasColumnName("handling_mode").HasConversion<short>();
         builder.Property(s => s.ResponderRef).HasColumnName("responder_ref");
@@ -83,8 +99,8 @@ internal sealed class ServiceSessionConfiguration : IEntityTypeConfiguration<Ser
         // A referência ao contato carrega o tenant: o banco recusa sessão ligada ao contato de outro tenant.
         builder.HasOne<Contact>().WithMany().HasForeignKey(s => new { s.TenantId, s.ContactId }).OnDelete(DeleteBehavior.Restrict);
 
-        // No máximo uma sessão ABERTA por contato (status 1 = Open).
-        builder.HasIndex(s => new { s.TenantId, s.ContactId }).IsUnique().HasFilter("status = 1").HasDatabaseName(OneOpenPerContactIndex);
+        // No máximo uma sessão ABERTA de chat por contato (status 1 = Open, sem chave de thread).
+        builder.HasIndex(s => new { s.TenantId, s.ContactId }).IsUnique().HasFilter(OpenChatIndexFilter).HasDatabaseName(OpenChatIndex);
 
         // A listagem por organização, da mais recente para a mais antiga.
         builder.HasIndex(s => new { s.TenantId, s.OrganizationId, s.LastMessageAt }).HasDatabaseName("ix_service_sessions_tenant_id_organization_id_last_message_at");

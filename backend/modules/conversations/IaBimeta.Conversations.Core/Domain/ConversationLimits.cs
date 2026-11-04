@@ -7,9 +7,21 @@ namespace IaBimeta.Conversations.Domain;
 public static class ConversationLimits
 {
     public const int TextMaxLength = 4096;
-    public const int ContactRefMaxLength = 128;
+
+    /// <summary>
+    /// A referência do contato no provedor: 254 caracteres, o máximo de um endereço de e-mail (RFC 5321), para que o mesmo limite sirva ao WhatsApp, às demais
+    /// redes de chat e ao e-mail (ADR 0012, seção A, item 6). Alargado de 128 (migração <c>ChatSessionAssociationAndLimits</c>); é o tamanho da coluna <c>external_ref</c>.
+    /// </summary>
+    public const int ContactRefMaxLength = 254;
+
     public const int DisplayNameMaxLength = 120;
-    public const int ProviderEventIdMaxLength = 200;
+
+    /// <summary>
+    /// O identificador da mensagem no provedor (a chave de idempotência): 512 caracteres, para caber o <c>Message-ID</c> de e-mail e identificadores longos de
+    /// outros provedores (ADR 0012, seção A, item 6). Alargado de 200; é o tamanho da coluna <c>provider_event_id</c>.
+    /// </summary>
+    public const int ProviderEventIdMaxLength = 512;
+
     public const int ReasonMaxLength = 100;
 
     public const int DefaultPageSize = 50;
@@ -31,6 +43,22 @@ public static class ConversationLimits
 
     /// <summary>Chaves de <c>ChannelData</c>: o mesmo formato dos códigos curtos, mas ancorado em <c>\z</c>, para que uma quebra de linha no fim não passe.</summary>
     private static readonly Regex ChannelDataKeyPattern = new("^[a-z0-9][a-z0-9_.-]*\\z", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// O identificador da mensagem no provedor, sem os espaços das pontas: de 1 a <see cref="ProviderEventIdMaxLength"/> caracteres. É a mesma regra da criação da mensagem,
+    /// e a ingestão a aplica ANTES de qualquer consulta: um identificador sem limite não chega a ser usado como parâmetro de uma leitura.
+    /// </summary>
+    /// <exception cref="ConversationsValidationException">O identificador está vazio ou acima do limite.</exception>
+    public static string ValidateProviderEventId(string? providerEventId)
+    {
+        var evento = (providerEventId ?? string.Empty).Trim();
+        if (evento.Length == 0 || evento.Length > ProviderEventIdMaxLength)
+        {
+            throw new ConversationsValidationException($"O id do evento do provedor deve ter de 1 a {ProviderEventIdMaxLength} caracteres.");
+        }
+
+        return evento;
+    }
 
     /// <exception cref="ConversationsValidationException">O motivo está fora do formato.</exception>
     public static string ValidateReason(string? reason)

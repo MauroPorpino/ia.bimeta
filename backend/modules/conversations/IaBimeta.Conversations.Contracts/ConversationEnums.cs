@@ -41,6 +41,17 @@ public enum SessionStatus
 }
 
 /// <summary>
+/// Como uma mensagem de entrada é associada a uma sessão (ADR 0012, seção B). Hoje só existe <see cref="Contact"/>: a sessão aberta é a do CONTATO na instância de
+/// canal (chat: WhatsApp e redes semelhantes), no máximo uma por contato. O modo de associação por thread (e-mail) é de uma fatia posterior e NÃO existe aqui: um valor
+/// que não seja <see cref="Contact"/> é recusado na ingestão, e nunca rebaixado para <see cref="Contact"/> (rebaixar trataria um e-mail como chat).
+/// </summary>
+public enum AssociationMode
+{
+    /// <summary>A sessão é a do contato na instância de canal; <c>ThreadKey</c> não existe.</summary>
+    Contact = 1,
+}
+
+/// <summary>
 /// Modo de atendimento: quem responde (BOUNDARIES.md §6). Só o Conversations o altera. É o vocabulário ÚNICO da plataforma:
 /// Channels, Agents e ContactCenter usam este tipo, sem versão própria. A correspondência com os modos de produto é
 /// <b>AI</b> = <see cref="AiAutonomous"/>, <b>Human</b> = <see cref="HumanAssisted"/> e <b>Hybrid</b> = <see cref="AiSupervised"/>
