@@ -409,7 +409,7 @@ public sealed class ConversationsPersistenceTests(PostgresFixture banco)
             c.Tenant.TenantId.Value, Guid.NewGuid(), c.OrganizacaoId, contato, c.CanalId.Value));
 
         Assert.Equal(PostgresErrorCodes.UniqueViolation, falha.SqlState);
-        Assert.Equal("ix_service_sessions_one_open_per_contact", falha.ConstraintName);
+        Assert.Equal("ux_service_sessions_open_chat", falha.ConstraintName);
     }
 
     [Fact]

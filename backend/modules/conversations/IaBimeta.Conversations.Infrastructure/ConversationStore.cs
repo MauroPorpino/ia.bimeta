@@ -204,27 +204,39 @@ internal sealed class ConversationUnitOfWork : IConversationUnitOfWork
         return await _db.Contacts.AsNoTracking().SingleAsync(c => c.ChannelInstanceId == channelInstanceId && c.ExternalRef == externalRef, cancellationToken);
     }
 
-    public async Task<Guid> GetOrCreateOpenSessionIdAsync(Contact contact, Guid organizationId, Guid? businessUnitId, Guid? departmentId, HandlingMode initialHandlingMode, DateTimeOffset now, CancellationToken cancellationToken)
+    public async Task<Guid> GetOrCreateOpenSessionIdAsync(
+        Contact contact, Guid organizationId, Guid? businessUnitId, Guid? departmentId, HandlingMode initialHandlingMode, AssociationMode associationMode, DateTimeOffset now, CancellationToken cancellationToken)
     {
+        // Hoje só existe a associação por contato (chat): a sessão tem thread_key nulo, e o CHECK do banco recusa qualquer outra combinação. Uma fatia futura que
+        // criar a associação por thread terá o SEU comando de inserção, com alvo e predicado próprios (ADR 0012, seção A, item 3): este não se generaliza.
+        if (associationMode != AssociationMode.Contact)
+        {
+            throw new ArgumentOutOfRangeException(nameof(associationMode), associationMode, "Só a associação por contato é suportada.");
+        }
+
         var tenant = _db.CurrentTenantValue;
         var id = Guid.CreateVersion7();
         var modo = (short)initialHandlingMode;
+        var associacao = (short)associationMode;
 
         // Sessão que nasce já em atendimento humano começa no período 1 (o primeiro período humano); em IA, no 0.
         var periodo = initialHandlingMode == HandlingMode.HumanAssisted ? 1L : 0L;
+
+        // O alvo e o predicado do ON CONFLICT casam EXATAMENTE com o índice ux_service_sessions_open_chat (tenant_id, contact_id) WHERE status = 1 AND thread_key IS NULL:
+        // o PostgreSQL só aceita o predicado se o índice o implicar, e um ON CONFLICT sem alvo engoliria a violação de qualquer outro índice único.
         await _db.Database.ExecuteSqlInterpolatedAsync(
             $@"INSERT INTO conversations.service_sessions
                  (tenant_id, id, organization_id, business_unit_id, department_id, contact_id, channel_instance_id, status, handling_mode, responder_ref, state_version,
                   last_message_seq, last_inbound_seq, answered_through_seq, active_turn_id, turn_epoch, last_lease_token, last_reply_accepted_at,
-                  reply_delivery_failed, attention_raised_for_seq, created_at, last_message_at, closed_at, handling_period)
+                  reply_delivery_failed, attention_raised_for_seq, created_at, last_message_at, closed_at, handling_period, association_mode, thread_key)
                VALUES
                  ({tenant}, {id}, {organizationId}, {businessUnitId}, {departmentId}, {contact.Id}, {contact.ChannelInstanceId.Value}, 1, {modo}, NULL, 1,
-                  0, 0, 0, NULL, 0, 0, NULL, FALSE, NULL, {now}, {now}, NULL, {periodo})
-               ON CONFLICT (tenant_id, contact_id) WHERE status = 1 DO NOTHING",
+                  0, 0, 0, NULL, 0, 0, NULL, FALSE, NULL, {now}, {now}, NULL, {periodo}, {associacao}, NULL)
+               ON CONFLICT (tenant_id, contact_id) WHERE status = 1 AND thread_key IS NULL DO NOTHING",
             cancellationToken);
 
         return await _db.Sessions.AsNoTracking()
-            .Where(s => s.ContactId == contact.Id && s.Status == SessionStatus.Open)
+            .Where(s => s.ContactId == contact.Id && s.Status == SessionStatus.Open && s.ThreadKey == null)
             .Select(s => s.Id)
             .SingleAsync(cancellationToken);
     }

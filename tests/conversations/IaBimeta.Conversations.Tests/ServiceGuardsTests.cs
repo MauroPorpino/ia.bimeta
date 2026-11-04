@@ -201,16 +201,14 @@ public class ServiceGuardsTests
     private static ChannelData DadosDoCanal() => new(1, new Dictionary<string, string> { ["media.kind"] = "image", ["media.mime"] = "image/jpeg" });
 
     [Fact]
-    public async Task ChannelData_valido_e_recusado_como_nao_suportado_e_nunca_descartado_em_silencio()
+    public async Task ChannelData_valido_nao_e_mais_recusado_e_a_ingestao_segue_ate_o_armazenamento_que_o_guarda()
     {
         var m = new Montagem();
         m.ComoSistema();
 
-        // O armazenamento explodiria se fosse tocado: a recusa é uma ConversationsValidationException, e nada foi lido nem gravado.
-        var falha = await Assert.ThrowsAsync<ConversationsValidationException>(() => m.Ingestao.IngestInboundMessageAsync(Entrada() with { ChannelData = DadosDoCanal() }));
-
-        Assert.Contains("ainda não são suportados", falha.Message);
-        Assert.Contains("não foi registrada", falha.Message);
+        // A3: o bloco válido é guardado com a mensagem. Nada o recusa mais (nem o descarta): a ingestão chega ao armazenamento, que aqui explode (InvalidOperationException),
+        // e não à ConversationsValidationException de "ainda não suportado" que a A1 lançava. A gravação e a leitura com PostgreSQL estão nos testes de integração.
+        await Assert.ThrowsAsync<InvalidOperationException>(() => m.Ingestao.IngestInboundMessageAsync(Entrada() with { ChannelData = DadosDoCanal() }));
     }
 
     [Fact]
@@ -224,6 +222,7 @@ public class ServiceGuardsTests
             new ChannelData(1, new Dictionary<string, string> { ["Chave Invalida"] = "v" }),
             new ChannelData(1, new Dictionary<string, string> { ["k"] = new string('v', ConversationLimits.ChannelDataValueMaxLength + 1) }),
             new ChannelData(1, Enumerable.Range(0, ConversationLimits.ChannelDataMaxEntries + 1).ToDictionary(i => $"k{i}", _ => "v")),
+            new ChannelData(1, new Dictionary<string, string> { ["k"] = "sozinho\uD83D" }), // substituto UTF-16 sem par: não pode ser guardado como JSON (construído aqui, fora de InlineData)
         };
 
         foreach (var dados in invalidos)
@@ -242,6 +241,63 @@ public class ServiceGuardsTests
         // Sem metadados a recusa não existe: a validação passa e a ingestão chega ao armazenamento, que aqui explode.
         await Assert.ThrowsAsync<InvalidOperationException>(() => m.Ingestao.IngestInboundMessageAsync(Entrada()));
         await Assert.ThrowsAsync<InvalidOperationException>(() => m.Ingestao.IngestInboundMessageAsync(Entrada() with { ChannelData = null }));
+    }
+
+    // Modo de associação (fatia A2): hoje só existe o do contato. Qualquer outro valor é recusado ANTES de qualquer acesso ao armazenamento e nunca é rebaixado.
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(2)]
+    [InlineData(99)]
+    [InlineData(-1)]
+    public async Task Modo_de_associacao_que_nao_e_o_do_contato_e_recusado_antes_do_armazenamento_e_nunca_rebaixado(int valor)
+    {
+        var m = new Montagem();
+        m.ComoSistema();
+
+        // O armazenamento explodiria se fosse tocado: a recusa é uma ConversationsValidationException (e não a InvalidOperationException do armazenamento).
+        var falha = await Assert.ThrowsAsync<ConversationsValidationException>(() => m.Ingestao.IngestInboundMessageAsync(Entrada() with { AssociationMode = (AssociationMode)valor }));
+
+        Assert.Contains("modo de associação", falha.Message);
+    }
+
+    [Fact]
+    public async Task Sem_informar_o_modo_de_associacao_ou_informando_o_do_contato_a_ingestao_segue_ate_o_armazenamento()
+    {
+        var m = new Montagem();
+        m.ComoSistema();
+
+        // A validação passa e a ingestão chega ao armazenamento, que aqui explode: o caminho de antes da A2 está intacto.
+        await Assert.ThrowsAsync<InvalidOperationException>(() => m.Ingestao.IngestInboundMessageAsync(Entrada()));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => m.Ingestao.IngestInboundMessageAsync(Entrada() with { AssociationMode = AssociationMode.Contact }));
+    }
+
+    [Fact]
+    public async Task O_modo_de_associacao_nao_abre_a_ingestao_a_quem_nao_e_de_sistema()
+    {
+        var m = new Montagem();
+        m.ComoUsuarioComTudo();
+
+        var falha = await Assert.ThrowsAsync<AccessDeniedException>(() => m.Ingestao.IngestInboundMessageAsync(Entrada() with { AssociationMode = (AssociationMode)2 }));
+
+        Assert.Equal(Permission.SystemOperation, falha.Permission);
+    }
+
+    [Fact]
+    public async Task Referencia_e_evento_alargados_chegam_ao_armazenamento_e_os_acima_do_limite_sao_recusados_antes_dele()
+    {
+        var m = new Montagem();
+        m.ComoSistema();
+
+        // No limite novo (254 e 512): a validação passa e o armazenamento é alcançado (aqui ele explode).
+        await Assert.ThrowsAsync<InvalidOperationException>(() => m.Ingestao.IngestInboundMessageAsync(
+            Entrada() with { ContactExternalRef = new string('c', ConversationLimits.ContactRefMaxLength), ProviderEventId = new string('e', ConversationLimits.ProviderEventIdMaxLength) }));
+
+        // Um acima: recusado antes de qualquer acesso.
+        await Assert.ThrowsAsync<ConversationsValidationException>(() => m.Ingestao.IngestInboundMessageAsync(
+            Entrada() with { ContactExternalRef = new string('c', ConversationLimits.ContactRefMaxLength + 1) }));
+        await Assert.ThrowsAsync<ConversationsValidationException>(() => m.Ingestao.IngestInboundMessageAsync(
+            Entrada() with { ProviderEventId = new string('e', ConversationLimits.ProviderEventIdMaxLength + 1) }));
     }
 
     [Fact]

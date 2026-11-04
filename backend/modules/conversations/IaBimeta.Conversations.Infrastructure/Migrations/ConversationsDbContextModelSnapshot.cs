@@ -48,8 +48,8 @@ namespace IaBimeta.Conversations.Infrastructure.Migrations
 
                     b.Property<string>("ExternalRef")
                         .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)")
+                        .HasMaxLength(254)
+                        .HasColumnType("character varying(254)")
                         .HasColumnName("external_ref");
 
                     b.Property<string>("PreferredLocale")
@@ -176,6 +176,14 @@ namespace IaBimeta.Conversations.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("author_ref");
 
+                    b.Property<string>("ChannelDataValues")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("channel_data");
+
+                    b.Property<int?>("ChannelDataVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("channel_data_version");
+
                     b.Property<Guid>("ChannelInstanceId")
                         .HasColumnType("uuid")
                         .HasColumnName("channel_instance_id");
@@ -239,8 +247,8 @@ namespace IaBimeta.Conversations.Infrastructure.Migrations
                         .HasColumnName("occurred_at");
 
                     b.Property<string>("ProviderEventId")
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
                         .HasColumnName("provider_event_id");
 
                     b.Property<DateTimeOffset?>("ProviderTimestamp")
@@ -317,6 +325,8 @@ namespace IaBimeta.Conversations.Infrastructure.Migrations
 
                     b.ToTable("messages", "conversations", t =>
                         {
+                            t.HasCheckConstraint("ck_messages_channel_data", "(channel_data IS NULL AND channel_data_version IS NULL) OR (channel_data IS NOT NULL AND channel_data_version IS NOT NULL AND channel_data_version >= 1 AND jsonb_typeof(channel_data) = 'object')");
+
                             t.HasCheckConstraint("ck_messages_direction_shape", "(direction = 1 AND inbound_seq IS NOT NULL AND provider_event_id IS NOT NULL AND author = 1 AND delivery_state IS NULL) OR (direction = 2 AND inbound_seq IS NULL AND delivery_state IS NOT NULL AND author IN (2, 3))");
 
                             t.HasCheckConstraint("ck_messages_locale", "(locale IS NULL AND locale_origin IS NULL) OR (locale IS NOT NULL AND locale_origin IS NOT NULL AND locale_origin IN (1, 2) AND locale ~ '^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$')");
@@ -395,6 +405,12 @@ namespace IaBimeta.Conversations.Infrastructure.Migrations
                     b.Property<long>("AnsweredThroughSeq")
                         .HasColumnType("bigint")
                         .HasColumnName("answered_through_seq");
+
+                    b.Property<short>("AssociationMode")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("smallint")
+                        .HasDefaultValue((short)1)
+                        .HasColumnName("association_mode");
 
                     b.Property<long?>("AttentionRaisedForSeq")
                         .HasColumnType("bigint")
@@ -486,6 +502,10 @@ namespace IaBimeta.Conversations.Infrastructure.Migrations
                         .HasColumnType("smallint")
                         .HasColumnName("status");
 
+                    b.Property<string>("ThreadKey")
+                        .HasColumnType("text")
+                        .HasColumnName("thread_key");
+
                     b.Property<long>("TurnEpoch")
                         .HasColumnType("bigint")
                         .HasColumnName("turn_epoch");
@@ -494,14 +514,16 @@ namespace IaBimeta.Conversations.Infrastructure.Migrations
 
                     b.HasIndex("TenantId", "ContactId")
                         .IsUnique()
-                        .HasDatabaseName("ix_service_sessions_one_open_per_contact")
-                        .HasFilter("status = 1");
+                        .HasDatabaseName("ux_service_sessions_open_chat")
+                        .HasFilter("status = 1 AND thread_key IS NULL");
 
                     b.HasIndex("TenantId", "OrganizationId", "LastMessageAt")
                         .HasDatabaseName("ix_service_sessions_tenant_id_organization_id_last_message_at");
 
                     b.ToTable("service_sessions", "conversations", t =>
                         {
+                            t.HasCheckConstraint("ck_service_sessions_association", "association_mode = 1 AND thread_key IS NULL");
+
                             t.HasCheckConstraint("ck_service_sessions_department", "department_id IS NULL OR business_unit_id IS NOT NULL");
 
                             t.HasCheckConstraint("ck_service_sessions_responder", "handling_mode = 3 OR responder_ref IS NULL");

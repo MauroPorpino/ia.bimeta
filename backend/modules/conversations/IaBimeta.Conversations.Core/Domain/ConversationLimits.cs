@@ -7,9 +7,21 @@ namespace IaBimeta.Conversations.Domain;
 public static class ConversationLimits
 {
     public const int TextMaxLength = 4096;
-    public const int ContactRefMaxLength = 128;
+
+    /// <summary>
+    /// A referência do contato no provedor: 254 caracteres, o máximo de um endereço de e-mail (RFC 5321), para que o mesmo limite sirva ao WhatsApp, às demais
+    /// redes de chat e ao e-mail (ADR 0012, seção A, item 6). Alargado de 128 (migração <c>ChatSessionAssociationAndLimits</c>); é o tamanho da coluna <c>external_ref</c>.
+    /// </summary>
+    public const int ContactRefMaxLength = 254;
+
     public const int DisplayNameMaxLength = 120;
-    public const int ProviderEventIdMaxLength = 200;
+
+    /// <summary>
+    /// O identificador da mensagem no provedor (a chave de idempotência): 512 caracteres, para caber o <c>Message-ID</c> de e-mail e identificadores longos de
+    /// outros provedores (ADR 0012, seção A, item 6). Alargado de 200; é o tamanho da coluna <c>provider_event_id</c>.
+    /// </summary>
+    public const int ProviderEventIdMaxLength = 512;
+
     public const int ReasonMaxLength = 100;
 
     public const int DefaultPageSize = 50;
@@ -31,6 +43,22 @@ public static class ConversationLimits
 
     /// <summary>Chaves de <c>ChannelData</c>: o mesmo formato dos códigos curtos, mas ancorado em <c>\z</c>, para que uma quebra de linha no fim não passe.</summary>
     private static readonly Regex ChannelDataKeyPattern = new("^[a-z0-9][a-z0-9_.-]*\\z", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// O identificador da mensagem no provedor, sem os espaços das pontas: de 1 a <see cref="ProviderEventIdMaxLength"/> caracteres. É a mesma regra da criação da mensagem,
+    /// e a ingestão a aplica ANTES de qualquer consulta: um identificador sem limite não chega a ser usado como parâmetro de uma leitura.
+    /// </summary>
+    /// <exception cref="ConversationsValidationException">O identificador está vazio ou acima do limite.</exception>
+    public static string ValidateProviderEventId(string? providerEventId)
+    {
+        var evento = (providerEventId ?? string.Empty).Trim();
+        if (evento.Length == 0 || evento.Length > ProviderEventIdMaxLength)
+        {
+            throw new ConversationsValidationException($"O id do evento do provedor deve ter de 1 a {ProviderEventIdMaxLength} caracteres.");
+        }
+
+        return evento;
+    }
 
     /// <exception cref="ConversationsValidationException">O motivo está fora do formato.</exception>
     public static string ValidateReason(string? reason)
@@ -103,11 +131,42 @@ public static class ConversationLimits
                 throw new ConversationsValidationException("Os valores dos dados do canal não podem ter caractere de controle.");
             }
 
+            // O bloco é GUARDADO como JSON (A3): um substituto UTF-16 sem par não é texto Unicode válido, e o banco o recusaria na gravação. Recusar aqui, antes de
+            // qualquer acesso ao armazenamento, é o que mantém a falha limpa em vez de um erro do banco depois da trava da sessão.
+            if (HasUnpairedSurrogate(valor))
+            {
+                throw new ConversationsValidationException("Os valores dos dados do canal precisam ser texto Unicode válido (sem substituto UTF-16 sem par).");
+            }
+
             total += chave.Length + valor.Length;
             if (total > ChannelDataMaxTotalLength)
             {
                 throw new ConversationsValidationException($"Os dados do canal aceitam no máximo {ChannelDataMaxTotalLength} caracteres somando chaves e valores.");
             }
         }
+    }
+
+    /// <summary>Há um substituto UTF-16 alto sem o baixo que o segue, ou um baixo sem o alto que o precede? Um par válido (por exemplo, um emoji) não conta.</summary>
+    private static bool HasUnpairedSurrogate(string texto)
+    {
+        for (var i = 0; i < texto.Length; i++)
+        {
+            var c = texto[i];
+            if (char.IsHighSurrogate(c))
+            {
+                if (i + 1 >= texto.Length || !char.IsLowSurrogate(texto[i + 1]))
+                {
+                    return true;
+                }
+
+                i++;
+            }
+            else if (char.IsLowSurrogate(c))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

@@ -151,8 +151,12 @@ public class DelegatedContractsShapeTests
     public void Os_comandos_existentes_so_ganharam_parametros_opcionais_no_fim_e_os_chamadores_antigos_compilam_iguais()
     {
         var evento = Parametros(typeof(IngestInboundMessageCommand));
-        Assert.Equal(("ChannelData", "ChannelData"), evento[^1]);
+
+        // A1 acrescentou ChannelData; A2 acrescentou, depois dele, o modo de associação. Os dois são opcionais e vêm no fim.
+        Assert.Equal(("ChannelData", "ChannelData"), evento[^2]);
+        Assert.Equal(("AssociationMode", "AssociationMode"), evento[^1]);
         Assert.Contains("ChannelData", ComPadrao(typeof(IngestInboundMessageCommand)));
+        Assert.Contains("AssociationMode", ComPadrao(typeof(IngestInboundMessageCommand)));
         Assert.Equal(
             new[] { "ChannelInstanceId", "ContactExternalRef", "ContactDisplayName", "OrganizationId", "BusinessUnitId", "ProviderEventId", "ProviderTimestamp", "Kind", "Text" },
             evento.Take(9).Select(p => p.Nome));

@@ -5,8 +5,8 @@ namespace IaBimeta.Conversations.Tests;
 
 /// <summary>
 /// Os limites estruturais FIXOS do bloco opaco de metadados do canal (fatia A1; ADR 0011, seções B e D; DP-05): quantidade, tamanho e forma. Não há
-/// configuração por tenant. O que acontece com um <c>ChannelData</c> válido na ingestão (a recusa, enquanto não houver persistência) está em
-/// <c>ServiceGuardsTests</c>.
+/// configuração por tenant. O que acontece com um <c>ChannelData</c> válido na ingestão (guardado com a mensagem, A3) está em <c>ServiceGuardsTests</c>,
+/// <c>MessageChannelDataTests</c> e nos testes de integração.
 /// </summary>
 public class ChannelDataTests
 {

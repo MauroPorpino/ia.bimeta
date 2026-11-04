@@ -69,8 +69,12 @@ public interface IConversationUnitOfWork : IAsyncDisposable
 {
     Task<Contact> GetOrCreateContactAsync(ChannelInstanceId channelInstanceId, string externalRef, string? displayName, DateTimeOffset now, CancellationToken cancellationToken);
 
-    /// <summary>O identificador da sessão aberta do contato (no máximo uma por contato), criando-a se não houver.</summary>
-    Task<Guid> GetOrCreateOpenSessionIdAsync(Contact contact, Guid organizationId, Guid? businessUnitId, Guid? departmentId, HandlingMode initialHandlingMode, DateTimeOffset now, CancellationToken cancellationToken);
+    /// <summary>
+    /// O identificador da sessão aberta do contato (no máximo uma por contato), criando-a se não houver. A sessão nova nasce no modo de associação informado
+    /// (hoje só <see cref="AssociationMode.Contact"/>, com <c>ThreadKey</c> nulo); uma sessão já aberta mantém o dela.
+    /// </summary>
+    Task<Guid> GetOrCreateOpenSessionIdAsync(
+        Contact contact, Guid organizationId, Guid? businessUnitId, Guid? departmentId, HandlingMode initialHandlingMode, AssociationMode associationMode, DateTimeOffset now, CancellationToken cancellationToken);
 
     /// <summary>Trava a linha da sessão e a devolve já rastreada para alteração, ou <c>null</c> se ela não existe no tenant.</summary>
     Task<ServiceSession?> LockSessionAsync(Guid sessionId, CancellationToken cancellationToken);
