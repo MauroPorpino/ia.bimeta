@@ -19,6 +19,11 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
+  <!-- A configuração de referência do AiGateway (catálogo de modelos e limites padrão). Nenhum segredo: as chaves vêm do ambiente. -->
+  <ItemGroup>
+    <None Include="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <!-- O SDK padrão não importa os espaços do Generic Host, como o SDK Worker faria. -->
   <ItemGroup>
     <Using Include="Microsoft.Extensions.Configuration" />
@@ -30,6 +35,9 @@
   <ItemGroup>
     <ProjectReference Include="..\..\building-blocks\IaBimeta.Messaging\IaBimeta.Messaging.csproj" />
     <ProjectReference Include="..\..\building-blocks\IaBimeta.SharedKernel\IaBimeta.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\modules\ai-gateway\IaBimeta.AiGateway.Contracts\IaBimeta.AiGateway.Contracts.csproj" />
+    <ProjectReference Include="..\..\modules\ai-gateway\IaBimeta.AiGateway.Core\IaBimeta.AiGateway.Core.csproj" />
+    <ProjectReference Include="..\..\modules\ai-gateway\IaBimeta.AiGateway.Infrastructure\IaBimeta.AiGateway.Infrastructure.csproj" />
     <ProjectReference Include="..\..\modules\audit\IaBimeta.Audit.Infrastructure\IaBimeta.Audit.Infrastructure.csproj" />
     <ProjectReference Include="..\..\modules\channels\IaBimeta.Channels.Contracts\IaBimeta.Channels.Contracts.csproj" />
     <ProjectReference Include="..\..\modules\channels\IaBimeta.Channels.Core\IaBimeta.Channels.Core.csproj" />

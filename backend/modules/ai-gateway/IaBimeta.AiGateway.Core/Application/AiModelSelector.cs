@@ -60,6 +60,9 @@ public enum AiSelectionOutcome
 
     /// <summary>Nenhum adaptador está registrado para o provedor da configuração.</summary>
     ProviderNotRegistered = 8,
+
+    /// <summary>A IA do tenant está desabilitada por ele ou bloqueada pela plataforma.</summary>
+    TenantAiDisabled = 9,
 }
 
 /// <summary>A seleção: o desfecho e, quando <see cref="AiSelectionOutcome.Selected"/>, o modelo do catálogo e o adaptador escolhidos.</summary>
@@ -103,6 +106,12 @@ public sealed class AiModelSelector
         {
             // Nada da configuração alheia é usado nem devolvido.
             return Refuse(AiSelectionOutcome.TenantMismatch, AiFailureCodes.ConfigurationTenantMismatch, null);
+        }
+
+        // Habilitação: a IA desabilitada pelo tenant ou bloqueada pela plataforma nunca chega a escolher modelo nem a chamar nada (qualquer valor desconhecido também recusa).
+        if (configuration.Status != AiTenantStatus.Enabled)
+        {
+            return Refuse(AiSelectionOutcome.TenantAiDisabled, AiFailureCodes.TenantAiDisabled, configuration);
         }
 
         // A origem da credencial é conferida antes do catálogo: PlatformManaged (reservada) e qualquer valor desconhecido nunca chegam a executar.

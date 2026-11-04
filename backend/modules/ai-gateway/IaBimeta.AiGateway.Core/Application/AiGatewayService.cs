@@ -10,12 +10,13 @@ namespace IaBimeta.AiGateway.Application;
 /// <list type="number">
 /// <item>valida a forma do pedido (nada é chamado se ela falhar);</item>
 /// <item>lê a configuração do tenant e escolhe o modelo do catálogo e o adaptador (<see cref="AiModelSelector"/>): configuração ausente, de outro
-/// tenant, com origem de credencial não suportada (<see cref="AiCredentialSource.PlatformManaged"/>), com modelo fora do catálogo ou desativado, ou sem
-/// adaptador, termina em <see cref="AiErrorKind.NotConfigured"/>;</item>
-/// <item>aplica o limite de mensagens por turno, limita o teto de saída ao do tenant e ao do modelo e o tempo limite ao máximo configurado;</item>
-/// <item>resolve a credencial do tenant (falha fechada sem ela), pede a vaga à contabilidade (simultaneidade, chamadas e tokens do período) e chama UM
-/// adaptador: o do provedor do tenant, sem fallback para outro;</item>
-/// <item>normaliza o consumo, estima o custo, aplica a política de erro e registra o consumo (sem prompt e sem resposta), devolvendo a vaga SEMPRE.</item>
+/// tenant, desabilitada ou bloqueada, com origem de credencial não suportada (<see cref="AiCredentialSource.PlatformManaged"/>), com modelo fora do catálogo
+/// ou desativado, ou sem adaptador, termina em <see cref="AiErrorKind.NotConfigured"/>;</item>
+/// <item>aplica o limite de mensagens por turno e o teto de entrada, ESTIMA a entrada (heurística com margem), limita o teto de saída ao do tenant e ao do modelo, recusa
+/// o que não cabe na janela do modelo ou no teto de tokens por chamada, e limita o tempo limite ao máximo configurado;</item>
+/// <item>resolve a credencial do tenant (falha fechada sem ela, e sem a chave mestra), pede a vaga com a RESERVA de tokens à contabilidade (simultaneidade, chamadas e tokens
+/// do período; contabilidade fora do ar é falha transitória e o provedor NÃO é chamado) e chama UM adaptador: o do provedor do tenant, sem fallback para outro;</item>
+/// <item>normaliza o consumo, estima o custo, aplica a política de erro e conclui a vaga com o consumo CONFIRMADO ou INDETERMINADO (sem prompt e sem resposta).</item>
 /// </list>
 /// Pedido inválido, contexto de tenant ausente, acesso negado e cancelamento são exceções; tudo o que vem do provedor, dos limites e da configuração
 /// volta em <see cref="AiGenerationResult.Failure"/>.
@@ -76,13 +77,57 @@ public sealed class AiGatewayService : IAiGateway
             return Fail(aiRequestId, modelo, AiErrorKind.TenantLimitExceeded, AiFailureCodes.InputMessageLimit);
         }
 
-        var credencial = await _credentials.ResolveAsync(tenant, modelo.ProviderId, cancellationToken);
+        // O provedor não limita a entrada: o teto de caracteres, a janela do modelo e o teto por chamada do tenant são o que a limita. A estimativa é uma heurística com margem de
+        // segurança, usada para a RESERVA de orçamento; nunca é apresentada como o consumo real, que o provedor informa.
+        if (_options.MaxInputCharacters is { } tetoDeEntrada && AiTokenEstimator.CountInputCharacters(request) > tetoDeEntrada)
+        {
+            return Fail(aiRequestId, modelo, AiErrorKind.TenantLimitExceeded, AiFailureCodes.InputTooLarge);
+        }
+
+        var entradaEstimada = AiTokenEstimator.EstimateInputTokens(request, _options);
+        var tetoDeSaida = Math.Min(request.MaxOutputTokens, Math.Min(limites.MaxOutputTokens, modelo.MaxOutputTokens));
+        var reserva = entradaEstimada + tetoDeSaida;
+        if (reserva > modelo.ContextWindowTokens)
+        {
+            return Fail(aiRequestId, modelo, AiErrorKind.ContextTooLong, AiFailureCodes.ContextWindowExceeded);
+        }
+
+        if (limites.MaxTokensPerCall is { } tetoPorChamada && reserva > tetoPorChamada)
+        {
+            return Fail(aiRequestId, modelo, AiErrorKind.TenantLimitExceeded, AiFailureCodes.PerCallTokenLimit);
+        }
+
+        AiCredential? credencial;
+        try
+        {
+            credencial = await _credentials.ResolveAsync(tenant, modelo.ProviderId, cancellationToken);
+        }
+        catch (AiSecretsUnavailableException)
+        {
+            // A chave mestra não está disponível: falha da PLATAFORMA (não do tenant), fechada, e nada do conteúdo da chave é repetido.
+            return Fail(aiRequestId, modelo, AiErrorKind.NotConfigured, AiFailureCodes.SecretsUnavailable);
+        }
+
         if (credencial is null || string.IsNullOrWhiteSpace(credencial.Secret))
         {
             return Fail(aiRequestId, modelo, AiErrorKind.InvalidCredentials, AiFailureCodes.CredentialMissing);
         }
 
-        var concessao = await _ledger.TryBeginAsync(new AiLeaseRequest(tenant, aiRequestId, limites, _clock.GetUtcNow()), cancellationToken);
+        var tempoLimite = request.Timeout > _options.MaxCallTimeout ? _options.MaxCallTimeout : request.Timeout;
+        var inicioDaVaga = _clock.GetUtcNow();
+        AiLeaseResult concessao;
+        try
+        {
+            concessao = await _ledger.TryBeginAsync(
+                new AiLeaseRequest(tenant, aiRequestId, request.CorrelationId, modelo.ProviderId, modelo.ModelId, limites, inicioDaVaga, entradaEstimada, tetoDeSaida, tempoLimite + _options.LeaseMargin),
+                cancellationToken);
+        }
+        catch (AiLedgerUnavailableException)
+        {
+            // Sem contabilidade não há como saber o que o tenant já gastou: falha FECHADA, o provedor NÃO é chamado, e o consumidor trata como transitória.
+            return Fail(aiRequestId, modelo, AiErrorKind.Transient, AiFailureCodes.LedgerUnavailable);
+        }
+
         if (concessao.Lease is not { } vaga)
         {
             return Fail(aiRequestId, modelo, AiErrorKind.TenantLimitExceeded, concessao.Refusal switch
@@ -94,7 +139,8 @@ public sealed class AiGatewayService : IAiGateway
             });
         }
 
-        // A partir daqui a vaga está ocupada e PRECISA ser devolvida, com sucesso, falha ou cancelamento.
+        // A partir daqui a vaga está ocupada e PRECISA ser concluída, com sucesso, falha ou cancelamento. O teto de saída já limitado vai NA requisição ao provedor: o adaptador
+        // o repassa sempre (o contrato de teste dos adaptadores confere), e é ele que limita a saída de fato.
         var pedido = new AiCompletionRequest(
             aiRequestId,
             request.CorrelationId,
@@ -102,8 +148,8 @@ public sealed class AiGatewayService : IAiGateway
             modelo.Profile,
             request.SystemInstruction,
             request.Messages.ToArray(),
-            Math.Min(request.MaxOutputTokens, Math.Min(limites.MaxOutputTokens, modelo.MaxOutputTokens)),
-            request.Timeout > _options.MaxCallTimeout ? _options.MaxCallTimeout : request.Timeout,
+            tetoDeSaida,
+            tempoLimite,
             request.OutputMode,
             request.StructuredOutput,
             credencial);
@@ -118,32 +164,33 @@ public sealed class AiGatewayService : IAiGateway
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // O chamador desistiu: a vaga volta, o consumo (nenhum conhecido) é registrado como cancelado e a desistência segue como exceção.
+            // O chamador desistiu: o consumo é DESCONHECIDO (a chamada pode ter sido enviada e faturada), então fica indeterminado e cobra a reserva. A desistência segue como exceção.
             var cancelado = new AiRequestRecord(
                 tenant, aiRequestId, request.CorrelationId, modelo.ProviderId, modelo.ModelId, AiUsage.None, ZeroCost(modelo), _clock.GetElapsedTime(inicio),
-                AiRequestOutcome.Cancelled, null, null, null, null, _clock.GetUtcNow());
-            await _ledger.CompleteAsync(vaga, cancelado, CancellationToken.None);
+                AiRequestOutcome.Cancelled, null, null, null, null, _clock.GetUtcNow(), AiUsageCertainty.Unknown);
+            await TryCompleteAsync(vaga, cancelado);
             throw;
         }
         catch (OperationCanceledException)
         {
-            // O tempo limite esgotou: falha transitória, retentável pelo consumidor.
+            // O tempo limite esgotou: falha transitória, retentável pelo consumidor, e consumo DESCONHECIDO (a requisição pode ter sido processada e cobrada).
             bruto = AiCompletionResult.Failure(new AiError(AiErrorKind.Transient, null, AiFailureCodes.Timeout), _clock.GetElapsedTime(inicio));
         }
         catch (Exception)
         {
             // Um adaptador que lança em vez de devolver a falha normalizada é tratado como falha transitória (a mensagem da exceção não é usada:
-            // ela pode conter trechos do pedido). O consumidor limita as tentativas.
+            // ela pode conter trechos do pedido), com consumo DESCONHECIDO. O consumidor limita as tentativas.
             bruto = AiCompletionResult.Failure(new AiError(AiErrorKind.Transient, null, AiFailureCodes.ProviderException), _clock.GetElapsedTime(inicio));
         }
 
-        // O adaptador devolve ou a resposta ou a falha. Qualquer outra combinação é defeito do adaptador, e falha fechada: nunca vira sucesso.
+        // O adaptador devolve ou a resposta ou a falha. Qualquer outra combinação é defeito do adaptador, e falha fechada: nunca vira sucesso, e o consumo fica desconhecido.
         if (bruto is null || (bruto.Completion is null) == (bruto.Error is null))
         {
             bruto = AiCompletionResult.Failure(new AiError(AiErrorKind.InvalidRequest, null, AiFailureCodes.ProviderResultInvalid), _clock.GetElapsedTime(inicio));
         }
 
         var consumo = AiUsageNormalizer.Normalize(bruto.Usage);
+        var certeza = NormalizeCertainty(bruto, consumo);
         var custo = AiCostEstimator.Estimate(consumo, modelo.Prices);
         var latencia = bruto.Latency < TimeSpan.Zero ? TimeSpan.Zero : bruto.Latency;
         var identificadorNoProvedor = AiErrorPolicy.SanitizeCode(bruto.ProviderRequestId);
@@ -152,11 +199,46 @@ public sealed class AiGatewayService : IAiGateway
         var registro = new AiRequestRecord(
             tenant, aiRequestId, request.CorrelationId, modelo.ProviderId, modelo.ModelId, consumo, custo, latencia,
             falha is null ? AiRequestOutcome.Succeeded : AiRequestOutcome.Failed,
-            bruto.Completion?.StopReason, falha?.Kind, falha?.Code, identificadorNoProvedor, _clock.GetUtcNow());
-        await _ledger.CompleteAsync(vaga, registro, CancellationToken.None);
+            bruto.Completion?.StopReason, falha?.Kind, falha?.Code, identificadorNoProvedor, _clock.GetUtcNow(), certeza);
+        await TryCompleteAsync(vaga, registro);
 
         return new AiGenerationResult(
             aiRequestId, modelo.ProviderId, modelo.ModelId, bruto.Completion, falha, consumo, custo, latencia, identificadorNoProvedor);
+    }
+
+    /// <summary>
+    /// A certeza do consumo que vale para a contabilidade. Uma resposta SEMPRE tem consumo informado (<see cref="AiUsageCertainty.Reported"/>). Uma falha vale o que o adaptador declarou,
+    /// mas nunca menos do que o consumo que ele próprio informou: <see cref="AiUsageCertainty.NoneIncurred"/> com tokens informados é incoerente e fica <see cref="AiUsageCertainty.Reported"/>
+    /// (o lado seguro), e um valor fora do enum fica <see cref="AiUsageCertainty.Unknown"/>.
+    /// </summary>
+    private static AiUsageCertainty NormalizeCertainty(AiCompletionResult resultado, AiUsage consumo)
+    {
+        if (resultado.Completion is not null)
+        {
+            return AiUsageCertainty.Reported;
+        }
+
+        return resultado.UsageCertainty switch
+        {
+            AiUsageCertainty.Reported => AiUsageCertainty.Reported,
+            AiUsageCertainty.NoneIncurred => consumo.InputTokens + consumo.OutputTokens > 0 ? AiUsageCertainty.Reported : AiUsageCertainty.NoneIncurred,
+            _ => AiUsageCertainty.Unknown,
+        };
+    }
+
+    /// <summary>
+    /// Conclui a vaga. Se a contabilidade falhar DEPOIS da chamada ao provedor, a resposta (ou a falha) já obtida NÃO se perde: a linha da vaga continua aberta, expira e vira
+    /// consumo indeterminado (cobra a reserva, que é o lado seguro), e uma conclusão posterior pode reconciliá-la. Só a falha de infraestrutura da contabilidade é absorvida aqui.
+    /// </summary>
+    private async Task TryCompleteAsync(AiLease vaga, AiRequestRecord registro)
+    {
+        try
+        {
+            await _ledger.CompleteAsync(vaga, registro, CancellationToken.None);
+        }
+        catch (AiLedgerUnavailableException)
+        {
+        }
     }
 
     private static AiCostEstimate ZeroCost(AiModelDescriptor modelo) => new(0m, modelo.Prices.Currency);

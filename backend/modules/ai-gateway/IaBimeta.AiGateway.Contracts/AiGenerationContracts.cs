@@ -66,16 +66,48 @@ public sealed record AiCompletionRequest(
 /// <param name="Usage">O consumo normalizado (<see cref="AiUsage.None"/> se nada foi gasto).</param>
 /// <param name="Latency">A duração da chamada ao provedor.</param>
 /// <param name="ProviderRequestId">O identificador da requisição no provedor (por exemplo, o cabeçalho de identificação), quando houver.</param>
-public sealed record AiCompletionResult(AiCompletion? Completion, AiError? Error, AiUsage Usage, TimeSpan Latency, string? ProviderRequestId = null)
+/// <param name="UsageCertainty">
+/// O quanto o consumo informado é confiável (ADR 0017, ajuste B do ledger). O adaptador NUNCA presume ausência de consumo: <see cref="AiUsageCertainty.NoneIncurred"/> exige evidência
+/// de que nenhuma chamada faturável ocorreu. O padrão da falha é <see cref="AiUsageCertainty.Unknown"/>, que o AiGateway contabiliza pela reserva (limite superior).
+/// </param>
+public sealed record AiCompletionResult(
+    AiCompletion? Completion,
+    AiError? Error,
+    AiUsage Usage,
+    TimeSpan Latency,
+    string? ProviderRequestId = null,
+    AiUsageCertainty UsageCertainty = AiUsageCertainty.Unknown)
 {
     /// <summary>Verdadeiro quando há resposta e não há falha.</summary>
     public bool IsSuccess => Completion is not null && Error is null;
 
+    /// <summary>A chamada deu certo: o provedor devolveu a resposta, e o consumo é o que ele informou (<see cref="AiUsageCertainty.Reported"/>).</summary>
     public static AiCompletionResult Success(AiCompletion completion, AiUsage usage, TimeSpan latency, string? providerRequestId = null) =>
-        new(completion, null, usage, latency, providerRequestId);
+        new(completion, null, usage, latency, providerRequestId, AiUsageCertainty.Reported);
 
-    public static AiCompletionResult Failure(AiError error, TimeSpan latency, AiUsage? usage = null, string? providerRequestId = null) =>
-        new(null, error, usage ?? AiUsage.None, latency, providerRequestId);
+    /// <summary>
+    /// A chamada falhou. Sem informar a certeza, vale <see cref="AiUsageCertainty.Unknown"/>: só use <see cref="AiUsageCertainty.NoneIncurred"/> com evidência de que nada foi
+    /// faturado (uma rejeição de admissão do provedor, com resposta completa e sem <c>usage</c>), e <see cref="AiUsageCertainty.Reported"/> quando o provedor informou o consumo.
+    /// </summary>
+    public static AiCompletionResult Failure(
+        AiError error, TimeSpan latency, AiUsage? usage = null, string? providerRequestId = null, AiUsageCertainty usageCertainty = AiUsageCertainty.Unknown) =>
+        new(null, error, usage ?? AiUsage.None, latency, providerRequestId, usageCertainty);
+}
+
+/// <summary>O quanto o consumo de uma chamada ao provedor é conhecido.</summary>
+public enum AiUsageCertainty
+{
+    /// <summary>O provedor informou o consumo (<c>usage</c>): é o valor que vale, também numa falha que o cobrou (por exemplo, uma recusa do modelo).</summary>
+    Reported = 1,
+
+    /// <summary>Há evidência suficiente de que NENHUMA chamada faturável ocorreu (rejeição de admissão com resposta completa e sem consumo): o consumo é zero.</summary>
+    NoneIncurred = 2,
+
+    /// <summary>
+    /// Não se sabe se houve consumo nem quanto (tempo esgotado, queda no meio da resposta, 5xx, resposta sem <c>usage</c>, adaptador que lançou exceção, desistência do chamador).
+    /// O AiGateway contabiliza como INDETERMINADO: cobra a reserva (limite superior) e mantém a possibilidade de reconciliar depois.
+    /// </summary>
+    Unknown = 3,
 }
 
 /// <summary>

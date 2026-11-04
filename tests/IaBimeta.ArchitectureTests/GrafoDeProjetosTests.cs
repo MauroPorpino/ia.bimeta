@@ -107,10 +107,12 @@ public class GrafoDeProjetosTests
         // por uma porta dele, implementada pelo host sobre o Channels.Contracts (ADR 0008). O ContactCenter da etapa 4 usa
         // Tenancy (organização, unidade e setor), Identity (o usuário existe no tenant), Audit e Conversations (a atribuição e o
         // handoff IA/humano chamam o estado de atendimento pelos contratos dele; a aresta já estava na matriz). Aresta nova exige
-        // ADR e atualização desta lista.
+        // ADR e atualização desta lista. O AiGateway (C1.4, ADR 0017) usa só o Audit (a auditoria da configuração de IA do tenant); a matriz também permite Identity e Tenancy,
+        // que ele não precisa: o RequestContext chega pronto do host, e o tenant vem dele.
         Assert.Equal(
             new[]
             {
+                ("AiGateway", "Audit"),
                 ("Channels", "Audit"), ("Channels", "Tenancy"),
                 ("ContactCenter", "Audit"), ("ContactCenter", "Conversations"), ("ContactCenter", "Identity"), ("ContactCenter", "Tenancy"),
                 ("Conversations", "Audit"), ("Conversations", "Tenancy"),
@@ -184,23 +186,33 @@ public class GrafoDeProjetosTests
     }
 
     [Fact]
-    public void O_modulo_AiGateway_nasce_com_Contracts_e_Core_sem_aresta_nova_na_matriz_e_sem_provedor_no_grafo()
+    public void O_modulo_AiGateway_tem_Contracts_Core_e_Infrastructure_so_a_aresta_para_o_Audit_e_sem_provedor_no_grafo()
     {
         var nomes = Projetos.Select(p => p.Nome).ToHashSet();
 
-        // ADR 0017 (seção B), fatias C1.1 a C1.3: só Contracts e Core. Infrastructure e Presentation nascem em C1.4 e C1.5; os adaptadores de provedor, na C4 e na C6.
+        // ADR 0017 (seção B): Contracts e Core (C1.1 a C1.3) e a Infrastructure (C1.4). A Presentation nasce na C1.5; os adaptadores de provedor, na C4 e na C6.
         Assert.Contains("IaBimeta.AiGateway.Contracts", nomes);
         Assert.Contains("IaBimeta.AiGateway.Core", nomes);
-        Assert.DoesNotContain("IaBimeta.AiGateway.Infrastructure", nomes);
+        Assert.Contains("IaBimeta.AiGateway.Infrastructure", nomes);
         Assert.DoesNotContain("IaBimeta.AiGateway.Presentation", nomes);
 
-        // Nenhuma referência do AiGateway a outro módulo: ele usa só o SharedKernel (o tenant vem do contexto). A matriz não mudou.
+        // Só o Audit entre os outros módulos (a auditoria da configuração do tenant); nenhum outro módulo, nenhum adaptador. A matriz não mudou.
         var doModulo = Projetos.Where(p => p.Nome.StartsWith("IaBimeta.AiGateway.", StringComparison.Ordinal) && !p.Nome.EndsWith("Tests", StringComparison.Ordinal)).ToList();
-        Assert.Equal(2, doModulo.Count);
+        Assert.Equal(3, doModulo.Count);
+        var permitidas = new Dictionary<string, string[]>
+        {
+            ["IaBimeta.AiGateway.Contracts"] = Array.Empty<string>(),
+            ["IaBimeta.AiGateway.Core"] = new[] { "IaBimeta.SharedKernel", "IaBimeta.AiGateway.Contracts", "IaBimeta.Audit.Contracts" },
+            ["IaBimeta.AiGateway.Infrastructure"] = new[] { "IaBimeta.SharedKernel", "IaBimeta.AiGateway.Contracts", "IaBimeta.AiGateway.Core" },
+        };
         foreach (var projeto in doModulo)
         {
-            Assert.All(projeto.Referencias, r => Assert.True(r is "IaBimeta.SharedKernel" or "IaBimeta.AiGateway.Contracts", $"{projeto.Nome} -> {r}"));
+            Assert.All(projeto.Referencias, r => Assert.True(permitidas[projeto.Nome].Contains(r), $"{projeto.Nome} -> {r}"));
         }
+
+        // A Infrastructure não referencia a Infrastructure de outro módulo nem adaptador; o grafo geral já proíbe, e aqui fica explícito.
+        var infra = Assert.Single(doModulo, p => p.Nome == "IaBimeta.AiGateway.Infrastructure");
+        Assert.DoesNotContain(infra.Referencias, r => r.EndsWith(".Infrastructure", StringComparison.Ordinal) || r.Contains("Adapters", StringComparison.Ordinal));
 
         Assert.Equal(new[] { "Audit", "Identity", "Tenancy" }, Matriz["AiGateway"].OrderBy(m => m, StringComparer.Ordinal).ToArray());
     }

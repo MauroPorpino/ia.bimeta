@@ -16,6 +16,7 @@
   <Project Path="host/IaBimeta.Worker/IaBimeta.Worker.csproj" />
   <Project Path="modules/ai-gateway/IaBimeta.AiGateway.Contracts/IaBimeta.AiGateway.Contracts.csproj" />
   <Project Path="modules/ai-gateway/IaBimeta.AiGateway.Core/IaBimeta.AiGateway.Core.csproj" />
+  <Project Path="modules/ai-gateway/IaBimeta.AiGateway.Infrastructure/IaBimeta.AiGateway.Infrastructure.csproj" />
   <Project Path="modules/audit/IaBimeta.Audit.Contracts/IaBimeta.Audit.Contracts.csproj" />
   <Project Path="modules/audit/IaBimeta.Audit.Core/IaBimeta.Audit.Core.csproj" />
   <Project Path="modules/audit/IaBimeta.Audit.Infrastructure/IaBimeta.Audit.Infrastructure.csproj" />

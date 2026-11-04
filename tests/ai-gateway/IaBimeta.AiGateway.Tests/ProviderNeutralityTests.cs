@@ -90,6 +90,7 @@ public class ProviderNeutralityTests
             .Select(e => Path.GetFileNameWithoutExtension(((string)e.Attribute("Include")!).Replace('\\', '/')))
             .OrderBy(n => n, StringComparer.Ordinal)
             .ToList();
-        Assert.Equal(new[] { "IaBimeta.AiGateway.Contracts", "IaBimeta.SharedKernel" }, referenciasDoCore);
+        // A única aresta entre módulos do Core é a auditoria da configuração (AiGateway → Audit, prevista na matriz), e só pelo Contracts.
+        Assert.Equal(new[] { "IaBimeta.AiGateway.Contracts", "IaBimeta.Audit.Contracts", "IaBimeta.SharedKernel" }, referenciasDoCore);
     }
 }

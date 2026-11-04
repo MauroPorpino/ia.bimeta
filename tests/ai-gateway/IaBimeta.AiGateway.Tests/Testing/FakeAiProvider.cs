@@ -93,8 +93,10 @@ public sealed class FakeAiProvider : IAiProvider
     public AiCompletionResult Succeed(string text, AiUsage? usage = null, AiStopReason stopReason = AiStopReason.Completed, string? providerRequestId = "req-teste") =>
         AiCompletionResult.Success(new AiCompletion(text, stopReason), usage ?? new AiUsage(100, 0, 0, 20), Latency, providerRequestId);
 
-    public AiCompletionResult Fail(AiErrorKind kind, TimeSpan? retryAfter = null, string? code = null, AiUsage? usage = null) =>
-        AiCompletionResult.Failure(new AiError(kind, retryAfter, code), Latency, usage, "req-teste");
+    /// <summary>Uma falha do provedor. Sem informar a certeza do consumo, vale <see cref="AiUsageCertainty.Unknown"/> (o padrão seguro do contrato).</summary>
+    public AiCompletionResult Fail(
+        AiErrorKind kind, TimeSpan? retryAfter = null, string? code = null, AiUsage? usage = null, AiUsageCertainty usageCertainty = AiUsageCertainty.Unknown) =>
+        AiCompletionResult.Failure(new AiError(kind, retryAfter, code), Latency, usage, "req-teste", usageCertainty);
 
     /// <summary>A próxima e todas as chamadas seguintes devolvem este resultado.</summary>
     public FakeAiProvider Returns(AiCompletionResult result)

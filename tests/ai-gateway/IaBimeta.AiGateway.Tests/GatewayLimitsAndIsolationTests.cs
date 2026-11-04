@@ -120,22 +120,29 @@ public class GatewayLimitsTests
     [Fact]
     public async Task O_limite_de_tokens_do_periodo_recusa_a_chamada_seguinte_e_libera_no_periodo_seguinte()
     {
+        // O teto do período é DURO COM RESERVA: cada chamada reserva a entrada estimada (com margem) mais o teto de saída. Aqui a reserva é 149 (49 de entrada + 100 de saída) e o consumo
+        // real é 120. Com o teto de 400: 0+149, 120+149 e 240+149 cabem (389); a quarta, 360+149 = 509, não.
         var h = new GatewayHarness();
-        Limita(h, A, GatewayHarness.ProviderAId, "model-a1", GatewayHarness.GenerousLimits with { MaxTokensPerPeriod = 100 });
+        Limita(h, A, GatewayHarness.ProviderAId, "model-a1", GatewayHarness.GenerousLimits with { MaxTokensPerPeriod = 400 });
         h.ProviderA.Returns(h.ProviderA.Succeed("ok", new AiUsage(100, 0, 0, 20))); // 120 tokens por chamada
         h.AsSystem(A);
 
-        var primeira = await h.Gateway.GenerateAsync(GatewayHarness.Request()); // 0 < 100: passa, e a última chamada pode ultrapassar o limite
-        var segunda = await h.Gateway.GenerateAsync(GatewayHarness.Request()); // 120 >= 100: recusada
+        var primeiras = new List<AiGenerationResult>();
+        for (var i = 0; i < 3; i++)
+        {
+            primeiras.Add(await h.Gateway.GenerateAsync(GatewayHarness.Request(maxOutputTokens: 100)));
+        }
 
-        Assert.True(primeira.IsSuccess);
-        Assert.Equal(AiErrorKind.TenantLimitExceeded, segunda.Failure!.Kind);
-        Assert.Equal(AiFailureCodes.PeriodTokenLimit, segunda.Failure.Code);
-        Assert.Equal(1, h.ProviderA.CallCount);
-        Assert.Equal((1, 120L), h.Ledger.UsageInWindowOf(A, h.Clock.GetUtcNow(), TimeSpan.FromHours(1)));
+        var quarta = await h.Gateway.GenerateAsync(GatewayHarness.Request(maxOutputTokens: 100));
+
+        Assert.All(primeiras, r => Assert.True(r.IsSuccess));
+        Assert.Equal(AiErrorKind.TenantLimitExceeded, quarta.Failure!.Kind);
+        Assert.Equal(AiFailureCodes.PeriodTokenLimit, quarta.Failure.Code);
+        Assert.Equal(3, h.ProviderA.CallCount);
+        Assert.Equal((3, 360L), h.Ledger.UsageInWindowOf(A, h.Clock.GetUtcNow(), TimeSpan.FromHours(1)));
 
         h.Clock.Advance(TimeSpan.FromHours(1));
-        Assert.True((await h.Gateway.GenerateAsync(GatewayHarness.Request())).IsSuccess);
+        Assert.True((await h.Gateway.GenerateAsync(GatewayHarness.Request(maxOutputTokens: 100))).IsSuccess);
     }
 
     [Fact]

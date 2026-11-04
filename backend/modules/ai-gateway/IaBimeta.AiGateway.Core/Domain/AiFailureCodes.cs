@@ -14,6 +14,10 @@ public static class AiFailureCodes
     public const string ModelNotSupported = "model-not-supported";
     public const string ModelDisabled = "model-disabled";
     public const string ProviderNotRegistered = "provider-not-registered";
+    public const string TenantAiDisabled = "tenant-ai-disabled";
+
+    // A chave mestra das credenciais não está disponível: falha da plataforma, não do tenant (NotConfigured)
+    public const string SecretsUnavailable = "secrets-unavailable";
 
     // Credencial (InvalidCredentials)
     public const string CredentialMissing = "credential-missing";
@@ -23,7 +27,15 @@ public static class AiFailureCodes
     public const string ConcurrencyLimit = "concurrency-limit";
     public const string PeriodCallLimit = "period-call-limit";
     public const string PeriodTokenLimit = "period-token-limit";
+    public const string PerCallTokenLimit = "per-call-token-limit";
+    public const string InputTooLarge = "input-too-large";
     public const string LeaseDenied = "lease-denied";
+
+    // O pedido não cabe na janela do modelo, pela ESTIMATIVA (ContextTooLong)
+    public const string ContextWindowExceeded = "context-window-exceeded";
+
+    // A contabilidade de uso está fora do ar: falha fechada, o provedor NÃO é chamado (Transient)
+    public const string LedgerUnavailable = "ledger-unavailable";
 
     // Falhas ao chamar o adaptador
     public const string Timeout = "timeout";

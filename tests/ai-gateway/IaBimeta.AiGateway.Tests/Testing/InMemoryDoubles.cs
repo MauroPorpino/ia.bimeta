@@ -87,23 +87,54 @@ public sealed class FakeAiCredentialResolver : IAiCredentialResolver
 }
 
 /// <summary>
-/// A contabilidade de uso em memória: respeita o contrato de <see cref="IAiUsageLedger"/> (concessão ATÔMICA da vaga, simultaneidade, chamadas e tokens do
-/// período, devolução da vaga em toda conclusão). Registra a maior simultaneidade observada por tenant e todos os registros de consumo.
+/// A contabilidade de uso em memória: respeita o contrato de <see cref="IAiUsageLedger"/> como a implementação do PostgreSQL (concessão ATÔMICA da vaga com RESERVA de
+/// tokens, simultaneidade por contagem de vagas abertas, expiração no <c>TryBegin</c>, conclusão IDEMPOTENTE e reconciliação do indeterminado). Registra a maior
+/// simultaneidade observada por tenant e todos os registros de consumo. A janela é fixa, alinhada ao relógio UTC (a regra de mudança de duração é testada no PostgreSQL).
 /// </summary>
 public sealed class InMemoryAiUsageLedger : IAiUsageLedger
 {
+    private enum State
+    {
+        Open = 1,
+        Confirmed = 2,
+        Indeterminate = 3,
+    }
+
+    private sealed class Entry
+    {
+        public State State { get; set; } = State.Open;
+
+        public long Reserved { get; init; }
+
+        public long Window { get; init; }
+
+        public DateTimeOffset ExpiresAt { get; init; }
+
+        public long Charged { get; set; }
+    }
+
+    private sealed class Window
+    {
+        public int Calls { get; set; }
+
+        public long Confirmed { get; set; }
+
+        public long Indeterminate { get; set; }
+
+        public long Overage { get; set; }
+    }
+
     private sealed class TenantState
     {
-        public int InFlight { get; set; }
-
         public int MaxInFlightObserved { get; set; }
 
-        public Dictionary<long, (int Calls, long Tokens)> Windows { get; } = new();
+        public Dictionary<Guid, Entry> Requests { get; } = new();
+
+        public Dictionary<long, Window> Windows { get; } = new();
     }
 
     private readonly object _gate = new();
     private readonly Dictionary<TenantId, TenantState> _tenants = new();
-    private readonly Dictionary<(TenantId, Guid), long> _openLeases = new();
     private readonly List<AiRequestRecord> _records = new();
 
     public IReadOnlyList<AiRequestRecord> Records
@@ -117,11 +148,14 @@ public sealed class InMemoryAiUsageLedger : IAiUsageLedger
         }
     }
 
+    /// <summary>Quando verdadeiro, <see cref="TryBeginAsync"/> e <see cref="CompleteAsync"/> falham como um banco fora do ar (<see cref="AiLedgerUnavailableException"/>).</summary>
+    public bool Unavailable { get; set; }
+
     public int InFlight(TenantId tenantId)
     {
         lock (_gate)
         {
-            return _tenants.TryGetValue(tenantId, out var estado) ? estado.InFlight : 0;
+            return _tenants.TryGetValue(tenantId, out var estado) ? estado.Requests.Values.Count(r => r.State == State.Open) : 0;
         }
     }
 
@@ -133,12 +167,41 @@ public sealed class InMemoryAiUsageLedger : IAiUsageLedger
         }
     }
 
-    /// <summary>As chamadas e os tokens contados na janela do instante informado.</summary>
+    /// <summary>As chamadas e os tokens contados (confirmados mais indeterminados) na janela do instante informado.</summary>
     public (int Calls, long Tokens) UsageInWindowOf(TenantId tenantId, DateTimeOffset now, TimeSpan period)
     {
         lock (_gate)
         {
-            return _tenants.TryGetValue(tenantId, out var estado) && estado.Windows.TryGetValue(now.UtcTicks / period.Ticks, out var janela) ? janela : (0, 0);
+            return _tenants.TryGetValue(tenantId, out var estado) && estado.Windows.TryGetValue(now.UtcTicks / period.Ticks, out var janela)
+                ? (janela.Calls, janela.Confirmed + janela.Indeterminate)
+                : (0, 0);
+        }
+    }
+
+    /// <summary>Os tokens reservados pelas vagas abertas do tenant.</summary>
+    public long OpenReservedTokens(TenantId tenantId)
+    {
+        lock (_gate)
+        {
+            return _tenants.TryGetValue(tenantId, out var estado) ? estado.Requests.Values.Where(r => r.State == State.Open).Sum(r => r.Reserved) : 0;
+        }
+    }
+
+    /// <summary>Os tokens indeterminados (cobrados pela reserva) na janela do instante informado.</summary>
+    public long IndeterminateTokensInWindowOf(TenantId tenantId, DateTimeOffset now, TimeSpan period)
+    {
+        lock (_gate)
+        {
+            return _tenants.TryGetValue(tenantId, out var estado) && estado.Windows.TryGetValue(now.UtcTicks / period.Ticks, out var janela) ? janela.Indeterminate : 0;
+        }
+    }
+
+    /// <summary>O excedente (consumo real acima da reserva) registrado na janela do instante informado.</summary>
+    public long OverageTokensInWindowOf(TenantId tenantId, DateTimeOffset now, TimeSpan period)
+    {
+        lock (_gate)
+        {
+            return _tenants.TryGetValue(tenantId, out var estado) && estado.Windows.TryGetValue(now.UtcTicks / period.Ticks, out var janela) ? janela.Overage : 0;
         }
     }
 
@@ -146,16 +209,31 @@ public sealed class InMemoryAiUsageLedger : IAiUsageLedger
     {
         lock (_gate)
         {
+            ThrowIfUnavailable();
+
             if (!_tenants.TryGetValue(request.TenantId, out var estado))
             {
                 estado = new TenantState();
                 _tenants[request.TenantId] = estado;
             }
 
-            var chave = request.Now.UtcTicks / request.Limits.Period.Ticks;
-            estado.Windows.TryGetValue(chave, out var janela);
+            // Vagas expiradas deste tenant viram consumo indeterminado (cobram a reserva) ANTES da decisão.
+            foreach (var aberta in estado.Requests.Values.Where(r => r.State == State.Open && r.ExpiresAt < request.Now))
+            {
+                aberta.State = State.Indeterminate;
+                aberta.Charged = aberta.Reserved;
+                estado.Windows[aberta.Window].Indeterminate += aberta.Reserved;
+            }
 
-            if (estado.InFlight >= request.Limits.MaxConcurrentCalls)
+            var chave = request.Now.UtcTicks / request.Limits.Period.Ticks;
+            if (!estado.Windows.TryGetValue(chave, out var janela))
+            {
+                janela = new Window();
+                estado.Windows[chave] = janela;
+            }
+
+            var abertas = estado.Requests.Values.Count(r => r.State == State.Open);
+            if (abertas >= request.Limits.MaxConcurrentCalls)
             {
                 return Task.FromResult(new AiLeaseResult(null, AiLimitRefusal.ConcurrentCalls));
             }
@@ -165,17 +243,18 @@ public sealed class InMemoryAiUsageLedger : IAiUsageLedger
                 return Task.FromResult(new AiLeaseResult(null, AiLimitRefusal.CallsPerPeriod));
             }
 
-            if (janela.Tokens >= request.Limits.MaxTokensPerPeriod)
+            var reservadoNaJanela = estado.Requests.Values.Where(r => r.State == State.Open && r.Window == chave).Sum(r => r.Reserved);
+            if (janela.Confirmed + janela.Indeterminate + reservadoNaJanela + request.ReservedTokens > request.Limits.MaxTokensPerPeriod)
             {
                 return Task.FromResult(new AiLeaseResult(null, AiLimitRefusal.TokensPerPeriod));
             }
 
-            estado.InFlight++;
-            estado.MaxInFlightObserved = Math.Max(estado.MaxInFlightObserved, estado.InFlight);
-            estado.Windows[chave] = (janela.Calls + 1, janela.Tokens);
-            _openLeases[(request.TenantId, request.AiRequestId)] = chave;
+            var expira = request.Now + request.LeaseDuration;
+            estado.Requests.Add(request.AiRequestId, new Entry { Reserved = request.ReservedTokens, Window = chave, ExpiresAt = expira });
+            janela.Calls++;
+            estado.MaxInFlightObserved = Math.Max(estado.MaxInFlightObserved, abertas + 1);
 
-            return Task.FromResult(new AiLeaseResult(new AiLease(request.TenantId, request.AiRequestId, request.Now), null));
+            return Task.FromResult(new AiLeaseResult(new AiLease(request.TenantId, request.AiRequestId, request.Now, request.ReservedTokens, expira), null));
         }
     }
 
@@ -183,20 +262,56 @@ public sealed class InMemoryAiUsageLedger : IAiUsageLedger
     {
         lock (_gate)
         {
-            if (!_openLeases.Remove((lease.TenantId, lease.AiRequestId), out var chave))
+            ThrowIfUnavailable();
+
+            if (!_tenants.TryGetValue(lease.TenantId, out var estado) || !estado.Requests.TryGetValue(lease.AiRequestId, out var entrada))
             {
-                throw new InvalidOperationException("A vaga já foi devolvida ou nunca foi concedida.");
+                throw new InvalidOperationException("A vaga nunca foi concedida.");
             }
 
-            var estado = _tenants[lease.TenantId];
-            estado.InFlight--;
+            // Idempotente: uma chamada já CONFIRMADA nunca é contada de novo.
+            if (entrada.State == State.Confirmed)
+            {
+                return Task.CompletedTask;
+            }
 
-            // Os tokens somam na janela em que a chamada COMEÇOU, a mesma em que ela foi contada.
-            var janela = estado.Windows[chave];
-            estado.Windows[chave] = (janela.Calls, janela.Tokens + record.Usage.InputTokens + record.Usage.OutputTokens);
+            var janela = estado.Windows[entrada.Window];
+            if (record.UsageCertainty == AiUsageCertainty.Unknown)
+            {
+                // Indeterminado: cobra a reserva. Se já era indeterminado (a vaga expirou), nada muda.
+                if (entrada.State == State.Open)
+                {
+                    entrada.State = State.Indeterminate;
+                    entrada.Charged = entrada.Reserved;
+                    janela.Indeterminate += entrada.Reserved;
+                    _records.Add(record);
+                }
+
+                return Task.CompletedTask;
+            }
+
+            // Confirmado: o consumo informado (ou zero, com evidência de que nada foi cobrado). Se estava indeterminado, o indeterminado sai e o real entra (reconciliação).
+            var real = record.UsageCertainty == AiUsageCertainty.NoneIncurred ? 0 : (long)record.Usage.InputTokens + record.Usage.OutputTokens;
+            if (entrada.State == State.Indeterminate)
+            {
+                janela.Indeterminate -= entrada.Charged;
+            }
+
+            janela.Confirmed += real;
+            janela.Overage += Math.Max(0, real - entrada.Reserved);
+            entrada.State = State.Confirmed;
+            entrada.Charged = real;
             _records.Add(record);
         }
 
         return Task.CompletedTask;
+    }
+
+    private void ThrowIfUnavailable()
+    {
+        if (Unavailable)
+        {
+            throw new AiLedgerUnavailableException("A contabilidade de uso está fora do ar (dublê).");
+        }
     }
 }

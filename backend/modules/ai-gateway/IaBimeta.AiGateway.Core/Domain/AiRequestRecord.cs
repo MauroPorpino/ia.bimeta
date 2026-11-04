@@ -14,6 +14,9 @@ public enum AiRequestOutcome
 
     /// <summary>O chamador desistiu no meio da chamada.</summary>
     Cancelled = 3,
+
+    /// <summary>A vaga expirou sem conclusão (processo caiu ou a conclusão nunca chegou): o consumo é indeterminado e cobra a reserva até uma reconciliação.</summary>
+    Expired = 4,
 }
 
 /// <summary>
@@ -21,6 +24,10 @@ public enum AiRequestOutcome
 /// provedor, modelo, tokens por tipo, custo estimado, latência, resultado, tipo de erro e identificador da requisição no provedor. NÃO guarda o prompt
 /// nem a resposta (nem a credencial): o dado de saúde continua só no Conversations. Só as chamadas que chegaram a ser tentadas são registradas.
 /// </summary>
+/// <param name="UsageCertainty">
+/// O quanto o consumo é conhecido: <see cref="AiUsageCertainty.Reported"/> e <see cref="AiUsageCertainty.NoneIncurred"/> CONFIRMAM o consumo; <see cref="AiUsageCertainty.Unknown"/> o
+/// deixa INDETERMINADO (cobra a reserva, e uma conclusão posterior com o consumo real o reconcilia uma vez).
+/// </param>
 public sealed record AiRequestRecord(
     TenantId TenantId,
     Guid AiRequestId,
@@ -35,4 +42,5 @@ public sealed record AiRequestRecord(
     AiErrorKind? ErrorKind,
     string? ErrorCode,
     string? ProviderRequestId,
-    DateTimeOffset OccurredAt);
+    DateTimeOffset OccurredAt,
+    AiUsageCertainty UsageCertainty = AiUsageCertainty.Reported);

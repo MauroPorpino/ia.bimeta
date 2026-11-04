@@ -14,6 +14,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\..\building-blocks\IaBimeta.SharedKernel\IaBimeta.SharedKernel.csproj" />
     <ProjectReference Include="..\IaBimeta.AiGateway.Contracts\IaBimeta.AiGateway.Contracts.csproj" />
+    <!-- A auditoria da configuração de IA do tenant (aresta AiGateway -> Audit já prevista na matriz, ADR 0017). -->
+    <ProjectReference Include="..\..\audit\IaBimeta.Audit.Contracts\IaBimeta.Audit.Contracts.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,3 +1,5 @@
+using IaBimeta.AiGateway.Application;
+using IaBimeta.AiGateway.Infrastructure;
 using IaBimeta.Audit.Infrastructure;
 using IaBimeta.Channels.Infrastructure;
 using IaBimeta.ContactCenter.Infrastructure;
@@ -79,6 +81,15 @@ public static class WorkerHost
         builder.Services.AddSingleton<IMessagingScopeInitializer, WorkerScopeInitializer>();
         builder.Services.AddConversations(provider => ConnectionStringOf(provider, "Conversations"));
         builder.Services.AddContactCenter(provider => ConnectionStringOf(provider, "ContactCenter"));
+
+        // O AiGateway que o Agents (C2) vai chamar neste processo: a mesma composição do Api, com a mesma configuração (catálogo e limites padrão em AiGateway:Catalog e
+        // AiGateway:DefaultLimits) e as mesmas chaves mestras do ambiente (AiGateway:Secrets). A expiração de vagas acontece no próprio TryBegin: não há varredor periódico (fica para depois do MVP).
+        builder.Services.AddAiGateway(
+            provider => ConnectionStringOf(provider, "AiGateway"),
+            segredos => builder.Configuration.GetSection("AiGateway:Secrets").Bind(segredos),
+            catalogo => builder.Configuration.GetSection("AiGateway:Catalog").Bind(catalogo),
+            limites => builder.Configuration.GetSection("AiGateway:DefaultLimits").Bind(limites),
+            builder.Configuration.GetSection("AiGateway:Options").Get<AiGatewayOptions>());
         builder.Services.AddOutboxRelay<ConversationsDbContext>();
 
         builder.Services.AddSingleton<ContactCenterReconciler>();

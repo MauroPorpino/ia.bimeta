@@ -20,3 +20,27 @@ public sealed class AiGatewayValidationException : Exception
     {
     }
 }
+
+/// <summary>
+/// A contabilidade de uso (o ledger) não está disponível: o banco não respondeu, a conexão caiu ou o tempo esgotou. É falha de infraestrutura, nunca decisão de limite. Antes da
+/// chamada ao provedor a falha é FECHADA (o provedor não é chamado); depois dela, a resposta obtida não se perde.
+/// </summary>
+public sealed class AiLedgerUnavailableException : Exception
+{
+    public AiLedgerUnavailableException(string message, Exception? innerException = null)
+        : base(message, innerException)
+    {
+    }
+}
+
+/// <summary>
+/// A chave mestra das credenciais BYOK não está disponível (nenhuma ativa, a que cifrou não está configurada ou tem formato inválido). É falha da PLATAFORMA, não do
+/// tenant: falha fechada, sem nunca repetir o conteúdo de uma chave na mensagem.
+/// </summary>
+public sealed class AiSecretsUnavailableException : Exception
+{
+    public AiSecretsUnavailableException(string message)
+        : base(message)
+    {
+    }
+}

@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using IaBimeta.AiGateway.Infrastructure;
 using IaBimeta.Api.Channels;
 using IaBimeta.Api.ContactCenter;
 using IaBimeta.Audit.Infrastructure;
@@ -45,6 +46,40 @@ public sealed class PostgresFixture : IAsyncLifetime
     public static readonly string ChaveDeCifraDeTeste = Convert.ToBase64String(RandomNumberGenerator.GetBytes(ChannelSecretOptions.KeySizeBytes));
 
     public const string IdDaChaveDeTeste = "teste-1";
+
+    /// <summary>A chave mestra das credenciais de IA nos testes: PRÓPRIA do AiGateway (diferente da dos canais), aleatória a cada execução, sintética, nunca gravada em arquivo.</summary>
+    public static readonly string ChaveDeCifraDeIADeTeste = Convert.ToBase64String(RandomNumberGenerator.GetBytes(AiSecretOptions.KeySizeBytes));
+
+    public const string IdDaChaveDeIADeTeste = "ia-teste-1";
+
+    public const string ProvedorDeIADeTeste = "provider-a";
+    public const string ModeloDeIADeTeste = "model-a1";
+    public const string OutroProvedorDeIADeTeste = "provider-b";
+    public const string OutroModeloDeIADeTeste = "model-b1";
+    public const string ModeloDesativadoDeIADeTeste = "model-a2";
+
+    /// <summary>O catálogo SINTÉTICO dos testes: dois provedores (um com um modelo desativado). Nenhum nome real de provedor.</summary>
+    public static IEnumerable<AiCatalogModelSettings> ModelosDeIADeTeste()
+    {
+        AiCatalogModelSettings Modelo(string provedor, string modelo, string situacao) => new()
+        {
+            ProviderId = provedor,
+            ModelId = modelo,
+            Profile = "perfil-teste",
+            ContextWindowTokens = 200_000,
+            MaxOutputTokens = 4_000,
+            Currency = "USD",
+            InputPerMillion = 0.10m,
+            CachedInputPerMillion = 0.01m,
+            CacheWritePerMillion = 0.125m,
+            OutputPerMillion = 0.50m,
+            Status = situacao,
+        };
+
+        yield return Modelo(ProvedorDeIADeTeste, ModeloDeIADeTeste, "Active");
+        yield return Modelo(ProvedorDeIADeTeste, ModeloDesativadoDeIADeTeste, "Disabled");
+        yield return Modelo(OutroProvedorDeIADeTeste, OutroModeloDeIADeTeste, "Active");
+    }
 
     private ServiceProvider? _servicos;
     private ServiceProvider? _servicosComCanaisReais;
@@ -120,6 +155,26 @@ public sealed class PostgresFixture : IAsyncLifetime
             colecao.AddOutboxRelay<ConversationsDbContext>();
         }
 
+        // O AiGateway (C1.4), como no host: catálogo SINTÉTICO (nenhum provedor real), chave mestra própria de teste (aleatória a cada execução) e limites padrão generosos. Nenhum
+        // adaptador de provedor é registrado: os testes de ponta a ponta montam o AiGatewayService com um provedor falso próprio.
+        colecao.AddAiGateway(
+            _ => ConnectionString,
+            segredos =>
+            {
+                segredos.ActiveKeyId = IdDaChaveDeIADeTeste;
+                segredos.Keys[IdDaChaveDeIADeTeste] = ChaveDeCifraDeIADeTeste;
+            },
+            catalogo => catalogo.Models.AddRange(ModelosDeIADeTeste()),
+            limites =>
+            {
+                limites.MaxConcurrentCalls = 8;
+                limites.MaxCallsPerPeriod = 1000;
+                limites.MaxTokensPerPeriod = 10_000_000;
+                limites.PeriodSeconds = 3600;
+                limites.MaxInputMessages = 50;
+                limites.MaxOutputTokens = 500;
+            });
+
         return colecao.BuildServiceProvider(validateScopes: true);
     }
 
@@ -137,6 +192,7 @@ public sealed class PostgresFixture : IAsyncLifetime
         await escopo.ServiceProvider.GetRequiredService<ConversationsDbContext>().Database.MigrateAsync();
         await escopo.ServiceProvider.GetRequiredService<ChannelsDbContext>().Database.MigrateAsync();
         await escopo.ServiceProvider.GetRequiredService<ContactCenterDbContext>().Database.MigrateAsync();
+        await escopo.ServiceProvider.GetRequiredService<AiGatewayDbContext>().Database.MigrateAsync();
 
         // O relay processa o outbox INTEIRO (todos os tenants): o que sobrou de execuções anteriores e dos testes da API (que gravam
         // eventos e não rodam relay) é dado de outros testes. Marca-o como processado antes de começar, para os testes de entrega
