@@ -30,6 +30,45 @@ internal sealed class ChannelWebhookConfiguration : IEntityTypeConfiguration<Cha
     }
 }
 
+/// <summary>
+/// O estado de envio de cada conta (<c>channels.account_send_state</c>): balde de fichas (SND-2), espera do provedor e pausa (SND-6). Uma linha por conta, criada na primeira necessidade. Os nomes das colunas
+/// são usados pelo <c>INSERT ... ON CONFLICT</c> da persistência (a linha nasce cheia), então mudar aqui exige mudar lá.
+/// </summary>
+internal sealed class AccountSendStateConfiguration : IEntityTypeConfiguration<AccountSendState>
+{
+    public const string TableName = "account_send_state";
+
+    public void Configure(EntityTypeBuilder<AccountSendState> builder)
+    {
+        builder.ToTable(TableName, table =>
+        {
+            table.HasCheckConstraint("ck_account_send_state_tokens", "tokens >= 0");
+            table.HasCheckConstraint("ck_account_send_state_throughput", "throughput_per_second IS NULL OR (throughput_per_second >= 1 AND throughput_per_second <= 1000)");
+            table.HasCheckConstraint("ck_account_send_state_pause", "(is_paused AND pause_reason IS NOT NULL AND paused_at IS NOT NULL) OR (NOT is_paused AND pause_reason IS NULL)");
+        });
+
+        // TEN-3: a chave começa por tenant_id. O filtro global por tenant é aplicado no DbContext.
+        builder.HasKey(s => new { s.TenantId, s.AccountId });
+        builder.Property(s => s.TenantId).HasColumnName("tenant_id").HasConversion(new TenantIdConverter()).ValueGeneratedNever();
+        builder.Property(s => s.AccountId).HasColumnName("account_id").ValueGeneratedNever();
+        builder.Property(s => s.Tokens).HasColumnName("tokens");
+        builder.Property(s => s.RefilledAt).HasColumnName("refilled_at");
+        builder.Property(s => s.CooldownUntil).HasColumnName("cooldown_until");
+        builder.Property(s => s.IsPaused).HasColumnName("is_paused");
+        builder.Property(s => s.PauseReason).HasColumnName("pause_reason").HasMaxLength(AccountSendState.PauseReasonMaxLength);
+        builder.Property(s => s.PausedAt).HasColumnName("paused_at");
+        builder.Property(s => s.ResumedAt).HasColumnName("resumed_at");
+        builder.Property(s => s.ThroughputPerSecond).HasColumnName("throughput_per_second");
+        builder.Property(s => s.UpdatedAt).HasColumnName("updated_at");
+
+        // A conta é do mesmo tenant: o banco garante que o estado não aponta para conta de outro.
+        builder.HasOne<ChannelAccount>().WithOne()
+            .HasForeignKey<AccountSendState>(s => new { s.TenantId, s.AccountId })
+            .HasPrincipalKey<ChannelAccount>(a => new { a.TenantId, a.Id })
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
 /// <summary>O despacho das mensagens de saída (<c>channels.outbound_messages</c>).</summary>
 internal sealed class OutboundMessageConfiguration : IEntityTypeConfiguration<OutboundMessage>
 {

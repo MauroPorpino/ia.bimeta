@@ -9,14 +9,23 @@ namespace IaBimeta.Adapters.WhatsApp;
 /// <item>O desfecho vem do <c>error.code</c> do corpo (a documentação manda construir o tratamento em torno dele), nunca de <c>error.message</c>, <c>error_data</c> ou <c>title</c>, que podem ecoar dados. O código sai
 /// como TEXTO de dígitos; qualquer outra coisa é descartada.</item>
 /// <item>Só vira <c>Rejected*</c>, <c>WindowClosed</c> ou <c>AccountError</c> o que o provedor RECUSOU com um corpo de erro completo (ou um estado 401/403 de credencial). Tudo o que deixa dúvida sobre ter havido envio
-/// (tempo esgotado, rede, 5xx, 429 sem código conhecido, corpo ilegível, sucesso sem identificador) é <c>Unknown</c>: nunca reenviado automaticamente (estratégia de efeito <c>None</c>).</item>
+/// (tempo esgotado, rede, 5xx, 429 sem corpo de erro completo, corpo ilegível, sucesso sem identificador) é <c>Unknown</c>: nunca reenviado automaticamente (estratégia de efeito <c>None</c>).</item>
 /// <item>A documentação não fixa o estado HTTP de cada código: o estado só decide quando o código não é um dos conhecidos.</item>
 /// </list>
 /// </summary>
 internal static class WhatsAppSendResponseReader
 {
-    /// <summary>130429 (limite de vazão), 131056 (par remetente-destinatário) e 131000 (falha de envio desconhecida): retentativa com espera (ADR 0011, A.2, item 7).</summary>
-    private static readonly HashSet<int> TransientCodes = new() { 130429, 131056, 131000 };
+    /// <summary>
+    /// Limite de taxa que atinge a CONTA inteira: 130429 (vazão do Cloud API), 80007 (limite de taxa da conta WhatsApp Business) e 4 (limite de chamadas do aplicativo). A página oficial de erros (consulta de
+    /// 05/11/2026) os lista como "throttling" e manda repetir mais tarde; ela NÃO fixa o estado HTTP nem o <c>Retry-After</c> deles. Retentativa com espera (ADR 0011, A.2, item 7), e a espera vale para a conta toda (SND-2).
+    /// </summary>
+    private static readonly HashSet<int> AccountRateLimitCodes = new() { 130429, 80007, 4 };
+
+    /// <summary>131056: limite do par remetente-destinatário (1 mensagem a cada 6 s para o mesmo destinatário). A página oficial diz que se pode enviar a OUTRO destinatário sem esperar: a espera vale só para o par.</summary>
+    private const int RecipientRateLimitCode = 131056;
+
+    /// <summary>131000 (falha de envio desconhecida): transitória, mas sem prova de limite de taxa.</summary>
+    private const int GenericTransientCode = 131000;
 
     /// <summary>131047: a janela de 24 horas está fechada, só template (ADR 0011, A.2, itens 8 e 10).</summary>
     private const int WindowClosedCode = 131047;
@@ -103,11 +112,23 @@ internal static class WhatsAppSendResponseReader
         var (codigo, completo) = ReadErrorBody(body);
         var texto = codigo?.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
+        var espera = retryAfter is { } sugerida && sugerida >= TimeSpan.Zero ? sugerida : (TimeSpan?)null;
+
         if (codigo is { } c)
         {
-            if (TransientCodes.Contains(c))
+            if (AccountRateLimitCodes.Contains(c))
             {
-                return new ProviderSendResult(ProviderSendOutcome.RejectedTransient, null, texto, retryAfter is { } espera && espera >= TimeSpan.Zero ? espera : null);
+                return new ProviderSendResult(ProviderSendOutcome.RejectedTransient, null, texto, espera, ProviderRateLimitScope.Account);
+            }
+
+            if (c == RecipientRateLimitCode)
+            {
+                return new ProviderSendResult(ProviderSendOutcome.RejectedTransient, null, texto, espera, ProviderRateLimitScope.Recipient);
+            }
+
+            if (c == GenericTransientCode)
+            {
+                return new ProviderSendResult(ProviderSendOutcome.RejectedTransient, null, texto, espera);
             }
 
             if (c == WindowClosedCode)
@@ -134,8 +155,15 @@ internal static class WhatsAppSendResponseReader
             return new ProviderSendResult(ProviderSendOutcome.AccountError, null, codigoDeSaida);
         }
 
-        // Os demais 4xx de validação (parâmetro inválido ou ausente, destinatário não registrado...) são recusas definitivas, mas SÓ com o corpo de erro completo do provedor. 408 (tempo) e 429 (limite
-        // sem código conhecido) não provam que nada foi enviado, e corpo ilegível não prova nada: ficam desconhecidos.
+        // 429 (Too Many Requests) COM o corpo de erro completo da Graph API, mesmo com um código que a lista não conhece: é o limitador do provedor recusando antes de processar. Vale como limite de taxa da CONTA
+        // (a espera é a do Retry-After, se o provedor a mandou). 429 sem corpo de erro completo (proxy, resposta ilegível) não prova nada: fica desconhecido.
+        if (status == 429 && completo)
+        {
+            return new ProviderSendResult(ProviderSendOutcome.RejectedTransient, null, codigoDeSaida, espera, ProviderRateLimitScope.Account);
+        }
+
+        // Os demais 4xx de validação (parâmetro inválido ou ausente, destinatário não registrado...) são recusas definitivas, mas SÓ com o corpo de erro completo do provedor. 408 (tempo) e 429 sem corpo de erro
+        // completo não provam que nada foi enviado, e corpo ilegível não prova nada: ficam desconhecidos.
         if (status is >= 400 and < 500 and not (408 or 429) && completo)
         {
             return new ProviderSendResult(ProviderSendOutcome.RejectedPermanent, null, codigoDeSaida);
@@ -147,7 +175,7 @@ internal static class WhatsAppSendResponseReader
     /// <summary>
     /// O <c>error.code</c> (número inteiro, ou texto só de dígitos) e se o corpo é um erro COMPLETO (objeto <c>error</c> com algum campo reconhecível). Nada mais é lido: a mensagem pode ecoar dados do pedido.
     /// </summary>
-    private static (int? Code, bool Complete) ReadErrorBody(byte[]? body)
+    internal static (int? Code, bool Complete) ReadErrorBody(byte[]? body)
     {
         if (body is null)
         {

@@ -21,3 +21,6 @@ public sealed record RegisterChannelInstanceRequest(Guid AccountId, string Name,
 public sealed record SetChannelDefaultsRequest(Guid? DefaultBusinessUnitId, Guid? DefaultDepartmentId);
 
 public sealed record SetChannelDefaultLocaleRequest(Locale? DefaultLocale);
+
+/// <summary>A vazão própria da conta, em mensagens por segundo (de 1 a 1000). Nulo: volta ao padrão da configuração.</summary>
+public sealed record SetAccountThroughputRequest(int? MessagesPerSecond);

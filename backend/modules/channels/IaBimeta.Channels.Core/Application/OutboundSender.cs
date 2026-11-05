@@ -1,3 +1,5 @@
+using IaBimeta.Audit.Contracts;
+using IaBimeta.Audit.Contracts.Commands;
 using IaBimeta.Channels.Contracts;
 using IaBimeta.Channels.Contracts.Providers;
 using IaBimeta.Channels.Domain;
@@ -51,6 +53,9 @@ public sealed class OutboundMessageRequestedHandler : EventHandlerBase<OutboundM
     private readonly ISecretProtector _protector;
     private readonly ChannelProviderAdapters _adapters;
     private readonly IOutboundMessageStore _store;
+    private readonly IAccountSendStateStore _sendState;
+    private readonly ChannelSendingOptions _sending;
+    private readonly IAuditWriter _audit;
     private readonly TimeProvider _clock;
 
     public OutboundMessageRequestedHandler(
@@ -60,14 +65,20 @@ public sealed class OutboundMessageRequestedHandler : EventHandlerBase<OutboundM
         ISecretProtector protector,
         ChannelProviderAdapters adapters,
         IOutboundMessageStore store,
+        IAccountSendStateStore sendState,
+        ChannelSendingOptions sending,
+        IAuditWriter audit,
         TimeProvider clock)
     {
+        _audit = audit;
         _dispatch = dispatch;
         _ingestion = ingestion;
         _repository = repository;
         _protector = protector;
         _adapters = adapters;
         _store = store;
+        _sendState = sendState;
+        _sending = sending;
         _clock = clock;
     }
 
@@ -141,6 +152,32 @@ public sealed class OutboundMessageRequestedHandler : EventHandlerBase<OutboundM
             return await FailAsync(mensagem, "account-credentials-missing", cancellationToken);
         }
 
+        // SND-6 e SND-2, ANTES de registrar a tentativa e de qualquer chamada ao provedor: conta pausada não envia (a mensagem falha de forma visível, sem gastar tentativa do relay), e o balde da conta limita a vazão.
+        // A espera curta é feita aqui mesmo (a ordem da lane e as tentativas do relay ficam intactas); uma espera longa devolve a entrega ao relay.
+        var tempoLimite = _clock.GetUtcNow() + _sending.MaxLocalWait;
+        while (true)
+        {
+            var ficha = await _sendState.TryAcquireAsync(instancia.AccountId, cancellationToken);
+            if (ficha.Paused)
+            {
+                ChannelsMetrics.OutboundBlockedByPause.Add(1);
+                return await FailAsync(mensagem, "account-paused", cancellationToken);
+            }
+
+            if (ficha.Granted)
+            {
+                break;
+            }
+
+            if (ficha.Wait > tempoLimite - _clock.GetUtcNow())
+            {
+                ChannelsMetrics.OutboundThrottled.Add(1);
+                return HandlerResult.Retry(ficha.Wait, "rate-limited-local");
+            }
+
+            await Task.Delay(ficha.Wait, _clock, cancellationToken);
+        }
+
         // O Conversations passa a mostrar "Enviando" (e só a partir daí um resultado ambíguo pode virar SendUnknown); o despacho registra a tentativa ANTES da chamada.
         await _ingestion.RecordDeliveryStatusAsync(new RecordDeliveryStatusCommand(payload.MessageId, DeliveryState.Sending, null), cancellationToken);
         mensagem.BeginAttempt(_clock.GetUtcNow());
@@ -160,13 +197,37 @@ public sealed class OutboundMessageRequestedHandler : EventHandlerBase<OutboundM
                 break;
 
             case ProviderSendOutcome.RejectedTransient when mensagem.Attempts < MaxSendAttempts:
+            {
                 mensagem.MarkRetry(resultado.ErrorCode, depois);
                 await _store.SaveAsync(cancellationToken);
+
+                // SND-2: o limite de taxa da CONTA vale para a conta toda (os envios das outras conversas também esperam, sem gastar tentativa do provedor); o do par remetente-destinatário, só para esta mensagem.
+                var espera = _sending.CooldownFor(resultado.RetryAfter);
+                if (resultado.RateLimitScope == ProviderRateLimitScope.Account)
+                {
+                    await _sendState.ApplyCooldownAsync(instancia.AccountId, espera, cancellationToken);
+                    ChannelsMetrics.OutboundRateLimited.Add(1);
+                    return HandlerResult.Retry(espera, "provider-rate-limited");
+                }
+
+                if (resultado.RateLimitScope == ProviderRateLimitScope.Recipient)
+                {
+                    ChannelsMetrics.OutboundRateLimited.Add(1);
+                }
+
                 return HandlerResult.Retry(resultado.RetryAfter, "provider-transient");
+            }
 
             case ProviderSendOutcome.RejectedTransient:
                 mensagem.MarkFailed("rate-limited", depois);
                 ChannelsMetrics.OutboundFailed.Add(1);
+                if (resultado.RateLimitScope == ProviderRateLimitScope.Account)
+                {
+                    // Esta mensagem esgotou as chamadas, mas a conta continua limitada: as demais esperam.
+                    await _sendState.ApplyCooldownAsync(instancia.AccountId, _sending.CooldownFor(resultado.RetryAfter), cancellationToken);
+                    ChannelsMetrics.OutboundRateLimited.Add(1);
+                }
+
                 break;
 
             case ProviderSendOutcome.WindowClosed:
@@ -177,6 +238,16 @@ public sealed class OutboundMessageRequestedHandler : EventHandlerBase<OutboundM
             case ProviderSendOutcome.AccountError:
                 mensagem.MarkFailed("account-error", depois);
                 ChannelsMetrics.OutboundFailed.Add(1);
+                await _store.SaveAsync(cancellationToken);
+
+                // SND-6: o erro atinge a CONTA (token expirado ou inválido, conta restrita): a conta é pausada, e as próximas mensagens falham como "account-paused" sem tocar no provedor nem gastar tentativa. A mensagem
+                // já está gravada como falha: se a pausa não puder ser gravada agora, o próximo envio da conta recebe o mesmo erro e tenta de novo.
+                if (await _sendState.PauseAsync(instancia.AccountId, $"account-error.{resultado.ErrorCode ?? "unknown"}", cancellationToken))
+                {
+                    ChannelsMetrics.AccountPaused.Add(1);
+                    await _audit.WriteAsync(new AuditEntry("channels.account.pause.provider-error", "channel-account", instancia.AccountId.ToString(), AuditOutcome.Success), cancellationToken);
+                }
+
                 break;
 
             case ProviderSendOutcome.RejectedPermanent:

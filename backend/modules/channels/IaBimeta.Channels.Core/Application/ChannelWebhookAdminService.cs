@@ -16,7 +16,7 @@ public sealed record ChannelWebhookView(Guid WebhookId, string Path);
 public sealed class ChannelWebhookAdminService
 {
     private const string Resource = "channel-account";
-    private const string WhatsAppPathPrefix = "/webhooks/whatsapp/";
+    internal const string WhatsAppPathPrefix = "/webhooks/whatsapp/";
 
     private readonly IChannelRepository _repository;
     private readonly IChannelWebhookStore _webhooks;

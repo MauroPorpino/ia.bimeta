@@ -89,17 +89,26 @@ public class AdaptadorWhatsAppArquiteturaTests
     }
 
     [Fact]
-    public void O_adaptador_nunca_baixa_midia_nem_le_a_url_ou_o_hash_dela_e_so_faz_o_envio_de_texto()
+    public void O_adaptador_nunca_baixa_midia_nem_le_a_url_ou_o_hash_dela_e_so_faz_o_envio_de_texto_e_a_leitura_do_numero()
     {
         var arquivos = Arquivos().ToDictionary(a => Path.GetFileName(a)!, a => Codigo(a));
 
         foreach (var (nome, codigo) in arquivos)
         {
-            Assert.False(Regex.IsMatch(codigo, @"\.(GetAsync|GetStreamAsync|GetByteArrayAsync|GetStringAsync|DownloadAsync|DeleteAsync|PutAsync)\b"), $"{nome} faz uma chamada HTTP além do envio.");
+            Assert.False(Regex.IsMatch(codigo, @"\.(GetAsync|GetStreamAsync|GetByteArrayAsync|GetStringAsync|DownloadAsync|DeleteAsync|PutAsync)\b"), $"{nome} faz uma chamada HTTP além do envio e da leitura do número.");
         }
 
-        // A única chamada HTTP é o envio; e o parser não lê a url nem o sha256 da mídia (só metadados de texto).
-        Assert.Equal(1, arquivos.Values.Sum(c => Regex.Matches(c, @"_http\.SendAsync\(").Count));
+        // As ÚNICAS chamadas HTTP: o envio (POST .../messages) e a sonda do teste de prontidão (um GET de leitura do número, sem mensagem nem mídia). Cada uma monta o pedido num só lugar.
+        Assert.Equal(2, arquivos.Values.Sum(c => Regex.Matches(c, @"_http\.SendAsync\(").Count));
+        var fabrica = arquivos["WhatsAppSendRequestFactory.cs"];
+        Assert.Single(Regex.Matches(fabrica, @"HttpMethod\.Post"));
+        Assert.Single(Regex.Matches(fabrica, @"HttpMethod\.Get"));
+        Assert.DoesNotContain(arquivos, a => a.Key != "WhatsAppSendRequestFactory.cs" && Regex.IsMatch(a.Value, @"HttpMethod\.(Get|Post|Put|Delete|Patch)\b"));
+
+        // A leitura do número pede só os campos de identificação e qualidade: nunca mídia, perfil de cliente ou conversa.
+        Assert.Contains("fields=id,display_phone_number,verified_name,quality_rating", fabrica);
+
+        // O parser não lê a url nem o sha256 da mídia (só metadados de texto).
         Assert.DoesNotContain("\"url\"", arquivos["WhatsAppWebhookParser.cs"]);
         Assert.DoesNotContain("\"sha256\"", arquivos["WhatsAppWebhookParser.cs"]);
     }

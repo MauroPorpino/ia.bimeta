@@ -20,13 +20,25 @@ public static class ChannelsInfrastructureExtensions
     public static IServiceCollection AddChannels(
         this IServiceCollection services,
         Func<IServiceProvider, string> connectionString,
-        Action<ChannelSecretOptions>? configureSecrets = null)
+        Action<ChannelSecretOptions>? configureSecrets = null,
+        Action<ChannelSendingOptions>? configureSending = null,
+        Action<ChannelWebhookOptions>? configureWebhook = null)
     {
         ArgumentNullException.ThrowIfNull(connectionString);
 
         var segredos = new ChannelSecretOptions();
         configureSecrets?.Invoke(segredos);
         services.AddSingleton(segredos);
+
+        // O envio (SND-2: vazão por conta, espera do provedor) e o webhook (endereço público): configuração validada na partida, nunca no meio do processamento.
+        var envio = new ChannelSendingOptions();
+        configureSending?.Invoke(envio);
+        envio.Validate();
+        services.AddSingleton(envio);
+
+        var webhook = new ChannelWebhookOptions();
+        configureWebhook?.Invoke(webhook);
+        services.AddSingleton(webhook);
         services.AddSingleton<ISecretProtector, AesGcmSecretProtector>();
 
         services.TryAddSingleton(TimeProvider.System);
@@ -49,8 +61,11 @@ public static class ChannelsInfrastructureExtensions
         services.AddScoped<IChannelWebhookStore, ChannelWebhookStore>();
         services.AddScoped<IInboundEventWriter, InboundEventWriter>();
         services.AddScoped<IOutboundMessageStore, OutboundMessageStore>();
+        services.AddScoped<IAccountSendStateStore, AccountSendStateStore>();
         services.AddScoped<ChannelWebhookService>();
         services.AddScoped<ChannelWebhookAdminService>();
+        services.AddScoped<AccountSendingService>();
+        services.AddScoped<ChannelReadinessService>();
         services.AddEventHandler<InboundProviderMessageHandler>();
         services.AddEventHandler<InboundProviderStatusHandler>();
         services.AddEventHandler<OutboundMessageRequestedHandler>();

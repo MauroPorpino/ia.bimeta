@@ -16,6 +16,9 @@ public interface IChannelWebhookStore
 
     /// <summary>O identificador opaco da conta do tenant do contexto, criado se ainda não existe (idempotente).</summary>
     Task<Guid> EnsureAsync(Guid accountId, CancellationToken cancellationToken);
+
+    /// <summary>O identificador opaco da conta do tenant do contexto, SEM criar. Nulo: ainda não existe.</summary>
+    Task<Guid?> FindAsync(Guid accountId, CancellationToken cancellationToken);
 }
 
 /// <summary>Um evento de entrada a gravar no Inbox durável (ver <see cref="IInboundEventWriter"/>).</summary>
@@ -44,6 +47,31 @@ public interface IOutboundMessageStore
     Task<bool> TryAddAsync(OutboundMessage message, CancellationToken cancellationToken);
 
     Task SaveAsync(CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// O estado de envio de cada conta (SND-2 e SND-6): o balde de fichas, a espera imposta pelo provedor e a pausa, guardados no banco para valerem entre instâncias do Worker. Toda operação trava a linha da conta na
+/// transação e só enxerga o tenant do contexto; conta de outro tenant ou inexistente falha como <see cref="InvalidOperationException"/>.
+/// </summary>
+public interface IAccountSendStateStore
+{
+    /// <summary>Pede UMA ficha ao balde da conta (cria a linha cheia se ainda não existe). Pausada: nada é gasto.</summary>
+    Task<SendAcquireResult> TryAcquireAsync(Guid accountId, CancellationToken cancellationToken);
+
+    /// <summary>Impõe à conta uma espera a partir de agora (o provedor mandou esperar). Só estende.</summary>
+    Task ApplyCooldownAsync(Guid accountId, TimeSpan duration, CancellationToken cancellationToken);
+
+    /// <summary>Pausa a conta. Falso: já estava pausada (vale o motivo da primeira pausa).</summary>
+    Task<bool> PauseAsync(Guid accountId, string reason, CancellationToken cancellationToken);
+
+    /// <summary>Retoma a conta. Falso: não estava pausada.</summary>
+    Task<bool> ResumeAsync(Guid accountId, CancellationToken cancellationToken);
+
+    /// <summary>Define (ou, com nulo, limpa) a vazão própria da conta.</summary>
+    Task SetThroughputAsync(Guid accountId, int? perSecond, CancellationToken cancellationToken);
+
+    /// <summary>O estado atual, ou nulo se a conta nunca enviou nem foi configurada (vale o padrão).</summary>
+    Task<AccountSendState?> FindAsync(Guid accountId, CancellationToken cancellationToken);
 }
 
 /// <summary>Os adaptadores de provedor registrados, por provedor.</summary>

@@ -49,6 +49,19 @@ public static class ChannelsEndpoints
         contas.MapPost("/{id:guid}/webhook", async (Guid id, ChannelWebhookAdminService servico, CancellationToken ct) =>
             Results.Ok(await servico.EnsureAsync(id, ct)));
 
+        // O envio da conta (SND-2 e SND-6): estado, pausa, retomada segura (exige a prova do provedor) e vazão.
+        contas.MapGet("/{id:guid}/sending", async (Guid id, AccountSendingService servico, CancellationToken ct) => Results.Ok(await servico.GetAsync(id, ct)));
+
+        contas.MapPost("/{id:guid}/sending/pause", async (Guid id, AccountSendingService servico, CancellationToken ct) => Results.Ok(await servico.PauseAsync(id, ct)));
+
+        contas.MapPost("/{id:guid}/sending/resume", async (Guid id, AccountSendingService servico, CancellationToken ct) => Results.Ok(await servico.ResumeAsync(id, ct)));
+
+        contas.MapPut("/{id:guid}/sending/throughput", async (Guid id, SetAccountThroughputRequest pedido, AccountSendingService servico, CancellationToken ct) =>
+            Results.Ok(await servico.SetThroughputAsync(id, pedido.MessagesPerSecond, ct)));
+
+        // O teste de prontidão: confere a configuração SEM enviar mensagem. Com live=true também LÊ o número no provedor (só leitura). O relatório traz o endereço do webhook (segredo operacional).
+        contas.MapGet("/{id:guid}/readiness", async (Guid id, bool? live, ChannelReadinessService servico, CancellationToken ct) => Results.Ok(await servico.CheckAsync(id, live ?? false, ct)));
+
         var instancias = app.MapGroup("/channels/instances").AddEndpointFilter(TratarErrosDeCanais);
 
         instancias.MapPost("/", async (RegisterChannelInstanceRequest pedido, ChannelInstanceService servico, CancellationToken ct) =>
@@ -112,7 +125,7 @@ public static class ChannelsEndpoints
         {
             return Results.Problem(title: "Dados inválidos", detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
         }
-        catch (Exception ex) when (ex is ChannelIdentifierInUseException or ChannelsConflictException)
+        catch (Exception ex) when (ex is ChannelIdentifierInUseException or ChannelsConflictException or ChannelResumeRefusedException)
         {
             return Results.Problem(title: "Conflito", detail: ex.Message, statusCode: StatusCodes.Status409Conflict);
         }

@@ -67,4 +67,12 @@ public static class ChannelsMetrics
     public static readonly Counter<long> OutboundFailed = Meter.CreateCounter<long>("channels.outbound.failed", description: "Mensagens com falha definitiva.");
 
     public static readonly Counter<long> OutboundUnknown = Meter.CreateCounter<long>("channels.outbound.send_unknown", description: "Envios de resultado incerto (nunca reenviados).");
+
+    public static readonly Counter<long> OutboundThrottled = Meter.CreateCounter<long>("channels.outbound.throttled", description: "Entregas devolvidas ao relay porque o balde da conta (ou a espera do provedor) não liberou o envio a tempo (SND-2).");
+
+    public static readonly Counter<long> OutboundRateLimited = Meter.CreateCounter<long>("channels.outbound.rate_limited", description: "Recusas de limite de taxa do provedor (a conta passa a esperar, SND-2).");
+
+    public static readonly Counter<long> AccountPaused = Meter.CreateCounter<long>("channels.account.paused", description: "Contas pausadas por erro de conta do provedor ou por ação do administrador (SND-6).");
+
+    public static readonly Counter<long> OutboundBlockedByPause = Meter.CreateCounter<long>("channels.outbound.blocked_by_pause", description: "Mensagens recusadas porque a conta está pausada (SND-6).");
 }

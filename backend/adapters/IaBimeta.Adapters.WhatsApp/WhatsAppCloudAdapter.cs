@@ -192,6 +192,49 @@ public sealed class WhatsAppCloudAdapter : IChannelProviderAdapter, IDisposable
         }
     }
 
+    /// <summary>
+    /// A sonda: lê o número no provedor (<c>GET</c>, nenhuma mensagem sai) para provar que o token é aceito e que o número existe e é acessível por ele. O tempo limite é o do envio; esgotado, rede caída ou 5xx dão
+    /// <see cref="ProviderProbeOutcome.Unavailable"/>: nunca se afirma que a configuração está certa sem a resposta do provedor.
+    /// </summary>
+    public async Task<ProviderProbeResult> ProbeAsync(ProviderProbeRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        using var mensagem = WhatsAppSendRequestFactory.CreateProbe(request, _versionedBase);
+        if (mensagem is null)
+        {
+            // Token fora do formato ou número não numérico: nada foi pedido ao provedor, e o administrador precisa corrigir o cadastro.
+            return new ProviderProbeResult(ProviderProbeOutcome.CredentialRejected, null, null, null, "credential-or-account-invalid-format");
+        }
+
+        using var limite = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        limite.CancelAfter(_requestTimeout);
+
+        HttpResponseMessage? resposta = null;
+        try
+        {
+            resposta = await _http.SendAsync(mensagem, HttpCompletionOption.ResponseHeadersRead, limite.Token);
+            var corpo = await ReadBoundedAsync(resposta.Content, _maxResponseBytes, limite.Token);
+            return WhatsAppProbeResponseReader.Read((int)resposta.StatusCode, corpo, request.ExternalAccountId);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            return WhatsAppProbeResponseReader.Unavailable("timeout");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException)
+        {
+            return WhatsAppProbeResponseReader.Unavailable("network-error");
+        }
+        finally
+        {
+            resposta?.Dispose();
+        }
+    }
+
     /// <summary>Lê o corpo até o limite. Acima dele (ou com o <c>Content-Length</c> acima) devolve nulo: a resposta é ilegível, e nada gigante entra na memória.</summary>
     private static async Task<byte[]?> ReadBoundedAsync(HttpContent conteudo, int limite, CancellationToken cancellationToken)
     {

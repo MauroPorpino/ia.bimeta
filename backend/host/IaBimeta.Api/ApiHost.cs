@@ -77,7 +77,9 @@ public static class ApiHost
         // funciona e só a gravação de credenciais responde 503.
         builder.Services.AddChannels(
             provider => ConnectionStringOf(provider, "Channels"),
-            opcoes => builder.Configuration.GetSection("Channels:Secrets").Bind(opcoes));
+            opcoes => builder.Configuration.GetSection("Channels:Secrets").Bind(opcoes),
+            envio => builder.Configuration.GetSection("Channels:Sending").Bind(envio),
+            webhook => builder.Configuration.GetSection("Channels:Webhook").Bind(webhook));
 
         // O Conversations pergunta ao Channels, por uma porta própria, se um número pode atender uma unidade. A matriz de
         // dependências não liga os dois módulos: a ligação é feita aqui, no host. Registrada ANTES do AddConversations, que

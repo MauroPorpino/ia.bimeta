@@ -26,7 +26,7 @@ using Microsoft.Extensions.Logging;
 namespace IaBimeta.IntegrationTests.Api;
 
 /// <summary>O que o "servidor da Graph API" da Meta recebeu: o token do cabeçalho, o caminho e o corpo.</summary>
-internal sealed record CapturaGraph(string Credencial, string Caminho, string Corpo)
+internal sealed record CapturaGraph(string Credencial, string Caminho, string Corpo, string Metodo = "POST", DateTimeOffset? Quando = null)
 {
     public JsonNode Json => JsonNode.Parse(Corpo)!;
 
@@ -45,20 +45,32 @@ internal sealed class ServidorGraphLoopback : IAsyncDisposable
 {
     private readonly WebApplication _app;
     private readonly ConcurrentQueue<CapturaGraph> _capturas = new();
+    private readonly ConcurrentQueue<CapturaGraph> _leituras = new();
     private int _contador;
 
     private ServidorGraphLoopback(WebApplication app)
     {
         _app = app;
         Roteiro = _ => Aceita();
+        RoteiroDeLeitura = captura => NumeroValido(captura.Caminho.Split('/', StringSplitOptions.RemoveEmptyEntries).Last());
     }
 
     public string EnderecoBase { get; private set; } = string.Empty;
 
+    /// <summary>Os ENVIOS (<c>POST .../messages</c>) que chegaram. As leituras da sonda (<c>GET</c>) ficam em <see cref="Leituras"/>: um teste de prontidão nunca pode produzir um envio.</summary>
     public IReadOnlyList<CapturaGraph> Capturas => _capturas.ToList();
 
-    /// <summary>O que responder a cada chamada: o status HTTP e o corpo.</summary>
+    /// <summary>As leituras do número (a sonda do teste de prontidão), <c>GET /{versão}/{phone_number_id}</c>.</summary>
+    public IReadOnlyList<CapturaGraph> Leituras => _leituras.ToList();
+
+    /// <summary>O que responder a cada envio: o status HTTP e o corpo.</summary>
     public Func<CapturaGraph, (int Status, string Corpo)> Roteiro { get; set; }
+
+    /// <summary>Quando definido, responde ao envio com o <c>Retry-After</c> (em segundos) além do status e do corpo; vale no lugar de <see cref="Roteiro"/>.</summary>
+    public Func<CapturaGraph, (int Status, string Corpo, int? RetryAfter)>? RoteiroComEspera { get; set; }
+
+    /// <summary>O que responder à leitura do número (a sonda). Por padrão, o número existe e o token é aceito.</summary>
+    public Func<CapturaGraph, (int Status, string Corpo)> RoteiroDeLeitura { get; set; }
 
     public static async Task<ServidorGraphLoopback> IniciarAsync()
     {
@@ -68,6 +80,7 @@ internal sealed class ServidorGraphLoopback : IAsyncDisposable
         app.Urls.Add("http://127.0.0.1:0");
         var servidor = new ServidorGraphLoopback(app);
         app.MapPost("/{versao}/{numero}/messages", servidor.AtenderAsync);
+        app.MapGet("/{versao}/{numero}", servidor.AtenderLeituraAsync);
         await app.StartAsync();
         var endereco = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
         servidor.EnderecoBase = endereco.TrimEnd('/') + "/";
@@ -87,14 +100,47 @@ internal sealed class ServidorGraphLoopback : IAsyncDisposable
     public static (int Status, string Corpo) Erro(int status, int codigo) =>
         (status, new JsonObject { ["error"] = new JsonObject { ["message"] = "mensagem do provedor", ["type"] = "OAuthException", ["code"] = codigo, ["fbtrace_id"] = "AbCdEf" } }.ToJsonString());
 
+    /// <summary>A resposta de uma leitura bem-sucedida do número (a forma documentada: id, display_phone_number, verified_name, quality_rating).</summary>
+    public static (int Status, string Corpo) NumeroValido(string id, string nome = "Laboratório do Ensaio", string exibicao = "+55 11 3000-0000", string qualidade = "GREEN") =>
+        (200, new JsonObject { ["id"] = id, ["display_phone_number"] = exibicao, ["verified_name"] = nome, ["quality_rating"] = qualidade }.ToJsonString());
+
     private async Task AtenderAsync(HttpContext http)
     {
         var corpo = await new StreamReader(http.Request.Body, Encoding.UTF8).ReadToEndAsync(http.RequestAborted);
         var autorizacao = http.Request.Headers.Authorization.ToString();
-        var captura = new CapturaGraph(autorizacao.StartsWith("Bearer ", StringComparison.Ordinal) ? autorizacao[7..] : string.Empty, http.Request.Path.Value ?? string.Empty, corpo);
+        var captura = new CapturaGraph(
+            autorizacao.StartsWith("Bearer ", StringComparison.Ordinal) ? autorizacao[7..] : string.Empty, http.Request.Path.Value ?? string.Empty, corpo, "POST", DateTimeOffset.UtcNow);
         _capturas.Enqueue(captura);
 
-        var (status, resposta) = Roteiro(captura);
+        int status;
+        string resposta;
+        if (RoteiroComEspera is { } comEspera)
+        {
+            var (s, r, espera) = comEspera(captura);
+            (status, resposta) = (s, r);
+            if (espera is { } segundos)
+            {
+                http.Response.Headers["Retry-After"] = segundos.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+        }
+        else
+        {
+            (status, resposta) = Roteiro(captura);
+        }
+
+        http.Response.StatusCode = status;
+        http.Response.ContentType = "application/json";
+        await http.Response.WriteAsync(resposta, http.RequestAborted);
+    }
+
+    private async Task AtenderLeituraAsync(HttpContext http)
+    {
+        var autorizacao = http.Request.Headers.Authorization.ToString();
+        var captura = new CapturaGraph(
+            autorizacao.StartsWith("Bearer ", StringComparison.Ordinal) ? autorizacao[7..] : string.Empty, http.Request.Path.Value ?? string.Empty, string.Empty, "GET", DateTimeOffset.UtcNow);
+        _leituras.Enqueue(captura);
+
+        var (status, resposta) = RoteiroDeLeitura(captura);
         http.Response.StatusCode = status;
         http.Response.ContentType = "application/json";
         await http.Response.WriteAsync(resposta, http.RequestAborted);
@@ -140,7 +186,12 @@ internal sealed class EnsaioDeWhatsApp : IAsyncDisposable
 
     public Guid FilaId { get; private set; }
 
-    public static async Task<EnsaioDeWhatsApp> IniciarAsync(PostgresFixture banco, string prefixo)
+    public Guid ContaId { get; private set; }
+
+    public Guid InstanciaId { get; private set; }
+
+    /// <param name="configuracao">Configuração a mais para o Api e o Worker (por exemplo, a vazão e o endereço público do webhook).</param>
+    public static async Task<EnsaioDeWhatsApp> IniciarAsync(PostgresFixture banco, string prefixo, IReadOnlyDictionary<string, string?>? configuracao = null)
     {
         var graph = await ServidorGraphLoopback.IniciarAsync();
         var adicionais = new Dictionary<string, string?>
@@ -153,6 +204,11 @@ internal sealed class EnsaioDeWhatsApp : IAsyncDisposable
             ["Channels:Secrets:ActiveKeyId"] = PostgresFixture.IdDaChaveDeTeste,
             [$"Channels:Secrets:Keys:{PostgresFixture.IdDaChaveDeTeste}"] = PostgresFixture.ChaveDeCifraDeTeste,
         };
+
+        foreach (var (chave, valor) in configuracao ?? new Dictionary<string, string?>())
+        {
+            adicionais[chave] = valor;
+        }
 
         var ia = await EnsaioDeIa.IniciarAsync(banco, prefixo, adicionais: adicionais);
         var ensaio = new EnsaioDeWhatsApp(banco, ia, graph);
@@ -176,7 +232,9 @@ internal sealed class EnsaioDeWhatsApp : IAsyncDisposable
             var contas = sp.GetRequiredService<ChannelAccountService>();
             var instancias = sp.GetRequiredService<ChannelInstanceService>();
             var conta = await contas.CreateAsync(OrganizacaoId, ChannelProvider.WhatsAppCloud, ContaDoProvedor, $"Conta {sufixo}");
-            var instancia = await instancias.RegisterAsync(conta.Id, $"Número {sufixo}", NumeroDoCanal, null, null);
+            ContaId = conta.Id;
+            var instancia = await instancias.RegisterAsync(conta.Id, $"Número {sufixo}", NumeroDoCanal, "+55 11 3000-0000", null);
+            InstanciaId = instancia.Id;
             await instancias.AuthorizeUnitAsync(instancia.Id, unidade.Id);
             await instancias.SetDefaultsAsync(instancia.Id, unidade.Id, null);
             await instancias.ActivateAsync(instancia.Id);
@@ -291,6 +349,38 @@ internal sealed class EnsaioDeWhatsApp : IAsyncDisposable
         await Ia.ComoSistemaAsync(sp => sp.GetRequiredService<ServiceQueueService>().AddMemberAsync(FilaId, usuario.Id, QueueMemberRole.Agent));
         return (usuario, await Ia.Api.LoginAsync(usuario));
     }
+
+    /// <summary>Um administrador (ou o papel informado) da organização do canal, com a sessão aberta (token).</summary>
+    public async Task<string> TokenDeAsync(Role papel)
+    {
+        TenantInfo tenant;
+        await using (var consulta = _banco.NovoEscopo())
+        {
+            tenant = await consulta.ServiceProvider.GetRequiredService<ITenantDirectory>().FindBySlugAsync(Ia.Slug) ?? throw new InvalidOperationException("O tenant do ensaio não existe.");
+        }
+
+        var usuario = await _banco.CriarUsuarioAsync(tenant, OrganizacaoId, papel);
+        return await Ia.Api.LoginAsync(usuario);
+    }
+
+    /// <summary>Uma chamada HTTP ao Api como o usuário do token (corpo JSON opcional). Devolve o status e o JSON da resposta (nulo se não houver corpo JSON).</summary>
+    public async Task<(HttpStatusCode Status, JsonNode? Corpo)> ChamarAsync(string token, HttpMethod metodo, string caminho, JsonNode? corpo = null)
+    {
+        using var pedido = Ia.Api.RequisicaoDe(token, metodo, caminho, corpo is null ? null : new StringContent(corpo.ToJsonString(), Encoding.UTF8, "application/json"));
+        using var resposta = await Ia.Api.Client.SendAsync(pedido);
+        var texto = await resposta.Content.ReadAsStringAsync();
+        JsonNode? json = null;
+        if (!string.IsNullOrWhiteSpace(texto) && resposta.Content.Headers.ContentType?.MediaType is "application/json" or "application/problem+json")
+        {
+            json = JsonNode.Parse(texto);
+        }
+
+        return (resposta.StatusCode, json);
+    }
+
+    /// <summary>Espera o estado de entrega da mensagem de saída de uma sessão chegar ao valor.</summary>
+    public Task EsperarEntregaAsync(Guid sessao, string estado, string autor = "Ai", int ordem = 0, int segundos = 30) =>
+        EnsaioDeIa.AguardarAsync(async () => await EstadoDeEntregaAsync(sessao, autor, ordem) == estado, $"a mensagem de {autor} deveria ficar em {estado}", segundos);
 
     public async ValueTask DisposeAsync()
     {

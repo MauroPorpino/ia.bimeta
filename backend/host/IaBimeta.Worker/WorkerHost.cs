@@ -75,7 +75,9 @@ public static class WorkerHost
             identidade => builder.Configuration.GetSection("Identity").Bind(identidade));
         builder.Services.AddChannels(
             provider => ConnectionStringOf(provider, "Channels"),
-            segredos => builder.Configuration.GetSection("Channels:Secrets").Bind(segredos));
+            segredos => builder.Configuration.GetSection("Channels:Secrets").Bind(segredos),
+            envio => builder.Configuration.GetSection("Channels:Sending").Bind(envio),
+            webhook => builder.Configuration.GetSection("Channels:Webhook").Bind(webhook));
 
         // A mesma ligação mediada pelo host do Api (ADR 0008): sem ela as mudanças de unidade seriam recusadas por falha fechada.
         builder.Services.AddScoped<IChannelUnitAuthorization, ChannelsBackedUnitAuthorization>();

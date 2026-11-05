@@ -23,6 +23,65 @@ namespace IaBimeta.Channels.Infrastructure.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("IaBimeta.Channels.Domain.AccountSendState", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("account_id");
+
+                    b.Property<DateTimeOffset?>("CooldownUntil")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("cooldown_until");
+
+                    b.Property<bool>("IsPaused")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_paused");
+
+                    b.Property<string>("PauseReason")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("pause_reason");
+
+                    b.Property<DateTimeOffset?>("PausedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("paused_at");
+
+                    b.Property<DateTimeOffset>("RefilledAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("refilled_at");
+
+                    b.Property<DateTimeOffset?>("ResumedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("resumed_at");
+
+                    b.Property<int?>("ThroughputPerSecond")
+                        .HasColumnType("integer")
+                        .HasColumnName("throughput_per_second");
+
+                    b.Property<double>("Tokens")
+                        .HasColumnType("double precision")
+                        .HasColumnName("tokens");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("TenantId", "AccountId");
+
+                    b.ToTable("account_send_state", "channels", t =>
+                        {
+                            t.HasCheckConstraint("ck_account_send_state_pause", "(is_paused AND pause_reason IS NOT NULL AND paused_at IS NOT NULL) OR (NOT is_paused AND pause_reason IS NULL)");
+
+                            t.HasCheckConstraint("ck_account_send_state_throughput", "throughput_per_second IS NULL OR (throughput_per_second >= 1 AND throughput_per_second <= 1000)");
+
+                            t.HasCheckConstraint("ck_account_send_state_tokens", "tokens >= 0");
+                        });
+                });
+
             modelBuilder.Entity("IaBimeta.Channels.Domain.ChannelAccount", b =>
                 {
                     b.Property<Guid>("TenantId")
@@ -522,6 +581,15 @@ namespace IaBimeta.Channels.Infrastructure.Migrations
 
                             t.HasCheckConstraint("ck_outbox_message_state", "state IN (1, 2, 3, 4)");
                         });
+                });
+
+            modelBuilder.Entity("IaBimeta.Channels.Domain.AccountSendState", b =>
+                {
+                    b.HasOne("IaBimeta.Channels.Domain.ChannelAccount", null)
+                        .WithOne()
+                        .HasForeignKey("IaBimeta.Channels.Domain.AccountSendState", "TenantId", "AccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("IaBimeta.Channels.Domain.ChannelInstance", b =>

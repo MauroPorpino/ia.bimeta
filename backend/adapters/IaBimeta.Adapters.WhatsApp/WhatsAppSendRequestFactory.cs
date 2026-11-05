@@ -94,6 +94,24 @@ internal static class WhatsAppSendRequestFactory
         return mensagem;
     }
 
+    /// <summary>
+    /// A sonda: <c>GET {base}{versão}/{phone_number_id}?fields=id,display_phone_number,verified_name,quality_rating</c>, só leitura. Os campos são os que a referência oficial do número lista como padrão. O token vai só no
+    /// cabeçalho deste pedido. Token ou número fora do formato: nulo, sem chamar o provedor.
+    /// </summary>
+    public static HttpRequestMessage? CreateProbe(ProviderProbeRequest request, Uri versionedBase)
+    {
+        if (!IsHeaderSafeToken(request.AccessToken) || request.ExternalAccountId is null || !AccountIdPattern.IsMatch(request.ExternalAccountId))
+        {
+            return null;
+        }
+
+        var endereco = new Uri(versionedBase, $"{request.ExternalAccountId}?fields=id,display_phone_number,verified_name,quality_rating");
+        var mensagem = new HttpRequestMessage(HttpMethod.Get, endereco);
+        mensagem.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        mensagem.Headers.Authorization = new AuthenticationHeaderValue("Bearer", request.AccessToken);
+        return mensagem;
+    }
+
     private static ProviderSendResult Refuse(ProviderSendOutcome outcome, string code) => new(outcome, null, code);
 
     internal static bool IsHeaderSafeToken(string? valor)

@@ -44,6 +44,9 @@ public sealed class ChannelsDbContext : DbContext
 
     public DbSet<OutboundMessage> OutboundMessages => Set<OutboundMessage>();
 
+    /// <summary>O balde de fichas, a espera do provedor e a pausa de cada conta (SND-2 e SND-6).</summary>
+    public DbSet<AccountSendState> SendStates => Set<AccountSendState>();
+
     // O EF reavalia esta propriedade a cada execução de consulta (membro do DbContext no filtro global).
     private TenantId TenantAtual => _contexto.GetRequired().TenantId;
 
@@ -58,6 +61,7 @@ public sealed class ChannelsDbContext : DbContext
         modelBuilder.ApplyConfiguration(new ChannelSecretConfiguration());
         modelBuilder.ApplyConfiguration(new ChannelWebhookConfiguration());
         modelBuilder.ApplyConfiguration(new OutboundMessageConfiguration());
+        modelBuilder.ApplyConfiguration(new AccountSendStateConfiguration());
 
         // O Inbox durável do Receiver (ADR 0011, seção C): o outbox do Messaging, no esquema deste módulo (o relay o entrega aos handlers do próprio Channels), e o inbox de idempotência dos consumidores.
         modelBuilder.ConfigureOutbox();
@@ -65,6 +69,7 @@ public sealed class ChannelsDbContext : DbContext
 
         modelBuilder.Entity<ChannelAccount>().HasQueryFilter(e => e.TenantId == TenantAtual);
         modelBuilder.Entity<OutboundMessage>().HasQueryFilter(e => e.TenantId == TenantAtual);
+        modelBuilder.Entity<AccountSendState>().HasQueryFilter(e => e.TenantId == TenantAtual);
         modelBuilder.Entity<ChannelInstance>().HasQueryFilter(e => e.TenantId == TenantAtual);
         modelBuilder.Entity<ChannelInstanceUnit>().HasQueryFilter(e => e.TenantId == TenantAtual);
         modelBuilder.Entity<ChannelSecret>().HasQueryFilter(e => e.TenantId == TenantAtual);

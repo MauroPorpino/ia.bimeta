@@ -104,8 +104,54 @@ public enum ProviderSendOutcome
 /// <param name="OpaqueCallbackData">O dado opaco que o provedor devolve nos status (a correlação com a nossa mensagem); até 512 caracteres.</param>
 public sealed record ProviderSendRequest(string AccessToken, string ExternalAccountId, string To, string Text, string? OpaqueCallbackData);
 
-/// <summary>O resultado do envio. Só o código do erro do provedor entra aqui (nunca a mensagem livre, que pode ecoar dados).</summary>
-public sealed record ProviderSendResult(ProviderSendOutcome Outcome, string? ProviderMessageId, string? ErrorCode, TimeSpan? RetryAfter = null);
+/// <summary>A quem o limite de taxa do provedor se aplica (só vale em <see cref="ProviderSendOutcome.RejectedTransient"/> de limite de taxa).</summary>
+public enum ProviderRateLimitScope
+{
+    /// <summary>A conta (ou o número, ou o aplicativo) inteira: nenhum envio dela deve sair antes do fim da espera (SND-2).</summary>
+    Account = 1,
+
+    /// <summary>Só o par remetente-destinatário: os envios para outros destinatários não precisam esperar.</summary>
+    Recipient = 2,
+}
+
+/// <summary>
+/// O resultado do envio. Só o código do erro do provedor entra aqui (nunca a mensagem livre, que pode ecoar dados).
+/// <paramref name="RateLimitScope"/> é preenchido quando a recusa transitória é um limite de taxa; nulo nas demais (por exemplo, falha genérica transitória).
+/// </summary>
+public sealed record ProviderSendResult(
+    ProviderSendOutcome Outcome,
+    string? ProviderMessageId,
+    string? ErrorCode,
+    TimeSpan? RetryAfter = null,
+    ProviderRateLimitScope? RateLimitScope = null);
+
+/// <summary>O pedido de sonda: confere a credencial e o número no provedor SEM enviar mensagem alguma (só leitura).</summary>
+/// <param name="AccessToken">A credencial da conta, decifrada para ESTA chamada (nunca guardada nem registrada).</param>
+/// <param name="ExternalAccountId">O número no provedor (Phone Number ID).</param>
+public sealed record ProviderProbeRequest(string AccessToken, string ExternalAccountId);
+
+/// <summary>O desfecho da sonda.</summary>
+public enum ProviderProbeOutcome
+{
+    /// <summary>A credencial é aceita e o número existe e é acessível por ela.</summary>
+    Ok = 1,
+
+    /// <summary>O provedor recusou a credencial (expirada, inválida, sem permissão) ou a conta está restrita.</summary>
+    CredentialRejected = 2,
+
+    /// <summary>O número não existe no provedor ou a credencial não enxerga esse número.</summary>
+    NotFound = 3,
+
+    /// <summary>Não foi possível concluir (rede, tempo esgotado, erro do provedor, resposta ilegível): nada se afirma sobre a configuração.</summary>
+    Unavailable = 4,
+}
+
+/// <summary>O que a sonda leu do número (só dados que o provedor mostra ao dono da conta; nunca credencial).</summary>
+/// <param name="VerifiedName">O nome verificado da empresa no provedor.</param>
+/// <param name="DisplayPhoneNumber">O número como o provedor o exibe.</param>
+/// <param name="QualityRating">A classificação de qualidade do número no provedor (por exemplo, GREEN, YELLOW, RED).</param>
+/// <param name="ErrorCode">O código de erro do provedor, só o código (nunca a mensagem livre).</param>
+public sealed record ProviderProbeResult(ProviderProbeOutcome Outcome, string? VerifiedName, string? DisplayPhoneNumber, string? QualityRating, string? ErrorCode);
 
 /// <summary>O adaptador de um provedor de canal. Implementado em <c>backend/adapters/IaBimeta.Adapters.*</c>, um por provedor.</summary>
 public interface IChannelProviderAdapter
@@ -139,4 +185,10 @@ public interface IChannelProviderAdapter
     /// <see cref="ProviderSendResult"/>. Cancelamento do chamador propaga como <see cref="OperationCanceledException"/>.
     /// </summary>
     Task<ProviderSendResult> SendTextAsync(ProviderSendRequest request, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Confere, SEM enviar mensagem, que a credencial é aceita e que o número existe e é acessível por ela (uma leitura no provedor). Não lança por falha do provedor: o desfecho vai em
+    /// <see cref="ProviderProbeResult"/>; só o cancelamento do chamador propaga como <see cref="OperationCanceledException"/>.
+    /// </summary>
+    Task<ProviderProbeResult> ProbeAsync(ProviderProbeRequest request, CancellationToken cancellationToken);
 }

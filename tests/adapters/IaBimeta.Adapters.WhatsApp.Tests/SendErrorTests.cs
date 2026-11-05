@@ -20,19 +20,67 @@ public sealed class SendErrorTests
     // Retentativa com espera
 
     [Theory]
-    [InlineData(130429, HttpStatusCode.TooManyRequests)]
-    [InlineData(130429, HttpStatusCode.BadRequest)]
-    [InlineData(131056, HttpStatusCode.BadRequest)]
-    [InlineData(131056, HttpStatusCode.TooManyRequests)]
-    [InlineData(131000, HttpStatusCode.BadRequest)]
-    [InlineData(131000, HttpStatusCode.InternalServerError)]
-    public async Task Limite_de_taxa_e_falha_de_envio_desconhecida_sao_recusa_transitoria_com_o_codigo(int codigo, HttpStatusCode http)
+    [InlineData(130429, HttpStatusCode.TooManyRequests, ProviderRateLimitScope.Account)]
+    [InlineData(130429, HttpStatusCode.BadRequest, ProviderRateLimitScope.Account)]
+    [InlineData(80007, HttpStatusCode.TooManyRequests, ProviderRateLimitScope.Account)]
+    [InlineData(80007, HttpStatusCode.BadRequest, ProviderRateLimitScope.Account)]
+    [InlineData(4, HttpStatusCode.TooManyRequests, ProviderRateLimitScope.Account)]
+    [InlineData(4, HttpStatusCode.BadRequest, ProviderRateLimitScope.Account)]
+    [InlineData(131056, HttpStatusCode.BadRequest, ProviderRateLimitScope.Recipient)]
+    [InlineData(131056, HttpStatusCode.TooManyRequests, ProviderRateLimitScope.Recipient)]
+    public async Task Limite_de_taxa_e_recusa_transitoria_com_o_codigo_e_o_alcance_do_limite(int codigo, HttpStatusCode http, ProviderRateLimitScope alcance)
     {
         var (adaptador, handler, _) = Sends.Adapter();
 
         var resultado = await Send(handler, adaptador, http, SendBodies.Error(codigo));
 
-        Assert.Equal(new ProviderSendResult(ProviderSendOutcome.RejectedTransient, null, codigo.ToString()), resultado);
+        Assert.Equal(new ProviderSendResult(ProviderSendOutcome.RejectedTransient, null, codigo.ToString(), null, alcance), resultado);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest)]
+    [InlineData(HttpStatusCode.InternalServerError)]
+    public async Task Falha_de_envio_desconhecida_131000_e_transitoria_sem_prova_de_limite_de_taxa(HttpStatusCode http)
+    {
+        var (adaptador, handler, _) = Sends.Adapter();
+
+        var resultado = await Send(handler, adaptador, http, SendBodies.Error(131000));
+
+        Assert.Equal(new ProviderSendResult(ProviderSendOutcome.RejectedTransient, null, "131000"), resultado);
+        Assert.Null(resultado.RateLimitScope);
+    }
+
+    [Fact]
+    public async Task Limite_de_taxa_da_conta_leva_a_espera_sugerida_pelo_provedor_junto_do_alcance()
+    {
+        var (adaptador, handler, _) = Sends.Adapter();
+
+        var resultado = await Send(handler, adaptador, HttpStatusCode.TooManyRequests, SendBodies.Error(80007), ("Retry-After", "42"));
+
+        Assert.Equal(new ProviderSendResult(ProviderSendOutcome.RejectedTransient, null, "80007", TimeSpan.FromSeconds(42), ProviderRateLimitScope.Account), resultado);
+    }
+
+    [Fact]
+    public async Task HTTP_429_com_corpo_de_erro_completo_e_codigo_desconhecido_e_limite_de_taxa_da_conta()
+    {
+        var (adaptador, handler, _) = Sends.Adapter();
+
+        var resultado = await Send(handler, adaptador, HttpStatusCode.TooManyRequests, SendBodies.Error(99999), ("Retry-After", "9"));
+
+        Assert.Equal(new ProviderSendResult(ProviderSendOutcome.RejectedTransient, null, "99999", TimeSpan.FromSeconds(9), ProviderRateLimitScope.Account), resultado);
+    }
+
+    [Theory]
+    [InlineData("<html>Too many requests</html>", "http-429")]
+    [InlineData("", "http-429")]
+    [InlineData("{}", "http-429")]
+    public async Task HTTP_429_sem_corpo_de_erro_completo_nao_prova_nada_e_fica_desconhecido(string corpo, string codigo)
+    {
+        var (adaptador, handler, _) = Sends.Adapter();
+
+        var resultado = await Send(handler, adaptador, HttpStatusCode.TooManyRequests, corpo);
+
+        Assert.Equal(new ProviderSendResult(ProviderSendOutcome.Unknown, null, codigo), resultado);
     }
 
     [Fact]
@@ -228,14 +276,12 @@ public sealed class SendErrorTests
         Assert.Equal(ProviderSendOutcome.Unknown, (await Send(handler, adaptador, http, SendBodies.Error(2, "Service temporarily unavailable"))).Outcome);
     }
 
-    [Theory]
-    [InlineData(HttpStatusCode.TooManyRequests)]
-    [InlineData(HttpStatusCode.RequestTimeout)]
-    public async Task Limite_ou_tempo_do_servidor_sem_codigo_conhecido_nao_prova_que_nada_foi_enviado(HttpStatusCode http)
+    [Fact]
+    public async Task Tempo_esgotado_do_servidor_408_sem_codigo_conhecido_nao_prova_que_nada_foi_enviado()
     {
         var (adaptador, handler, _) = Sends.Adapter();
 
-        var resultado = await Send(handler, adaptador, http, SendBodies.Error(99999));
+        var resultado = await Send(handler, adaptador, HttpStatusCode.RequestTimeout, SendBodies.Error(99999));
 
         Assert.Equal(ProviderSendOutcome.Unknown, resultado.Outcome);
     }
