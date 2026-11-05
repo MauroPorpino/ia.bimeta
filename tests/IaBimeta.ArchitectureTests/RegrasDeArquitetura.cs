@@ -52,14 +52,15 @@ internal static class RegrasDeArquitetura
             return new ClasseDoProjeto(TipoDeProjeto.Bloco, string.Empty, string.Empty);
         }
 
-        if (nome.StartsWith("IaBimeta.Adapters.", StringComparison.Ordinal))
-        {
-            return new ClasseDoProjeto(TipoDeProjeto.Adaptador, string.Empty, string.Empty);
-        }
-
+        // Um projeto de teste de adaptador (IaBimeta.Adapters.Ai.OpenAI.Tests) é TESTE: o sufixo vale antes do prefixo.
         if (nome.EndsWith("Tests", StringComparison.Ordinal))
         {
             return new ClasseDoProjeto(TipoDeProjeto.Teste, string.Empty, string.Empty);
+        }
+
+        if (nome.StartsWith("IaBimeta.Adapters.", StringComparison.Ordinal))
+        {
+            return new ClasseDoProjeto(TipoDeProjeto.Adaptador, string.Empty, string.Empty);
         }
 
         var casamento = ProjetoDeModulo.Match(nome);

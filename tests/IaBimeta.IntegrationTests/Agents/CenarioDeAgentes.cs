@@ -55,7 +55,8 @@ internal sealed class CenarioDeAgentes
     /// <summary>Um usuário do tenant que gere as configurações (a permissão que o ADR 0017 pede).</summary>
     public RequestContext Admin { get; private set; } = null!;
 
-    public static async Task<CenarioDeAgentes> CriarAsync(PostgresFixture banco, string prefixo, bool configurarIA = true, bool publicarAgente = true, string? textoDeAudio = null)
+    public static async Task<CenarioDeAgentes> CriarAsync(
+        PostgresFixture banco, string prefixo, bool configurarIA = true, bool publicarAgente = true, string? textoDeAudio = null, bool usarOpenAi = false)
     {
         var c = await CenarioDeConversas.CriarAsync(banco, prefixo, canaisReais: true, agentes: true);
         var cenario = new CenarioDeAgentes(c, $"sk-CANARIO-{Guid.NewGuid():N}", $"CANARIO-INSTRUCOES-{Guid.NewGuid():N}");
@@ -71,8 +72,10 @@ internal sealed class CenarioDeAgentes
             await c.ComoAsync(admin, async sp =>
             {
                 var configuracao = sp.GetRequiredService<AiTenantConfigurationService>();
-                await configuracao.SetConfigurationAsync(PostgresFixture.ProvedorDeIADeTeste, PostgresFixture.ModeloDeIADeTeste);
-                await configuracao.SetCredentialAsync(PostgresFixture.ProvedorDeIADeTeste, cenario.Canario);
+                // O tenant escolhe o provedor e o modelo: o dublê (provider-a) ou o adaptador REAL da OpenAI com o servidor HTTP simulado.
+                var provedor = usarOpenAi ? PostgresFixture.ProvedorOpenAiDeTeste : PostgresFixture.ProvedorDeIADeTeste;
+                await configuracao.SetConfigurationAsync(provedor, usarOpenAi ? PostgresFixture.ModeloOpenAiDeTeste : PostgresFixture.ModeloDeIADeTeste);
+                await configuracao.SetCredentialAsync(provedor, cenario.Canario);
                 return 0;
             });
         }
@@ -129,6 +132,17 @@ internal sealed class CenarioDeAgentes
     public IReadOnlyList<AiCompletionRequest> PedidosAoModelo => Provedor.Requests.Where(r => r.Credential.Secret == Canario).ToList();
 
     public int ChamadasAoModelo => PedidosAoModelo.Count;
+
+    // O servidor HTTP simulado da OpenAI (só com o adaptador real)
+
+    /// <summary>O roteiro HTTP do tenant: o que o "servidor da OpenAI" responde a cada requisição que traz a credencial DELE.</summary>
+    public Func<CapturaHttp, CancellationToken, Task<HttpResponseMessage>> RoteiroHttp
+    {
+        set => C.Banco.ServidorOpenAi.Definir(Canario, value);
+    }
+
+    /// <summary>As requisições HTTP que chegaram ao servidor simulado com a credencial DESTE tenant.</summary>
+    public IReadOnlyList<CapturaHttp> RequisicoesHttp => C.Banco.ServidorOpenAi.DaCredencial(Canario);
 
     // Fluxo
 

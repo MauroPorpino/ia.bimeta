@@ -34,6 +34,7 @@
     <ProjectReference Include="..\..\backend\host\IaBimeta.Worker\IaBimeta.Worker.csproj" />
     <ProjectReference Include="..\..\backend\building-blocks\IaBimeta.Messaging\IaBimeta.Messaging.csproj" />
     <ProjectReference Include="..\..\backend\building-blocks\IaBimeta.SharedKernel\IaBimeta.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\backend\adapters\IaBimeta.Adapters.Ai.OpenAI\IaBimeta.Adapters.Ai.OpenAI.csproj" />
     <ProjectReference Include="..\..\backend\modules\agents\IaBimeta.Agents.Core\IaBimeta.Agents.Core.csproj" />
     <ProjectReference Include="..\..\backend\modules\agents\IaBimeta.Agents.Infrastructure\IaBimeta.Agents.Infrastructure.csproj" />
     <ProjectReference Include="..\..\backend\modules\ai-gateway\IaBimeta.AiGateway.Contracts\IaBimeta.AiGateway.Contracts.csproj" />

@@ -1,3 +1,4 @@
+using IaBimeta.Adapters.Ai.OpenAI;
 using IaBimeta.AiGateway.Application;
 using IaBimeta.AiGateway.Infrastructure;
 using IaBimeta.Api.Channels;
@@ -91,13 +92,16 @@ public static class ApiHost
 
         // AiGateway (ADR 0017, C1.4): a configuração de IA do tenant, a credencial BYOK cifrada, o ledger de uso e o IAiGateway. O catálogo de modelos e os limites padrão vêm da
         // configuração (AiGateway:Catalog e AiGateway:DefaultLimits); as CHAVES MESTRAS (AiGateway:Secrets: ActiveKeyId e Keys) vêm do ambiente, nunca de arquivo versionado, e são
-        // diferentes das do Channels. Os adaptadores de provedor ainda não existem: sem eles, a seleção responde provider-not-registered e nada é chamado.
+        // diferentes das do Channels. Os adaptadores de provedor (um por provedor, só os hosts os referenciam) entram abaixo: um provedor sem adaptador responde provider-not-registered e nada é chamado.
         builder.Services.AddAiGateway(
             provider => ConnectionStringOf(provider, "AiGateway"),
             segredos => builder.Configuration.GetSection("AiGateway:Secrets").Bind(segredos),
             catalogo => builder.Configuration.GetSection("AiGateway:Catalog").Bind(catalogo),
             limites => builder.Configuration.GetSection("AiGateway:DefaultLimits").Bind(limites),
             builder.Configuration.GetSection("AiGateway:Options").Get<AiGatewayOptions>());
+
+        // O adaptador da OpenAI (C4): HttpClient direto na Responses API, credencial BYOK por chamada, nenhum segredo na configuração.
+        builder.Services.AddOpenAiProvider(openai => builder.Configuration.GetSection("AiGateway:Providers:OpenAi").Bind(openai));
 
         // Enums saem e entram como texto (por exemplo, "HumanAssisted"), não como número.
         builder.Services.ConfigureHttpJsonOptions(opcoes => opcoes.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));

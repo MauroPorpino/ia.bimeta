@@ -1,4 +1,5 @@
 <Solution>
+  <Project Path="../tests/adapters/IaBimeta.Adapters.Ai.OpenAI.Tests/IaBimeta.Adapters.Ai.OpenAI.Tests.csproj" />
   <Project Path="../tests/agents/IaBimeta.Agents.Tests/IaBimeta.Agents.Tests.csproj" />
   <Project Path="../tests/ai-gateway/IaBimeta.AiGateway.Tests/IaBimeta.AiGateway.Tests.csproj" />
   <Project Path="../tests/audit/IaBimeta.Audit.Tests/IaBimeta.Audit.Tests.csproj" />
@@ -15,6 +16,7 @@
   <Project Path="building-blocks/IaBimeta.SharedKernel/IaBimeta.SharedKernel.csproj" />
   <Project Path="host/IaBimeta.Api/IaBimeta.Api.csproj" />
   <Project Path="host/IaBimeta.Worker/IaBimeta.Worker.csproj" />
+  <Project Path="adapters/IaBimeta.Adapters.Ai.OpenAI/IaBimeta.Adapters.Ai.OpenAI.csproj" />
   <Project Path="modules/agents/IaBimeta.Agents.Core/IaBimeta.Agents.Core.csproj" />
   <Project Path="modules/agents/IaBimeta.Agents.Infrastructure/IaBimeta.Agents.Infrastructure.csproj" />
   <Project Path="modules/ai-gateway/IaBimeta.AiGateway.Contracts/IaBimeta.AiGateway.Contracts.csproj" />

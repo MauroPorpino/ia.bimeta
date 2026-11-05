@@ -169,7 +169,16 @@ public sealed class PostgresFixture : IAsyncLifetime
                 segredos.ActiveKeyId = IdDaChaveDeIADeTeste;
                 segredos.Keys[IdDaChaveDeIADeTeste] = ChaveDeCifraDeIADeTeste;
             },
-            catalogo => catalogo.Models.AddRange(ModelosDeIADeTeste()),
+            catalogo =>
+            {
+                catalogo.Models.AddRange(ModelosDeIADeTeste());
+
+                // Só a composição dos Agents conhece o modelo do adaptador REAL da OpenAI (a chamada vai ao servidor HTTP simulado, nunca à rede).
+                if (agentes)
+                {
+                    catalogo.Models.Add(ModeloDoCatalogoOpenAi());
+                }
+            },
             limites =>
             {
                 limites.MaxConcurrentCalls = 8;
@@ -185,6 +194,9 @@ public sealed class PostgresFixture : IAsyncLifetime
             // O Agents (C2): o ÚNICO provedor de IA é o dublê dos testes (nenhuma rede, nenhuma chave real), e as opções são as de referência, com o tempo nas mãos do teste.
             colecao.AddSingleton(ProvedorDeIA);
             colecao.AddSingleton<IAiProvider>(provider => provider.GetRequiredService<FakeAiProvider>());
+
+            // O adaptador REAL da OpenAI (C4), com o servidor HTTP simulado no lugar da rede: o pedido, o uso, os erros e o tempo limite são os do adaptador de produção.
+            colecao.AddSingleton<IAiProvider>(_ => new IaBimeta.Adapters.Ai.OpenAI.OpenAiProvider(new HttpClient(ServidorOpenAi) { Timeout = Timeout.InfiniteTimeSpan }, new IaBimeta.Adapters.Ai.OpenAI.OpenAiOptions()));
             colecao.AddAgents(_ => ConnectionString);
         }
 
@@ -245,6 +257,28 @@ public sealed class PostgresFixture : IAsyncLifetime
 
     /// <summary>O provedor de IA dos testes dos Agents: o dublê com latência e falha injetáveis, que registra cada pedido (o contador prova, por exemplo, que um handler nunca chama o modelo).</summary>
     public FakeAiProvider ProvedorDeIA { get; } = new(ProvedorDeIADeTeste);
+
+    /// <summary>O "servidor da OpenAI" (HTTP simulado) que o adaptador real da composição dos Agents chama: responde pelo roteiro do tenant cuja credencial chegou.</summary>
+    internal IaBimeta.IntegrationTests.Agents.ServidorOpenAiSimulado ServidorOpenAi { get; } = new();
+
+    public const string ProvedorOpenAiDeTeste = IaBimeta.Adapters.Ai.OpenAI.OpenAiOptions.ProviderId;
+    public const string ModeloOpenAiDeTeste = "gpt-6-luna";
+
+    /// <summary>O modelo do catálogo para o adaptador real da OpenAI (o perfil de atendimento rápido, os preços de referência do ADR 0017).</summary>
+    private static AiCatalogModelSettings ModeloDoCatalogoOpenAi() => new()
+    {
+        ProviderId = ProvedorOpenAiDeTeste,
+        ModelId = ModeloOpenAiDeTeste,
+        Profile = "atendimento-rapido",
+        ContextWindowTokens = 200_000,
+        MaxOutputTokens = 4_000,
+        Currency = "USD",
+        InputPerMillion = 0.10m,
+        CachedInputPerMillion = 0.01m,
+        CacheWritePerMillion = 0.10m,
+        OutputPerMillion = 0.50m,
+        Status = "Active",
+    };
 
     /// <summary>A composição dos Agents (mensageria, relay, handlers do ContactCenter e do Agents, AiGateway e o provedor de IA dublê): a raiz de serviços, onde o relay e o executor vivem.</summary>
     public IServiceProvider ServicosComAgentes => _servicosComAgentes!;

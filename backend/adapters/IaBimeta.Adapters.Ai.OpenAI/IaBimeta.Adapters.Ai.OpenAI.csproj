@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <!-- Os testes de unidade exercitam o pedido, o uso, os erros e o tempo limite direto nos componentes. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="IaBimeta.Adapters.Ai.OpenAI.Tests" />
+  </ItemGroup>
+
+  <!-- O HttpClient e o System.Text.Json vêm da plataforma (ADR 0017, seção B: nenhum SDK, nenhum pacote). O FrameworkReference só traz as abstrações de DI da extensão AddOpenAiProvider. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <!-- DEP-2: um adaptador referencia só o Contracts do módulo dono (AiGateway) e o SharedKernel. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\modules\ai-gateway\IaBimeta.AiGateway.Contracts\IaBimeta.AiGateway.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

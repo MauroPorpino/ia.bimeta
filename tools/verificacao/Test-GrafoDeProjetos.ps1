@@ -28,8 +28,9 @@ function Get-ClasseDoProjeto {
     if ($ListaLegado -contains $Nome) { return [pscustomobject]@{ Tipo = 'Legado'; Modulo = ''; Camada = '' } }
     if (@('IaBimeta.Api', 'IaBimeta.Worker') -contains $Nome) { return [pscustomobject]@{ Tipo = 'Host'; Modulo = ''; Camada = '' } }
     if (@('IaBimeta.SharedKernel', 'IaBimeta.Messaging') -contains $Nome) { return [pscustomobject]@{ Tipo = 'Bloco'; Modulo = ''; Camada = '' } }
-    if ($Nome -like 'IaBimeta.Adapters.*') { return [pscustomobject]@{ Tipo = 'Adaptador'; Modulo = ''; Camada = '' } }
+    # Um projeto de teste de adaptador (IaBimeta.Adapters.Ai.OpenAI.Tests) e TESTE: o sufixo vale antes do prefixo.
     if ($Nome -like '*Tests') { return [pscustomobject]@{ Tipo = 'Teste'; Modulo = ''; Camada = '' } }
+    if ($Nome -like 'IaBimeta.Adapters.*') { return [pscustomobject]@{ Tipo = 'Adaptador'; Modulo = ''; Camada = '' } }
     $m = [regex]::Match($Nome, '^IaBimeta\.([A-Za-z]+)\.(Contracts|Core|Infrastructure|Presentation)$')
     if ($m.Success -and ($Modulos -contains $m.Groups[1].Value)) {
         return [pscustomobject]@{ Tipo = 'Modulo'; Modulo = $m.Groups[1].Value; Camada = $m.Groups[2].Value }

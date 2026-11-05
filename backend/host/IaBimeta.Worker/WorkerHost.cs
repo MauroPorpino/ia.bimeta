@@ -1,4 +1,5 @@
 using IaBimeta.Agents.Infrastructure;
+using IaBimeta.Adapters.Ai.OpenAI;
 using IaBimeta.AiGateway.Application;
 using IaBimeta.AiGateway.Infrastructure;
 using IaBimeta.Audit.Infrastructure;
@@ -91,6 +92,9 @@ public static class WorkerHost
             catalogo => builder.Configuration.GetSection("AiGateway:Catalog").Bind(catalogo),
             limites => builder.Configuration.GetSection("AiGateway:DefaultLimits").Bind(limites),
             builder.Configuration.GetSection("AiGateway:Options").Get<AiGatewayOptions>());
+
+        // O adaptador da OpenAI (C4): o Worker é quem chama o modelo (o executor de turnos do Agents). Nenhum segredo na configuração: a credencial BYOK de cada tenant chega por chamada.
+        builder.Services.AddOpenAiProvider(openai => builder.Configuration.GetSection("AiGateway:Providers:OpenAi").Bind(openai));
         builder.Services.AddOutboxRelay<ConversationsDbContext>();
 
         // O Agents (C2, ADR 0017): o turno de IA. Os handlers só gravam o AiTurn (o relay os entrega); o executor e o reconciliador abaixo é que rodam os turnos, no contexto de sistema de cada
