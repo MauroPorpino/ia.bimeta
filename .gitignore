@@ -480,3 +480,7 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# Frontend (ia.bimeta atendente): build do Vite
+frontend/dist/
+*.tsbuildinfo
