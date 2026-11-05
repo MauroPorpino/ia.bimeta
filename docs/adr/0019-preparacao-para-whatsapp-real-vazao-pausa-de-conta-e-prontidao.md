@@ -1,0 +1,37 @@
+# ADR 0019 — Preparação para o WhatsApp real: vazão por conta (SND-2), pausa de conta (SND-6), sonda do número e teste de prontidão
+
+- **Status:** **Proposto para ratificação.** Implementado em 05/11/2026 sob a autorização do decisor para preparar a operação com o WhatsApp Cloud API real, com autonomia em decisões técnicas rotineiras. Nenhuma mensagem real foi enviada e nenhuma chamada à Meta foi feita: tudo foi provado contra a Graph API simulada.
+- **Data:** 05/11/2026
+- **Decisor:** Mauro Porpino
+- **Referências:** ADR 0011 (A.2 itens 5, 7, 9 e 11; E), ADR 0018; `docs/architecture/BOUNDARIES.md` §12.4 (SND-2, SND-6) e §12.8; procedimento operacional em `docs/operations/WHATSAPP-CONEXAO-REAL.md`
+- **Preserva:** a matriz `module-dependencies.json` (nenhuma aresta nova), a regra de que só os hosts referenciam adaptadores, a estratégia de efeito (c) do WhatsApp e a regra de que resultado ambíguo nunca é reenviado.
+
+## Contexto
+
+O ADR 0018 deixou como pendências reais para operar com a Meta o **balde de fichas** (SND-2) e a **pausa da conta por erro de conta** (SND-6), além de uma forma de **provar a configuração de uma conta real sem enviar mensagem**. Fatos da documentação oficial da Meta (consulta de 05/11/2026): 80 mensagens por segundo por número por padrão (até 1.000 por elevação automática; 20 em número em coexistência com o app WhatsApp Business); limite por par remetente–destinatário de 1 mensagem a cada 6 s (131056); códigos de limite 130429, 80007, 4 e 131056; token expirado 190 e restrição de conta 368; a página de erros **não** fixa o estado HTTP nem o `Retry-After` dos códigos de limite e **não** garante que a mensagem não saiu.
+
+## Decisão
+
+1. **Balde de fichas por conta, no banco** (`channels.account_send_state`, uma linha por conta, criada sob demanda). Toda operação trava a linha (`SELECT ... FOR UPDATE`) numa transação curta: duas instâncias do Worker nunca gastam a mesma ficha. Reabastecimento contínuo pelo tempo decorrido (taxa = vazão da conta; capacidade = vazão × `BurstSeconds`, no mínimo 1). Vazão padrão `Channels:Sending:DefaultThroughputPerSecond` (80), com **vazão própria por conta** (1 a 1.000) para números em coexistência. A unidade do balde é a **conta** (BOUNDARIES SND-2); como a Meta mede por número, é conservador para contas com vários números.
+2. **No Sender**, antes de registrar a tentativa e de qualquer chamada: conta pausada → a mensagem **falha de imediato** (`account-paused`, vai ao Conversations como falha definitiva e ao atendente, sem gastar tentativa do relay nem chamar a Meta); sem ficha → espera **dentro do handler** até `MaxLocalWait` (preserva a ordem da lane e as tentativas do relay); espera maior → `Retry` com a espera exata (gasta uma tentativa do relay).
+3. **Limite de taxa do provedor (429).** O contrato ganha `ProviderRateLimitScope` (aditivo): `Account` (130429, 80007, 4 e **qualquer HTTP 429 com corpo de erro completo da Graph API**) e `Recipient` (131056). `Account` impõe uma **espera à conta toda** (`cooldown_until` = `Retry-After` ou `DefaultRateLimitCooldown`, limitada a `MaxRateLimitCooldown`): nenhum envio da conta sai antes, e as outras conversas não gastam tentativa do provedor. `Recipient` repete só aquela mensagem (a Meta diz que outro destinatário pode receber sem esperar). Continuam valendo: até 3 chamadas por mensagem; HTTP 429 **sem** corpo de erro completo (proxy, resposta ilegível) segue **desconhecido** (`SendUnknown`, nunca reenviado). **Mudança consciente de regra:** antes, 429 com código desconhecido era `Unknown`; passa a ser limite de taxa da conta, por ser o limitador do provedor recusando antes de processar (a documentação não o garante: é uma inferência do estado HTTP padrão com o corpo de erro da Graph API).
+4. **Pausa da conta (SND-6).** `AccountError` (190, 368, 0, 3, 10 e HTTP 401/403) grava a mensagem como falha e **pausa a conta** (`is_paused`, motivo `account-error.<código>`, auditoria `channels.account.pause.provider-error`, métrica `channels.account.paused`). A pausa só pode ser perdida por falha de gravação depois da mensagem já gravada; o próximo envio recebe o mesmo erro e pausa de novo (autocura). Também há pausa **manual** do administrador.
+5. **Retomada segura.** `POST /channels/accounts/{id}/sending/resume` exige gerir canais e uma **prova do provedor**: o token é lido e uma **sonda** (leitura do número) tem de voltar `Ok` para **cada número ativo**; senão 409 e a conta continua pausada. Trocar o token **não** retoma sozinho. A vazão volta de forma gradual (o balde recomeça com 1 ficha).
+6. **Sonda do provedor** (`IChannelProviderAdapter.ProbeAsync`, aditivo): `GET /{versão}/{phone_number_id}?fields=id,display_phone_number,verified_name,quality_rating`, só leitura, token só no cabeçalho, desfecho de `error.code` (nunca texto livre), e **nunca `Ok` sem a resposta do provedor** sobre o número pedido. O teste de arquitetura do adaptador passou a exigir exatamente duas chamadas HTTP (o envio e a sonda), cada uma montada num único lugar. A página oficial não diz que permissão a leitura exige: o resultado só afirma o que a resposta provou.
+7. **Teste de prontidão** (`GET /channels/accounts/{id}/readiness?live=false|true`, exige gerir canais; auditado): verifica a chave mestra, o adaptador, as três credenciais (presentes, legíveis, **distintas**), os números (ativos, com unidade e **rota de entrada coerente** com instância e tenant), o webhook, o **endereço público HTTPS** (`Channels:Webhook:PublicBaseUrl`) e o estado de envio. Com `live=true`, a sonda. **Nenhum envio em hipótese alguma.** O relatório nunca traz valor de credencial; traz a URL completa do webhook (segredo operacional) só para quem gere os canais.
+8. **Ferramentas e procedimento:** `tools/ops/Conectar-ContaWhatsApp.ps1` (cadastro idempotente com credenciais sem eco e token de verificação gerado), `tools/ops/Test-ProntidaoWhatsApp.ps1` (código de saída 0/1) e `docs/operations/WHATSAPP-CONEXAO-REAL.md`.
+
+## O que fica fora (pendências)
+
+- Limite por **par** como balde (hoje só reativo, pelo 131056) e balde por número (hoje por conta).
+- Alerta ativo (e-mail, Slack) de conta pausada: hoje a pausa aparece na API de estado, na auditoria, na métrica e como falha ao atendente.
+- Verificação do **App Secret** sem um webhook real (a Meta só o prova ao entregar um webhook assinado) e do número de exibição contra o cadastro além do aviso.
+- Teste com o número de teste da Meta (5.2) e confirmação de `biz_opaque_callback_data` no envio.
+- Mensagens que falharam por pausa **não** são reenviadas sozinhas (o ADR 0009 8ª operação, `RequestDelegatedResend`, segue fora do MVP).
+- `Retry` do relay por espera longa gasta tentativas (`MaxAttempts` 8): um evento que esgote as tentativas vai aos mortos sem o Conversations ser avisado (limitação anterior do relay, agora mais exposta pela espera).
+
+## Consequências
+
+- Migração aditiva `AccountSendState` do Channels (uma tabela nova, com CHECK de coerência, chave estrangeira à conta e `Down`).
+- `ChannelProviderContracts` ganhou `ProviderRateLimitScope`, `ProviderSendResult.RateLimitScope` e `ProbeAsync` (aditivos, só em `Channels.Contracts`).
+- Testes: balde (unidade e concorrência com 60 chamadas paralelas no PostgreSQL), pausa/retomada e limite de taxa de ponta a ponta contra a Graph simulada (`PausaEVazaoWhatsAppTests`), prontidão por HTTP (`ProntidaoWhatsAppTests`) e a sonda/classificação no adaptador.

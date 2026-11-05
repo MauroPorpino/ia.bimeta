@@ -1,6 +1,6 @@
 # ADR 0018 — Fluxo operacional do MVP: Receiver, Inbox e Sender do WhatsApp, ações do atendente e interface
 
-- **Status:** **Proposto para ratificação.** Implementado em 05/11/2026 sob a autorização do decisor para concluir o fluxo funcional do MVP (WhatsApp, IA e atendimento humano) com autonomia em decisões técnicas rotineiras. As escolhas abaixo que se afastam do texto dos ADRs 0009, 0011 e 0014 estão marcadas como **simplificação do MVP** e têm pendência registrada.
+- **Status:** **Aceito para o escopo do MVP (ratificado pelo decisor em 05/11/2026)**, incluindo as ações **diretas** de responder e encerrar no ContactCenter, sem redesenho agora. Implementado em 05/11/2026 sob a autorização do decisor para concluir o fluxo funcional do MVP (WhatsApp, IA e atendimento humano) com autonomia em decisões técnicas rotineiras. As escolhas abaixo que se afastam do texto dos ADRs 0009, 0011 e 0014 estão marcadas como **simplificação do MVP** e têm pendência registrada.
 - **Data:** 05/11/2026
 - **Decisor:** Mauro Porpino
 - **Referências:** ADRs 0005, 0006, 0007, 0009, 0010, 0011, 0014, 0016 e 0017; `docs/architecture/BOUNDARIES.md` §12; `docs/architecture/CONVERSATION-LIFECYCLE.md`
@@ -26,7 +26,7 @@ O ADR 0011 especifica o Receiver, o Inbox e o Sender do `Channels` e o 0014 a re
 ## O que fica fora (pendências para o MVP)
 
 - **Cerca e intenção do atendente** (itens 8 do ADR 0014 e 0016): a persistência da intenção, o recibo e a reconciliação por job das ações de responder e encerrar.
-- **SND-2 e SND-6**: balde de fichas e pausa da conta por erro de conta (hoje o erro da conta falha a mensagem, sem pausar). Lane do Sender é a do relay (por sessão), não por (conta, destinatário).
+- ~~**SND-2 e SND-6**~~: balde de fichas e pausa da conta por erro de conta — **implementados** (ADR 0019). Continua pendente: a lane do Sender é a do relay (por sessão), não por (conta, destinatário).
 - **Templates e janela de 24 horas**: fora da janela a mensagem falha (`window-closed`); não há envio de template.
 - **Mídia** (DP-05), anexos, Instagram, Messenger, e-mail, SMS e WebChat; capacidades do canal no ContactCenter (DP-04).
 - **Teste com o número de teste da Meta** (5.2) e a confirmação do campo `biz_opaque_callback_data` no envio.

@@ -34,6 +34,21 @@ try {
         $contexto = $ouvinte.GetContext()
         $leitor = New-Object System.IO.StreamReader($contexto.Request.InputStream, [System.Text.Encoding]::UTF8)
         $corpo = $leitor.ReadToEnd()
+
+        # A SONDA do teste de prontidao: GET /{versao}/{phone_number_id} (so leitura, nenhuma mensagem). Responde como a Meta responde ao dono do numero.
+        if ($contexto.Request.HttpMethod -eq 'GET') {
+            $numero = ($contexto.Request.Url.AbsolutePath.Trim('/') -split '/')[-1]
+            Write-Host ((Get-Date).ToString('HH:mm:ss') + '  [sonda] leitura do numero ' + $numero + ' (nenhuma mensagem)')
+            $leitura = @{ id = $numero; display_phone_number = '+55 11 3000-0000'; verified_name = 'Laboratorio de Demonstracao'; quality_rating = 'GREEN' }
+            $bytesLeitura = [System.Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject $leitura -Compress))
+            $contexto.Response.StatusCode = 200
+            $contexto.Response.ContentType = 'application/json'
+            $contexto.Response.ContentLength64 = $bytesLeitura.Length
+            $contexto.Response.OutputStream.Write($bytesLeitura, 0, $bytesLeitura.Length)
+            $contexto.Response.Close()
+            continue
+        }
+
         $contador++
 
         $para = '?'
