@@ -295,6 +295,235 @@ namespace IaBimeta.Channels.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("IaBimeta.Channels.Domain.ChannelWebhook", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("account_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("WebhookId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("webhook_id");
+
+                    b.HasKey("TenantId", "AccountId");
+
+                    b.HasIndex("WebhookId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_channel_webhooks_webhook_id");
+
+                    b.ToTable("channel_webhooks", "channels");
+                });
+
+            modelBuilder.Entity("IaBimeta.Channels.Domain.OutboundMessage", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer")
+                        .HasColumnName("attempts");
+
+                    b.Property<Guid>("ChannelInstanceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("channel_instance_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("ErrorCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("error_code");
+
+                    b.Property<bool>("Notified")
+                        .HasColumnType("boolean")
+                        .HasColumnName("notified");
+
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("operation_id");
+
+                    b.Property<string>("ProviderMessageId")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("provider_message_id");
+
+                    b.Property<short>("State")
+                        .HasColumnType("smallint")
+                        .HasColumnName("state");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("TenantId", "Id");
+
+                    b.HasIndex("TenantId", "OperationId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_outbound_messages_tenant_id_operation_id");
+
+                    b.HasIndex("TenantId", "ProviderMessageId")
+                        .HasDatabaseName("ix_outbound_messages_tenant_id_provider_message_id");
+
+                    b.ToTable("outbound_messages", "channels", t =>
+                        {
+                            t.HasCheckConstraint("ck_outbound_messages_attempts", "attempts >= 0");
+
+                            t.HasCheckConstraint("ck_outbound_messages_state", "state IN (1, 2, 3, 4, 5)");
+                        });
+                });
+
+            modelBuilder.Entity("IaBimeta.Messaging.InboxMessage", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<string>("Consumer")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("consumer");
+
+                    b.Property<Guid>("EventId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("event_id");
+
+                    b.Property<DateTimeOffset>("ProcessedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("processed_at");
+
+                    b.HasKey("TenantId", "Consumer", "EventId");
+
+                    b.ToTable("inbox_message", "channels");
+                });
+
+            modelBuilder.Entity("IaBimeta.Messaging.OutboxMessage", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer")
+                        .HasColumnName("attempts");
+
+                    b.Property<Guid?>("CausationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("causation_id");
+
+                    b.Property<Guid>("CorrelationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("correlation_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("DeadReason")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("dead_reason");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("event_type");
+
+                    b.Property<int>("EventVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("event_version");
+
+                    b.Property<long>("IngestSeq")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("ingest_seq");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityAlwaysColumn(b.Property<long>("IngestSeq"));
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("last_error");
+
+                    b.Property<DateTimeOffset?>("LeaseExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("lease_expires_at");
+
+                    b.Property<string>("LeaseOwner")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("lease_owner");
+
+                    b.Property<Guid?>("LeaseToken")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lease_token");
+
+                    b.Property<DateTimeOffset>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("next_attempt_at");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("occurred_at");
+
+                    b.Property<string>("OrderingKey")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("ordering_key");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("payload");
+
+                    b.Property<DateTimeOffset?>("ProcessedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("processed_at");
+
+                    b.Property<short>("State")
+                        .HasColumnType("smallint")
+                        .HasColumnName("state");
+
+                    b.HasKey("TenantId", "Id");
+
+                    b.HasIndex("State", "NextAttemptAt", "IngestSeq")
+                        .HasDatabaseName("ix_outbox_message_state_next_attempt_at_ingest_seq")
+                        .HasFilter("state IN (1, 2)");
+
+                    b.HasIndex("TenantId", "OrderingKey", "IngestSeq")
+                        .HasDatabaseName("ix_outbox_message_tenant_id_ordering_key_ingest_seq")
+                        .HasFilter("state IN (1, 2)");
+
+                    b.ToTable("outbox_message", "channels", t =>
+                        {
+                            t.HasCheckConstraint("ck_outbox_message_attempts", "attempts >= 0");
+
+                            t.HasCheckConstraint("ck_outbox_message_lease", "(state = 2) = (lease_token IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_outbox_message_state", "state IN (1, 2, 3, 4)");
+                        });
+                });
+
             modelBuilder.Entity("IaBimeta.Channels.Domain.ChannelInstance", b =>
                 {
                     b.HasOne("IaBimeta.Channels.Domain.ChannelAccount", null)
@@ -328,6 +557,15 @@ namespace IaBimeta.Channels.Infrastructure.Migrations
                     b.HasOne("IaBimeta.Channels.Domain.ChannelAccount", null)
                         .WithMany()
                         .HasForeignKey("TenantId", "AccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("IaBimeta.Channels.Domain.ChannelWebhook", b =>
+                {
+                    b.HasOne("IaBimeta.Channels.Domain.ChannelAccount", null)
+                        .WithOne()
+                        .HasForeignKey("IaBimeta.Channels.Domain.ChannelWebhook", "TenantId", "AccountId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

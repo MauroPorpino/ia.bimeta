@@ -17,6 +17,7 @@
     <ProjectReference Include="..\..\building-blocks\IaBimeta.Messaging\IaBimeta.Messaging.csproj" />
     <ProjectReference Include="..\..\building-blocks\IaBimeta.SharedKernel\IaBimeta.SharedKernel.csproj" />
     <ProjectReference Include="..\..\adapters\IaBimeta.Adapters.Ai.OpenAI\IaBimeta.Adapters.Ai.OpenAI.csproj" />
+    <ProjectReference Include="..\..\adapters\IaBimeta.Adapters.WhatsApp\IaBimeta.Adapters.WhatsApp.csproj" />
     <ProjectReference Include="..\..\modules\agents\IaBimeta.Agents.Core\IaBimeta.Agents.Core.csproj" />
     <ProjectReference Include="..\..\modules\agents\IaBimeta.Agents.Infrastructure\IaBimeta.Agents.Infrastructure.csproj" />
     <ProjectReference Include="..\..\modules\ai-gateway\IaBimeta.AiGateway.Contracts\IaBimeta.AiGateway.Contracts.csproj" />

@@ -1,4 +1,9 @@
 using IaBimeta.Agents.Application;
+using IaBimeta.Channels.Application;
+using IaBimeta.Channels.Contracts;
+using IaBimeta.Channels.Domain;
+using IaBimeta.ContactCenter.Domain;
+using IaBimeta.Identity.Application;
 using IaBimeta.Agents.Domain;
 using IaBimeta.AiGateway.Application;
 using IaBimeta.AiGateway.Domain;
@@ -75,9 +80,80 @@ internal sealed class DevelopmentAiSetup : IHostedService
         await EnsureAgentAsync(servicos, ai, cancellationToken);
         await EnsureTenantAiAsync(servicos, ai, cancellationToken);
 
+        // O canal de demonstração do WhatsApp (credenciais SINTÉTICAS, só em desenvolvimento) e o atendente de demonstração na fila, para o fluxo ponta a ponta pela interface.
+        if (ai.DemoChannel)
+        {
+            try
+            {
+                await EnsureWhatsAppChannelAsync(servicos, organizacao.Id, ai, cancellationToken);
+            }
+            catch (ChannelSecretsNotConfiguredException)
+            {
+                _log.LogWarning("O canal de demonstração do WhatsApp NÃO foi cadastrado: falta a chave mestra dos canais (Channels:Secrets). Rode tools/dev/Set-ChaveMestraDosCanais.ps1 e reinicie o Api.");
+            }
+
+            await EnsureAttendantAsync(servicos, organizacao.Id, fila.Id, cancellationToken);
+        }
+
         _log.LogInformation(
-            "IA de desenvolvimento pronta no tenant '{Slug}': organização {OrganizationId}, fila {QueueId}. Confira em GET /simulator/ai/status.",
+            "IA de desenvolvimento pronta no tenant '{Slug}': organização {OrganizationId}, fila {QueueId}. Confira em GET /simulator/ai/status e GET /simulator/whatsapp/status.",
             ai.TenantSlug, organizacao.Id, fila.Id);
+    }
+
+    // O canal de demonstração: valores sintéticos, nunca de produção (a partida falha fora de Development, DevelopmentOnlyGuard).
+    internal const string DefaultDemoWabaId = "waba-dev-demo";
+    internal const string DefaultDemoPhoneNumberId = "100000000000001";
+    internal const string DemoAppSecret = "dev-app-secret-whatsapp-demo";
+    internal const string DemoAccessToken = "dev-access-token-whatsapp-demo";
+    internal const string DemoVerifyToken = "dev-verify-token-whatsapp-demo";
+    internal const string DemoAttendantEmail = "admin@demo-ia.local";
+
+    /// <summary>Cadastra, de forma idempotente, a unidade, a conta, o número ativo, as três credenciais cifradas e o identificador do webhook do canal de demonstração.</summary>
+    private static async Task EnsureWhatsAppChannelAsync(IServiceProvider servicos, Guid organizationId, DevelopmentAiOptions ai, CancellationToken cancellationToken)
+    {
+        var unidades = servicos.GetRequiredService<BusinessUnitService>();
+        var contas = servicos.GetRequiredService<ChannelAccountService>();
+        var instancias = servicos.GetRequiredService<ChannelInstanceService>();
+
+        const string nomeDaUnidade = "Matriz (demonstração)";
+        var unidade = (await unidades.ListByOrganizationAsync(organizationId, cancellationToken)).FirstOrDefault(u => u.Name == nomeDaUnidade)
+            ?? await unidades.CreateAsync(organizationId, nomeDaUnidade, IaBimeta.Tenancy.Domain.BusinessUnitKind.Headquarters, cancellationToken);
+
+        var conta = (await contas.ListAsync(cancellationToken)).FirstOrDefault(c => c.ProviderAccountId == ai.DemoWabaId);
+        if (conta is null)
+        {
+            conta = await contas.CreateAsync(organizationId, ChannelProvider.WhatsAppCloud, ai.DemoWabaId, "Conta de demonstração", cancellationToken);
+            await contas.SetSecretAsync(conta.Id, ChannelSecretKind.AppSecret, DemoAppSecret, cancellationToken);
+            await contas.SetSecretAsync(conta.Id, ChannelSecretKind.AccessToken, DemoAccessToken, cancellationToken);
+            await contas.SetSecretAsync(conta.Id, ChannelSecretKind.WebhookVerifyToken, DemoVerifyToken, cancellationToken);
+        }
+
+        var instancia = (await instancias.ListAsync(cancellationToken)).FirstOrDefault(i => i.PhoneNumberId == ai.DemoPhoneNumberId)
+            ?? await instancias.RegisterAsync(conta.Id, "Número de demonstração", ai.DemoPhoneNumberId, "55 11 3000-0000", null, cancellationToken);
+        if (instancia.Status != ChannelStatus.Active)
+        {
+            await instancias.AuthorizeUnitAsync(instancia.Id, unidade.Id, cancellationToken);
+            await instancias.SetDefaultsAsync(instancia.Id, unidade.Id, null, cancellationToken);
+            await instancias.ActivateAsync(instancia.Id, cancellationToken);
+        }
+
+        await servicos.GetRequiredService<ChannelWebhookAdminService>().EnsureAsync(conta.Id, cancellationToken);
+    }
+
+    /// <summary>Põe o administrador de demonstração do tenant (criado pela preparação do Identity) como atendente da fila: é com ele que se entra na interface para assumir, responder e encerrar.</summary>
+    private static async Task EnsureAttendantAsync(IServiceProvider servicos, Guid organizationId, Guid queueId, CancellationToken cancellationToken)
+    {
+        var usuario = (await servicos.GetRequiredService<UserService>().ListAsync(organizationId, cancellationToken)).FirstOrDefault(u => string.Equals(u.Email, DemoAttendantEmail, StringComparison.OrdinalIgnoreCase));
+        if (usuario is null)
+        {
+            return;
+        }
+
+        var filas = servicos.GetRequiredService<ServiceQueueService>();
+        if ((await filas.ListMembersAsync(queueId, cancellationToken))?.Any(m => m.UserId == usuario.UserId) != true)
+        {
+            await filas.AddMemberAsync(queueId, usuario.UserId, QueueMemberRole.Agent, cancellationToken);
+        }
     }
 
     private static async Task<OrganizationView> EnsureOrganizationAsync(IServiceProvider servicos, DevelopmentAiOptions ai, CancellationToken cancellationToken)

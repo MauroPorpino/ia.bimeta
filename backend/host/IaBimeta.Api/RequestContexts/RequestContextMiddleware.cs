@@ -8,8 +8,9 @@ namespace IaBimeta.Api.RequestContexts;
 /// </summary>
 internal sealed class RequestContextMiddleware
 {
-    // Rotas que não usam contexto: o /health não exige tenant nem depende do banco, e o login é anterior a qualquer sessão.
-    private static readonly string[] RotasSemContexto = { "/health", "/auth/login" };
+    // Rotas que não usam contexto: o /health não exige tenant nem depende do banco, o login é anterior a qualquer sessão e o webhook do provedor é anônimo (o Receiver cria o contexto do tenant pela URL, depois de
+    // resolver a conta: nunca por cabeçalho nem por sessão).
+    private static readonly string[] RotasSemContexto = { "/health", "/auth/login", "/webhooks" };
 
     private readonly RequestDelegate _next;
 

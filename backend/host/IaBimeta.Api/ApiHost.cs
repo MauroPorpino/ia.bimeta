@@ -1,4 +1,5 @@
 using IaBimeta.Adapters.Ai.OpenAI;
+using IaBimeta.Adapters.WhatsApp;
 using IaBimeta.Agents.Infrastructure;
 using IaBimeta.AiGateway.Application;
 using IaBimeta.AiGateway.Infrastructure;
@@ -104,6 +105,9 @@ public static class ApiHost
         // O adaptador da OpenAI (C4): HttpClient direto na Responses API, credencial BYOK por chamada, nenhum segredo na configuração.
         builder.Services.AddOpenAiProvider(openai => builder.Configuration.GetSection("AiGateway:Providers:OpenAi").Bind(openai));
 
+        // O adaptador do WhatsApp Cloud API (Meta): o Receiver do webhook o usa para verificar a assinatura e normalizar o corpo. Nenhum segredo na configuração: o App Secret e o token de acesso são por conta, cifrados.
+        builder.Services.AddWhatsAppAdapter(whatsapp => builder.Configuration.GetSection("Channels:Providers:WhatsApp").Bind(whatsapp));
+
         // O Agents (C2): o Api só precisa dos casos de uso da definição do agente do tenant (a preparação de desenvolvimento os chama; a API administrativa virá depois). Quem entrega os eventos e executa os
         // turnos é o Worker: aqui não há relay nem executor, então nenhum turno de IA roda dentro do Api.
         builder.Services.AddAgents(
@@ -175,6 +179,9 @@ public static class ApiHost
         app.MapAuditEndpoints();
         app.MapConversationsEndpoints();
         app.MapChannelsEndpoints();
+
+        // O Receiver do webhook do provedor: anônimo, autenticado pela assinatura do corpo (ADR 0011, seção C).
+        app.MapChannelWebhookEndpoints();
         app.MapContactCenterEndpoints();
 
         if (desenvolvimento.SimulatorEnabled)

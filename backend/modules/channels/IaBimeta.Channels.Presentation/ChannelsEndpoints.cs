@@ -45,6 +45,10 @@ public static class ChannelsEndpoints
             return Results.Ok(await servico.SetSecretAsync(id, papel, pedido.Value, ct));
         });
 
+        // O endereço do webhook da conta (o identificador opaco, criado se ainda não existe). Só quem gere os canais da organização o vê.
+        contas.MapPost("/{id:guid}/webhook", async (Guid id, ChannelWebhookAdminService servico, CancellationToken ct) =>
+            Results.Ok(await servico.EnsureAsync(id, ct)));
+
         var instancias = app.MapGroup("/channels/instances").AddEndpointFilter(TratarErrosDeCanais);
 
         instancias.MapPost("/", async (RegisterChannelInstanceRequest pedido, ChannelInstanceService servico, CancellationToken ct) =>

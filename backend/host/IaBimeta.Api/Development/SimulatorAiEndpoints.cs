@@ -1,6 +1,7 @@
 using IaBimeta.Agents.Application;
 using IaBimeta.Agents.Infrastructure;
 using IaBimeta.AiGateway.Application;
+using IaBimeta.Channels.Application;
 using IaBimeta.AiGateway.Domain;
 using IaBimeta.AiGateway.Infrastructure;
 using IaBimeta.ContactCenter.Application;
@@ -70,6 +71,27 @@ internal static class SimulatorAiEndpoints
                     inputPerMillion = m.Prices.InputPerMillion,
                     outputPerMillion = m.Prices.OutputPerMillion,
                 }),
+            });
+        });
+
+        // O canal de demonstração do WhatsApp: o caminho do webhook (o identificador opaco), o número e as credenciais SINTÉTICAS de desenvolvimento, para o script que simula a Meta assinar e enviar o webhook.
+        grupo.MapGet("/whatsapp/status", async (DevelopmentTenancyOptions opcoes, ChannelAccountService contas, ChannelWebhookAdminService webhooks, CancellationToken ct) =>
+        {
+            var conta = (await contas.ListAsync(ct)).FirstOrDefault(c => c.ProviderAccountId == opcoes.Ai.DemoWabaId);
+            if (conta is null)
+            {
+                return Results.NotFound();
+            }
+
+            var webhook = await webhooks.EnsureAsync(conta.Id, ct);
+            return Results.Ok(new
+            {
+                webhookPath = webhook.Path,
+                wabaId = opcoes.Ai.DemoWabaId,
+                phoneNumberId = opcoes.Ai.DemoPhoneNumberId,
+                appSecret = DevelopmentAiSetup.DemoAppSecret,
+                verifyToken = DevelopmentAiSetup.DemoVerifyToken,
+                attendant = DevelopmentAiSetup.DemoAttendantEmail,
             });
         });
 

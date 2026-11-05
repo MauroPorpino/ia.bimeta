@@ -149,7 +149,7 @@ internal sealed class EnsaioDeIa : IAsyncDisposable
     public CapturaDeLogs Logs { get; }
 
     /// <summary>Sobe o ensaio. Sem <paramref name="modelo"/>, o tenant fica sem modelo (a preparação não inventa um).</summary>
-    public static async Task<EnsaioDeIa> IniciarAsync(PostgresFixture banco, string prefixo, string? modelo = ModeloDoEnsaio, bool comChaveMestra = true)
+    public static async Task<EnsaioDeIa> IniciarAsync(PostgresFixture banco, string prefixo, string? modelo = ModeloDoEnsaio, bool comChaveMestra = true, IReadOnlyDictionary<string, string?>? adicionais = null)
     {
         await LimparPendenciasAsync(banco);
 
@@ -192,6 +192,11 @@ internal sealed class EnsaioDeIa : IAsyncDisposable
             configuracaoDoApi[chave] = valor;
         }
 
+        foreach (var (chave, valor) in adicionais ?? new Dictionary<string, string?>())
+        {
+            configuracaoDoApi[chave] = valor;
+        }
+
         var api = await ApiServer.StartAsync("Development", configuracaoDoApi, servicos: servicos => servicos.AddSingleton<ILoggerProvider>(logs));
 
         // O Worker: janelas curtas para o ensaio não esperar de verdade. O reconciliador fica desligado na prática (idade mínima de dez anos): ele olharia sessões antigas de outros testes.
@@ -214,6 +219,11 @@ internal sealed class EnsaioDeIa : IAsyncDisposable
             [$"Channels:Secrets:Keys:{PostgresFixture.IdDaChaveDeTeste}"] = PostgresFixture.ChaveDeCifraDeTeste,
         };
         foreach (var (chave, valor) in catalogo)
+        {
+            configuracaoDoWorker[chave] = valor;
+        }
+
+        foreach (var (chave, valor) in adicionais ?? new Dictionary<string, string?>())
         {
             configuracaoDoWorker[chave] = valor;
         }

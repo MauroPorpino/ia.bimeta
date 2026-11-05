@@ -1,5 +1,6 @@
 using IaBimeta.Channels.Domain;
 using IaBimeta.Channels.Infrastructure.Configurations;
+using IaBimeta.Messaging;
 using IaBimeta.SharedKernel;
 using Microsoft.EntityFrameworkCore;
 
@@ -38,6 +39,11 @@ public sealed class ChannelsDbContext : DbContext
 
     public DbSet<ChannelSecret> Secrets => Set<ChannelSecret>();
 
+    /// <summary>Sem filtro de tenant, de propósito (a URL do webhook é consultada antes de o tenant ser conhecido): só chaves de roteamento.</summary>
+    public DbSet<ChannelWebhook> Webhooks => Set<ChannelWebhook>();
+
+    public DbSet<OutboundMessage> OutboundMessages => Set<OutboundMessage>();
+
     // O EF reavalia esta propriedade a cada execução de consulta (membro do DbContext no filtro global).
     private TenantId TenantAtual => _contexto.GetRequired().TenantId;
 
@@ -50,8 +56,15 @@ public sealed class ChannelsDbContext : DbContext
         modelBuilder.ApplyConfiguration(new ChannelInstanceUnitConfiguration());
         modelBuilder.ApplyConfiguration(new ChannelRouteConfiguration());
         modelBuilder.ApplyConfiguration(new ChannelSecretConfiguration());
+        modelBuilder.ApplyConfiguration(new ChannelWebhookConfiguration());
+        modelBuilder.ApplyConfiguration(new OutboundMessageConfiguration());
+
+        // O Inbox durável do Receiver (ADR 0011, seção C): o outbox do Messaging, no esquema deste módulo (o relay o entrega aos handlers do próprio Channels), e o inbox de idempotência dos consumidores.
+        modelBuilder.ConfigureOutbox();
+        modelBuilder.ConfigureInbox();
 
         modelBuilder.Entity<ChannelAccount>().HasQueryFilter(e => e.TenantId == TenantAtual);
+        modelBuilder.Entity<OutboundMessage>().HasQueryFilter(e => e.TenantId == TenantAtual);
         modelBuilder.Entity<ChannelInstance>().HasQueryFilter(e => e.TenantId == TenantAtual);
         modelBuilder.Entity<ChannelInstanceUnit>().HasQueryFilter(e => e.TenantId == TenantAtual);
         modelBuilder.Entity<ChannelSecret>().HasQueryFilter(e => e.TenantId == TenantAtual);

@@ -1,5 +1,6 @@
 using IaBimeta.Channels.Application;
 using IaBimeta.Channels.Contracts.Queries;
+using IaBimeta.Messaging;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -41,6 +42,18 @@ public static class ChannelsInfrastructureExtensions
         services.AddScoped<ChannelRouteResolver>();
         services.AddScoped<ChannelRoutingQuery>();
         services.AddScoped<IChannelRouting>(provider => provider.GetRequiredService<ChannelRoutingQuery>());
+
+        // O Receiver, o processamento do Inbox e o Sender (ADR 0011). Os adaptadores de provedor (IChannelProviderAdapter) são registrados pelo HOST (só os hosts referenciam adaptadores): sem nenhum, o webhook
+        // responde 503 e o Sender falha a mensagem como "provider-unavailable". O Receiver não chama outro módulo (ARQ-19); quem chama o Conversations são os handlers do Inbox e do Sender, no Worker.
+        services.AddScoped<ChannelProviderAdapters>();
+        services.AddScoped<IChannelWebhookStore, ChannelWebhookStore>();
+        services.AddScoped<IInboundEventWriter, InboundEventWriter>();
+        services.AddScoped<IOutboundMessageStore, OutboundMessageStore>();
+        services.AddScoped<ChannelWebhookService>();
+        services.AddScoped<ChannelWebhookAdminService>();
+        services.AddEventHandler<InboundProviderMessageHandler>();
+        services.AddEventHandler<InboundProviderStatusHandler>();
+        services.AddEventHandler<OutboundMessageRequestedHandler>();
 
         return services;
     }

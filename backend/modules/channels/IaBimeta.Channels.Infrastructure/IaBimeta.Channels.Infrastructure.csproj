@@ -24,6 +24,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\building-blocks\IaBimeta.SharedKernel\IaBimeta.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\..\building-blocks\IaBimeta.Messaging\IaBimeta.Messaging.csproj" />
     <ProjectReference Include="..\IaBimeta.Channels.Contracts\IaBimeta.Channels.Contracts.csproj" />
     <ProjectReference Include="..\IaBimeta.Channels.Core\IaBimeta.Channels.Core.csproj" />
   </ItemGroup>

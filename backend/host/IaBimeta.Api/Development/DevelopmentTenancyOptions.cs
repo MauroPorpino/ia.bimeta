@@ -74,6 +74,18 @@ internal sealed class DevelopmentAiOptions
     public bool Enabled { get; set; }
 
     /// <summary>
+    /// Cadastra também o canal de demonstração do WhatsApp (conta, número ativo, credenciais SINTÉTICAS e webhook) e põe o atendente de demonstração na fila: é o que a demonstração de ponta a ponta usa. Os identificadores
+    /// são fixos e únicos na plataforma, por isso só um tenant do banco os tem: desligado por padrão (os testes não o ligam).
+    /// </summary>
+    public bool DemoChannel { get; set; }
+
+    /// <summary>O identificador da conta (WABA) do canal de demonstração, único na plataforma.</summary>
+    public string DemoWabaId { get; set; } = DevelopmentAiSetup.DefaultDemoWabaId;
+
+    /// <summary>O identificador do número (Phone Number ID) do canal de demonstração, único na plataforma.</summary>
+    public string DemoPhoneNumberId { get; set; } = DevelopmentAiSetup.DefaultDemoPhoneNumberId;
+
+    /// <summary>
     /// O tenant da IA (já cadastrado por <c>SeedTenants</c>). É um tenant PRÓPRIO, sem conversas antigas: o Worker entrega todo o backlog do outbox do banco, e só um tenant sem histórico garante que
     /// nenhuma conversa antiga do simulador vire, sem querer, uma chamada paga ao provedor.
     /// </summary>

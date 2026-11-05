@@ -1,5 +1,6 @@
 using IaBimeta.Agents.Infrastructure;
 using IaBimeta.Adapters.Ai.OpenAI;
+using IaBimeta.Adapters.WhatsApp;
 using IaBimeta.AiGateway.Application;
 using IaBimeta.AiGateway.Infrastructure;
 using IaBimeta.Audit.Infrastructure;
@@ -98,6 +99,13 @@ public static class WorkerHost
         // O adaptador da OpenAI (C4): o Worker é quem chama o modelo (o executor de turnos do Agents). Nenhum segredo na configuração: a credencial BYOK de cada tenant chega por chamada.
         builder.Services.AddOpenAiProvider(openai => builder.Configuration.GetSection("AiGateway:Providers:OpenAi").Bind(openai));
         builder.Services.AddOutboxRelay<ConversationsDbContext>();
+
+        // O Inbox do Channels (ADR 0011): o Receiver do Api grava os eventos do provedor no outbox do Channels, e este relay os entrega, em ordem por lane, aos handlers do próprio módulo (a ingestão no
+        // Conversations e o registro dos status de entrega). O Sender consome, pelo relay do Conversations, a saída liberada para envio.
+        builder.Services.AddOutboxRelay<ChannelsDbContext>();
+
+        // O adaptador do WhatsApp Cloud API: o Sender envia a mensagem de saída por ele (o token de acesso da conta é decifrado a cada envio).
+        builder.Services.AddWhatsAppAdapter(whatsapp => builder.Configuration.GetSection("Channels:Providers:WhatsApp").Bind(whatsapp));
 
         // O Agents (C2, ADR 0017): o turno de IA. Os handlers só gravam o AiTurn (o relay os entrega); o executor e o reconciliador abaixo é que rodam os turnos, no contexto de sistema de cada
         // tenant. As opções (agrupamento, tentativas, tempos, capacidade) vêm da seção Agents:Options, com a referência aprovada como padrão.

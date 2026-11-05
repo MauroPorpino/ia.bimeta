@@ -207,17 +207,21 @@ public sealed class WorkerHostTests(PostgresFixture banco)
         Assert.Contains("AgentsReconciliationService", servicos);
         await using var escopo = worker.Services.CreateAsyncScope();
 
-        // Os handlers do ContactCenter (3) e os do Agents (7): cada um só grava no banco do próprio módulo, e o ContactCenter e o Agents consomem o mesmo evento, cada um com o inbox dele.
+        // Os handlers do ContactCenter (3), os do Agents (7) e os do Channels (3: as duas entradas do Inbox do provedor e o Sender): cada um só age no banco do próprio módulo (o Channels também chama o Conversations pelos
+        // Contracts), e o ContactCenter e o Agents consomem o mesmo evento, cada um com o inbox dele.
         var tipos = escopo.ServiceProvider.GetServices<IEventHandler>().Select(h => $"{h.EventType}/{h.EventVersion}").OrderBy(t => t, StringComparer.Ordinal).ToList();
         Assert.Equal(
             new[]
             {
+                "channels.provider-message-received/1",
+                "channels.provider-status-received/1",
                 "conversations.conversation-locale-changed/1",
                 "conversations.handling-mode-changed/1",
                 "conversations.handling-mode-changed/1",
                 "conversations.inbound-message-registered/1",
                 "conversations.message-content-failed/1",
                 "conversations.message-content-ready/1",
+                "conversations.outbound-message-requested/1",
                 "conversations.session-closed/1",
                 "conversations.session-closed/1",
                 "conversations.session-transferred/1",
@@ -225,9 +229,12 @@ public sealed class WorkerHostTests(PostgresFixture banco)
             },
             tipos);
 
-        // O Agents NÃO consome a falha de envio nem o evento de entrega: falha de envio não dispara IA (ARQ-24).
-        Assert.DoesNotContain(tipos, t => t.Contains("outbound-message", StringComparison.Ordinal));
-        Assert.Single(worker.Services.GetServices<IOutboxRelay>());
+        // Ninguém consome a falha de envio como entrada de IA: falha de envio não dispara IA (ARQ-24). A saída liberada para envio só tem o Sender do Channels.
+        Assert.DoesNotContain(tipos, t => t.Contains("outbound-message-failed", StringComparison.Ordinal));
+        Assert.Single(tipos, t => t.StartsWith("conversations.outbound-message-requested", StringComparison.Ordinal));
+
+        // Dois relays: o do Conversations (os eventos de estado) e o do Channels (o Inbox do provedor).
+        Assert.Equal(new[] { "ChannelsDbContext", "ConversationsDbContext" }, worker.Services.GetServices<IOutboxRelay>().Select(r => r.Name).OrderBy(n => n, StringComparer.Ordinal).ToArray());
         await Task.CompletedTask;
     }
 

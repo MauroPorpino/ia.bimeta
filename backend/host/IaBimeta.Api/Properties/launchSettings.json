@@ -18,8 +18,13 @@
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development",
         "Tenancy__Development__Ai__Enabled": "true",
+        "Tenancy__Development__Ai__DemoChannel": "true",
         "Tenancy__Development__SeedTenants__2__Slug": "demo-ia",
-        "Tenancy__Development__SeedTenants__2__Name": "Tenant de IA (demonstracao)"
+        "Tenancy__Development__SeedTenants__2__Name": "Tenant de IA (demonstracao)",
+        "Tenancy__Development__SeedAdministrators__2__TenantSlug": "demo-ia",
+        "Tenancy__Development__SeedAdministrators__2__Email": "admin@demo-ia.local",
+        "Tenancy__Development__SeedAdministrators__2__DisplayName": "Atendente de demonstracao IA",
+        "Tenancy__Development__SeedAdministrators__2__Password": "DevLocal-Admin-2026!"
       }
     },
     "https": {
