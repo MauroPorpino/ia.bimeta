@@ -1,4 +1,5 @@
 using IaBimeta.Adapters.Ai.OpenAI;
+using IaBimeta.Agents.Infrastructure;
 using IaBimeta.AiGateway.Application;
 using IaBimeta.AiGateway.Infrastructure;
 using IaBimeta.Api.Channels;
@@ -103,6 +104,12 @@ public static class ApiHost
         // O adaptador da OpenAI (C4): HttpClient direto na Responses API, credencial BYOK por chamada, nenhum segredo na configuração.
         builder.Services.AddOpenAiProvider(openai => builder.Configuration.GetSection("AiGateway:Providers:OpenAi").Bind(openai));
 
+        // O Agents (C2): o Api só precisa dos casos de uso da definição do agente do tenant (a preparação de desenvolvimento os chama; a API administrativa virá depois). Quem entrega os eventos e executa os
+        // turnos é o Worker: aqui não há relay nem executor, então nenhum turno de IA roda dentro do Api.
+        builder.Services.AddAgents(
+            provider => ConnectionStringOf(provider, "Agents"),
+            agentes => builder.Configuration.GetSection("Agents:Options").Bind(agentes));
+
         // Enums saem e entram como texto (por exemplo, "HumanAssisted"), não como número.
         builder.Services.ConfigureHttpJsonOptions(opcoes => opcoes.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
@@ -125,6 +132,18 @@ public static class ApiHost
         {
             builder.Services.TryAddSingleton(desenvolvimento);
             builder.Services.AddHostedService<DevelopmentIdentitySetup>();
+        }
+
+        // A IA de desenvolvimento (organização, fila, rota, configuração do tenant e agente publicado) roda DEPOIS das migrations e do cadastro dos tenants (os serviços hospedados partem na ordem do registro).
+        if (desenvolvimento.Ai.Enabled)
+        {
+            builder.Services.TryAddSingleton(desenvolvimento);
+            builder.Services.AddHostedService<DevelopmentAiSetup>();
+        }
+
+        if (desenvolvimento.SimulatorEnabled)
+        {
+            builder.Services.TryAddSingleton(desenvolvimento);
         }
 
         // Limite de taxa do login por origem (IP), antes de qualquer consulta ao banco. Vale para quem insiste em tenant ou

@@ -57,6 +57,9 @@ internal sealed class ApiServer : IAsyncDisposable
     {
         ["ConnectionStrings:Tenancy"] = TestDatabase.ConnectionString,
         ["Tenancy:Development:HeaderEnabled"] = cabecalhoHabilitado ? "true" : "false",
+
+        // A IA de desenvolvimento é opt-in (perfil simulador-ia): um segredo de usuário ou uma variável do ambiente de quem desenvolve não pode ligá-la dentro dos testes.
+        ["Tenancy:Development:Ai:Enabled"] = "false",
         ["Identity:PasswordHashIterations"] = PostgresFixture.PasswordIterations.ToString(),
     };
 

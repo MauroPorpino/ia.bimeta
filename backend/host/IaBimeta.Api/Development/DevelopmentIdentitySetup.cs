@@ -1,3 +1,5 @@
+using IaBimeta.Agents.Infrastructure;
+using IaBimeta.AiGateway.Infrastructure;
 using IaBimeta.Audit.Infrastructure;
 using IaBimeta.Channels.Infrastructure;
 using IaBimeta.ContactCenter.Infrastructure;
@@ -46,7 +48,9 @@ internal sealed class DevelopmentIdentitySetup : IHostedService
                 await escopoDasMigrations.ServiceProvider.GetRequiredService<ConversationsDbContext>().Database.MigrateAsync(cancellationToken);
                 await escopoDasMigrations.ServiceProvider.GetRequiredService<ChannelsDbContext>().Database.MigrateAsync(cancellationToken);
                 await escopoDasMigrations.ServiceProvider.GetRequiredService<ContactCenterDbContext>().Database.MigrateAsync(cancellationToken);
-                _log.LogInformation("Migrations do Audit, do Identity, do Conversations, do Channels e do ContactCenter aplicadas.");
+                await escopoDasMigrations.ServiceProvider.GetRequiredService<AiGatewayDbContext>().Database.MigrateAsync(cancellationToken);
+                await escopoDasMigrations.ServiceProvider.GetRequiredService<AgentsDbContext>().Database.MigrateAsync(cancellationToken);
+                _log.LogInformation("Migrations do Audit, do Identity, do Conversations, do Channels, do ContactCenter, do AiGateway e do Agents aplicadas.");
             }
 
             foreach (var semente in _opcoes.SeedAdministrators)

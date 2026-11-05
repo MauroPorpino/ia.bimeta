@@ -16,6 +16,7 @@ internal static class DevelopmentOnlyGuard
             || opcoes.ApplyMigrations
             || opcoes.SeedTenants.Count > 0
             || opcoes.SeedAdministrators.Count > 0
+            || opcoes.Ai.Enabled
             || !string.IsNullOrEmpty(configuracao[DevelopmentTenancyOptions.AdminPasswordVariable]);
 
         if (algumLigado && !ambiente.IsDevelopment())

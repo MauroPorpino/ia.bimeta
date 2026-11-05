@@ -52,7 +52,9 @@ public static class WorkerHost
 {
     public static IHost Build(string[] args, Action<HostApplicationBuilder>? configure = null)
     {
-        var builder = Host.CreateApplicationBuilder(args);
+        // A raiz de conteúdo é a pasta do binário, não a pasta de onde o processo foi iniciado: o appsettings.json do Worker (catálogo de modelos e limites padrão de IA) é lido de lá, qualquer que seja o
+        // diretório corrente. Sem isto, um Worker iniciado de outra pasta subia SEM o catálogo e sem os limites, e toda chamada de IA terminava em "não configurada".
+        var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { Args = args, ContentRootPath = AppContext.BaseDirectory });
         configure?.Invoke(builder);
 
         var opcoes = new WorkerOptions();
@@ -102,6 +104,9 @@ public static class WorkerHost
         builder.Services.AddAgents(
             provider => ConnectionStringOf(provider, "Agents"),
             agentes => builder.Configuration.GetSection("Agents:Options").Bind(agentes));
+
+        // Um resumo (sem segredo) da configuração de IA que ESTE processo enxerga, na partida: um Worker sem o catálogo, sem os limites ou sem a chave mestra falha cada turno com "não configurada".
+        builder.Services.AddHostedService<AiConfigurationReport>();
 
         builder.Services.AddSingleton<ContactCenterReconciler>();
         builder.Services.AddSingleton<AgentsTurnExecutor>();

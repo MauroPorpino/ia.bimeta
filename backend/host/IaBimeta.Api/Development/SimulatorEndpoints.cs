@@ -1,3 +1,5 @@
+using IaBimeta.Agents.Domain;
+using IaBimeta.AiGateway.Domain;
 using IaBimeta.Conversations.Contracts;
 using IaBimeta.Conversations.Contracts.Commands;
 using IaBimeta.Conversations.Domain;
@@ -79,6 +81,9 @@ internal static class SimulatorEndpoints
             return Results.Ok(eventos.Published.Where(e => e.TenantId == tenant).Select(e => new { e.Type, e.Version, e.OrderingKey, e.OccurredAt, e.Payload }));
         });
 
+        // O primeiro teste de IA: cadastro da chave do provedor (cifrada) e inspeção do ledger, dos turnos e da conversa.
+        SimulatorAiEndpoints.MapAiRoutes(grupo);
+
         return app;
     }
 
@@ -114,6 +119,19 @@ internal static class SimulatorEndpoints
         catch (ConversationsValidationException ex)
         {
             return Results.Problem(title: "Dados inválidos", detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+        catch (Exception ex) when (ex is AiGatewayValidationException or AgentsValidationException)
+        {
+            // As mensagens destes dois são do nosso código (limites e catálogo): nunca carregam o valor da credencial.
+            return Results.Problem(title: "Dados inválidos", detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+        catch (AiSecretsUnavailableException)
+        {
+            // Falha da plataforma, não do pedido: nada foi guardado. O texto não repete a configuração, só diz o que falta.
+            return Results.Problem(
+                title: "Chave mestra indisponível",
+                detail: "A chave mestra que cifra as credenciais não está configurada (AiGateway:Secrets). Veja tools/dev/README.md.",
+                statusCode: StatusCodes.Status503ServiceUnavailable);
         }
         catch (ChannelUnitNotAuthorizedException ex)
         {
