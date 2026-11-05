@@ -1,3 +1,4 @@
+using IaBimeta.Agents.Infrastructure;
 using IaBimeta.AiGateway.Application;
 using IaBimeta.AiGateway.Infrastructure;
 using IaBimeta.Audit.Infrastructure;
@@ -92,9 +93,19 @@ public static class WorkerHost
             builder.Configuration.GetSection("AiGateway:Options").Get<AiGatewayOptions>());
         builder.Services.AddOutboxRelay<ConversationsDbContext>();
 
+        // O Agents (C2, ADR 0017): o turno de IA. Os handlers só gravam o AiTurn (o relay os entrega); o executor e o reconciliador abaixo é que rodam os turnos, no contexto de sistema de cada
+        // tenant. As opções (agrupamento, tentativas, tempos, capacidade) vêm da seção Agents:Options, com a referência aprovada como padrão.
+        builder.Services.AddAgents(
+            provider => ConnectionStringOf(provider, "Agents"),
+            agentes => builder.Configuration.GetSection("Agents:Options").Bind(agentes));
+
         builder.Services.AddSingleton<ContactCenterReconciler>();
+        builder.Services.AddSingleton<AgentsTurnExecutor>();
+        builder.Services.AddSingleton<AgentsReconciler>();
         builder.Services.AddHostedService<OutboxRelayService>();
         builder.Services.AddHostedService<ContactCenterReconciliationService>();
+        builder.Services.AddHostedService<AgentsTurnExecutorService>();
+        builder.Services.AddHostedService<AgentsReconciliationService>();
 
         return builder.Build();
     }

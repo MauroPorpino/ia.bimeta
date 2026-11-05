@@ -108,10 +108,13 @@ public class GrafoDeProjetosTests
         // Tenancy (organização, unidade e setor), Identity (o usuário existe no tenant), Audit e Conversations (a atribuição e o
         // handoff IA/humano chamam o estado de atendimento pelos contratos dele; a aresta já estava na matriz). Aresta nova exige
         // ADR e atualização desta lista. O AiGateway (C1.4, ADR 0017) usa só o Audit (a auditoria da configuração de IA do tenant); a matriz também permite Identity e Tenancy,
-        // que ele não precisa: o RequestContext chega pronto do host, e o tenant vem dele.
+        // que ele não precisa: o RequestContext chega pronto do host, e o tenant vem dele. O Agents (C2, ADR 0017) usa o AiGateway (o turno chama o modelo), o Conversations (o motor de turnos e os
+        // eventos), o ContactCenter (SÓ o RequestHandoff) e o Audit (a publicação da definição do agente); a matriz também permite Identity, Tenancy, Knowledge, Capabilities e Workflows, que ele
+        // não usa na 6a. Nenhuma aresta nova na matriz.
         Assert.Equal(
             new[]
             {
+                ("Agents", "AiGateway"), ("Agents", "Audit"), ("Agents", "ContactCenter"), ("Agents", "Conversations"),
                 ("AiGateway", "Audit"),
                 ("Channels", "Audit"), ("Channels", "Tenancy"),
                 ("ContactCenter", "Audit"), ("ContactCenter", "Conversations"), ("ContactCenter", "Identity"), ("ContactCenter", "Tenancy"),

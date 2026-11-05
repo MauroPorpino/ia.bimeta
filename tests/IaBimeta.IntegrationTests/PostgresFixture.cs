@@ -1,5 +1,8 @@
 using System.Security.Cryptography;
+using IaBimeta.Agents.Infrastructure;
+using IaBimeta.AiGateway.Contracts.Ports;
 using IaBimeta.AiGateway.Infrastructure;
+using IaBimeta.AiGateway.Testing;
 using IaBimeta.Api.Channels;
 using IaBimeta.Api.ContactCenter;
 using IaBimeta.Audit.Infrastructure;
@@ -85,6 +88,7 @@ public sealed class PostgresFixture : IAsyncLifetime
     private ServiceProvider? _servicosComCanaisReais;
     private ServiceProvider? _servicosComCanaisIndisponiveis;
     private ServiceProvider? _servicosComMensageria;
+    private ServiceProvider? _servicosComAgentes;
 
     public string ConnectionString { get; } = TestDatabase.ConnectionString;
 
@@ -94,13 +98,14 @@ public sealed class PostgresFixture : IAsyncLifetime
     /// que o cadastro autoriza. No de "canais indisponíveis", é a mesma implementação do host, mas o banco do Channels não responde
     /// (um banco que não existe), enquanto o do Conversations e os demais funcionam: a falha da consulta de autorização, de verdade.
     /// </summary>
-    private ServiceProvider Compor(bool canaisReais, bool canaisIndisponiveis = false, bool mensageria = false)
+    private ServiceProvider Compor(bool canaisReais, bool canaisIndisponiveis = false, bool mensageria = false, bool agentes = false)
     {
         var colecao = new ServiceCollection();
         if (mensageria)
         {
-            // O tempo só anda quando o teste manda: a espera entre tentativas e o vencimento do lease se provam sem esperar de verdade.
-            colecao.AddSingleton<TimeProvider>(RelogioDaMensageria);
+            // O tempo só anda quando o teste manda: a espera entre tentativas e o vencimento do lease se provam sem esperar de verdade. A composição dos Agents tem o PRÓPRIO relógio: os testes do
+            // agrupamento e do lease avançam o tempo sem mexer no relógio dos testes de mensageria.
+            colecao.AddSingleton<TimeProvider>(agentes ? RelogioDosAgentes : RelogioDaMensageria);
             colecao.AddLogging();
         }
 
@@ -175,6 +180,14 @@ public sealed class PostgresFixture : IAsyncLifetime
                 limites.MaxOutputTokens = 500;
             });
 
+        if (agentes)
+        {
+            // O Agents (C2): o ÚNICO provedor de IA é o dublê dos testes (nenhuma rede, nenhuma chave real), e as opções são as de referência, com o tempo nas mãos do teste.
+            colecao.AddSingleton(ProvedorDeIA);
+            colecao.AddSingleton<IAiProvider>(provider => provider.GetRequiredService<FakeAiProvider>());
+            colecao.AddAgents(_ => ConnectionString);
+        }
+
         return colecao.BuildServiceProvider(validateScopes: true);
     }
 
@@ -184,6 +197,7 @@ public sealed class PostgresFixture : IAsyncLifetime
         _servicosComCanaisReais = Compor(canaisReais: true);
         _servicosComCanaisIndisponiveis = Compor(canaisReais: true, canaisIndisponiveis: true);
         _servicosComMensageria = Compor(canaisReais: true, mensageria: true);
+        _servicosComAgentes = Compor(canaisReais: true, mensageria: true, agentes: true);
 
         await using var escopo = _servicos.CreateAsyncScope();
         await escopo.ServiceProvider.GetRequiredService<AuditDbContext>().Database.MigrateAsync();
@@ -193,6 +207,19 @@ public sealed class PostgresFixture : IAsyncLifetime
         await escopo.ServiceProvider.GetRequiredService<ChannelsDbContext>().Database.MigrateAsync();
         await escopo.ServiceProvider.GetRequiredService<ContactCenterDbContext>().Database.MigrateAsync();
         await escopo.ServiceProvider.GetRequiredService<AiGatewayDbContext>().Database.MigrateAsync();
+
+        // O esquema do Agents só existe na composição dos Agents (as demais composições não o conhecem).
+        await using (var escopoDosAgentes = _servicosComAgentes.CreateAsyncScope())
+        {
+            var bancoDosAgentes = escopoDosAgentes.ServiceProvider.GetRequiredService<AgentsDbContext>().Database;
+            await bancoDosAgentes.MigrateAsync();
+
+            // Os turnos abertos que sobraram de execuções anteriores (testes que não os executaram) seriam reivindicados pelo executor desta execução e consumiriam o provedor dublê: viram cancelados,
+            // para a fila de turnos devidos começar limpa. Nenhuma linha é apagada.
+            await bancoDosAgentes.ExecuteSqlRawAsync(
+                "UPDATE agents.ai_turns SET state = 7, end_reason = 'test-reset', ended_at = now(), next_attempt_at = NULL, lane_token = NULL, claimed_by = NULL, lease_expires_at = NULL, " +
+                "version = version + 1, updated_at = now() WHERE state IN (1, 2, 3)");
+        }
 
         // O relay processa o outbox INTEIRO (todos os tenants): o que sobrou de execuções anteriores e dos testes da API (que gravam
         // eventos e não rodam relay) é dado de outros testes. Marca-o como processado antes de começar, para os testes de entrega
@@ -212,6 +239,21 @@ public sealed class PostgresFixture : IAsyncLifetime
 
     /// <summary>Como <see cref="NovoEscopo"/>, mas na composição de mensageria (o evento vai também para o outbox durável).</summary>
     public AsyncServiceScope NovoEscopoComMensageria(RequestContext? contexto = null) => Abrir(_servicosComMensageria!, contexto);
+
+    /// <summary>O relógio da composição dos Agents, controlado pelo teste (o agrupamento, o recuo das tentativas e o lease dos turnos se provam sem esperar de verdade).</summary>
+    public RelogioDeTeste RelogioDosAgentes { get; } = new();
+
+    /// <summary>O provedor de IA dos testes dos Agents: o dublê com latência e falha injetáveis, que registra cada pedido (o contador prova, por exemplo, que um handler nunca chama o modelo).</summary>
+    public FakeAiProvider ProvedorDeIA { get; } = new(ProvedorDeIADeTeste);
+
+    /// <summary>A composição dos Agents (mensageria, relay, handlers do ContactCenter e do Agents, AiGateway e o provedor de IA dublê): a raiz de serviços, onde o relay e o executor vivem.</summary>
+    public IServiceProvider ServicosComAgentes => _servicosComAgentes!;
+
+    /// <summary>Os eventos entregues em memória na composição dos Agents.</summary>
+    public InMemoryEventPublisher EventosComAgentes => _servicosComAgentes!.GetRequiredService<InMemoryEventPublisher>();
+
+    /// <summary>Como <see cref="NovoEscopo"/>, mas na composição dos Agents.</summary>
+    public AsyncServiceScope NovoEscopoComAgentes(RequestContext? contexto = null) => Abrir(_servicosComAgentes!, contexto);
 
     /// <summary>Os eventos publicados pelo Conversations (dublê em memória), para os testes conferirem o que sairia para os consumidores.</summary>
     public InMemoryEventPublisher Eventos => _servicos!.GetRequiredService<InMemoryEventPublisher>();
@@ -242,6 +284,11 @@ public sealed class PostgresFixture : IAsyncLifetime
         if (_servicosComMensageria is not null)
         {
             await _servicosComMensageria.DisposeAsync();
+        }
+
+        if (_servicosComAgentes is not null)
+        {
+            await _servicosComAgentes.DisposeAsync();
         }
     }
 

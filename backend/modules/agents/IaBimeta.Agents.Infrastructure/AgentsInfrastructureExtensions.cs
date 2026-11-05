@@ -1,0 +1,55 @@
+using IaBimeta.Agents.Application;
+using IaBimeta.Agents.Domain;
+using IaBimeta.Messaging;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+
+namespace IaBimeta.Agents.Infrastructure;
+
+public static class AgentsInfrastructureExtensions
+{
+    /// <summary>
+    /// Registra o módulo Agents (ADR 0017): o turno de IA, o agendamento pelos eventos do Conversations, a definição do agente do tenant e a persistência. O host precisa registrar antes o
+    /// <c>IRequestContextAccessor</c>, o Audit (<c>IAuditWriter</c>), o Messaging (<c>AddMessaging</c>, que dá o <c>IMessagingScopeInitializer</c> ao relay), o Conversations (<c>ITurnCommands</c>), o AiGateway
+    /// (<c>IAiGateway</c>) e o ContactCenter (<c>IHandoffRequests</c>). A string de conexão é lida só quando o DbContext é usado. Quem entrega os eventos é o relay do Worker (o Api só registra
+    /// os handlers, nenhum é chamado fora do relay), e quem executa os turnos é o executor do Worker: o Agents nunca chama o modelo dentro de um handler.
+    /// </summary>
+    /// <param name="configure">Ajusta as opções (agrupamento, tentativas, tempos, capacidade); a configuração do host liga a seção <c>Agents:Options</c>.</param>
+    public static IServiceCollection AddAgents(this IServiceCollection services, Func<IServiceProvider, string> connectionString, Action<AgentsOptions>? configure = null)
+    {
+        ArgumentNullException.ThrowIfNull(connectionString);
+
+        var opcoes = new AgentsOptions();
+        configure?.Invoke(opcoes);
+        opcoes.Validate();
+        services.AddSingleton(opcoes);
+        services.TryAddSingleton(TimeProvider.System);
+
+        services.AddDbContext<AgentsDbContext>((provider, options) =>
+            options.UseNpgsql(
+                connectionString(provider),
+                npgsql => npgsql.MigrationsHistoryTable("__ef_migrations_history", AgentsDbContext.Schema)));
+
+        services.AddScoped<IAiTurnStore, AiTurnStore>();
+        services.AddScoped<AgentDefinitionStore>();
+        services.AddScoped<IAgentDefinitionStore>(provider => provider.GetRequiredService<AgentDefinitionStore>());
+        services.AddScoped<IAgentDefinitionReader>(provider => provider.GetRequiredService<AgentDefinitionStore>());
+        services.AddScoped<IPendingTurnSource, PendingTurnSource>();
+        services.AddScoped<TurnScheduler>();
+        services.AddScoped<TurnRunner>();
+        services.AddScoped<AgentDefinitionService>();
+
+        // Consumo durável do estado de atendimento do Conversations: o inbox do módulo e os handlers (que só gravam o AiTurn).
+        services.AddInboxGate<AgentsDbContext>();
+        services.AddEventHandler<InboundMessageRegisteredHandler>();
+        services.AddEventHandler<MessageContentReadyHandler>();
+        services.AddEventHandler<MessageContentFailedHandler>();
+        services.AddEventHandler<HandlingModeChangedHandler>();
+        services.AddEventHandler<SessionClosedHandler>();
+        services.AddEventHandler<SessionTransferredHandler>();
+        services.AddEventHandler<ConversationLocaleChangedHandler>();
+
+        return services;
+    }
+}

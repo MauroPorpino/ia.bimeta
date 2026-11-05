@@ -1,3 +1,4 @@
+using IaBimeta.Agents.Infrastructure;
 using IaBimeta.AiGateway.Infrastructure;
 using IaBimeta.Audit.Infrastructure;
 using IaBimeta.Channels.Infrastructure;
@@ -17,7 +18,10 @@ namespace IaBimeta.IntegrationTests.Persistence;
 [Collection(PostgresCollection.Name)]
 public sealed class ModuleSchemasTests(PostgresFixture banco)
 {
-    public static TheoryData<string> Modulos => new() { "tenancy", "identity", "audit", "conversations", "channels", "contact_center", "ai_gateway" };
+    public static TheoryData<string> Modulos => new() { "tenancy", "identity", "audit", "conversations", "channels", "contact_center", "ai_gateway", "agents" };
+
+    /// <summary>O escopo do módulo: o Agents só existe na composição dos Agents (as demais não o conhecem, para os handlers dele não se misturarem aos testes dos outros módulos).</summary>
+    private AsyncServiceScope Abrir(string modulo) => modulo == "agents" ? banco.NovoEscopoComAgentes() : banco.NovoEscopo();
 
     private static DbContext ContextoDo(IServiceProvider provider, string modulo) => modulo switch
     {
@@ -28,6 +32,7 @@ public sealed class ModuleSchemasTests(PostgresFixture banco)
         "channels" => provider.GetRequiredService<ChannelsDbContext>(),
         "contact_center" => provider.GetRequiredService<ContactCenterDbContext>(),
         "ai_gateway" => provider.GetRequiredService<AiGatewayDbContext>(),
+        "agents" => provider.GetRequiredService<AgentsDbContext>(),
         _ => throw new ArgumentOutOfRangeException(nameof(modulo)),
     };
 
@@ -35,7 +40,7 @@ public sealed class ModuleSchemasTests(PostgresFixture banco)
     [MemberData(nameof(Modulos))]
     public async Task Todas_as_migrations_do_modulo_estao_aplicadas(string modulo)
     {
-        await using var escopo = banco.NovoEscopo();
+        await using var escopo = Abrir(modulo);
         var db = ContextoDo(escopo.ServiceProvider, modulo);
 
         Assert.Empty(await db.Database.GetPendingMigrationsAsync());
@@ -46,7 +51,7 @@ public sealed class ModuleSchemasTests(PostgresFixture banco)
     [MemberData(nameof(Modulos))]
     public async Task Modelo_do_modulo_nao_tem_mudancas_pendentes_em_relacao_as_migrations(string modulo)
     {
-        await using var escopo = banco.NovoEscopo();
+        await using var escopo = Abrir(modulo);
         var db = ContextoDo(escopo.ServiceProvider, modulo);
 
         Assert.False(db.Database.HasPendingModelChanges());
@@ -80,13 +85,16 @@ public sealed class ModuleSchemasTests(PostgresFixture banco)
         { "ai_gateway", "ai_credentials" },
         { "ai_gateway", "ai_requests" },
         { "ai_gateway", "usage_windows" },
+        { "agents", "ai_turns" },
+        { "agents", "agent_definition_versions" },
+        { "agents", "inbox_message" },
     };
 
     [Theory]
     [MemberData(nameof(TabelasDeTenant))]
     public async Task Tabela_de_tenant_exige_tenant_id_e_a_chave_comeca_por_ele(string esquema, string tabela)
     {
-        await using var escopo = banco.NovoEscopo();
+        await using var escopo = Abrir(esquema);
         var db = ContextoDo(escopo.ServiceProvider, esquema);
 
         var anulavel = await db.Database
@@ -113,7 +121,7 @@ public sealed class ModuleSchemasTests(PostgresFixture banco)
     [MemberData(nameof(Modulos))]
     public async Task Esquema_do_modulo_tem_o_proprio_historico_de_migrations(string modulo)
     {
-        await using var escopo = banco.NovoEscopo();
+        await using var escopo = Abrir(modulo);
         var db = ContextoDo(escopo.ServiceProvider, modulo);
 
         var historico = await db.Database
@@ -136,7 +144,7 @@ public sealed class ModuleSchemasTests(PostgresFixture banco)
                 "select count(*)::int as \"Value\" from information_schema.referential_constraints rc " +
                 "join information_schema.table_constraints fk on fk.constraint_name = rc.constraint_name and fk.constraint_schema = rc.constraint_schema " +
                 "join information_schema.table_constraints pk on pk.constraint_name = rc.unique_constraint_name and pk.constraint_schema = rc.unique_constraint_schema " +
-                "where fk.table_schema in ('tenancy', 'identity', 'audit', 'conversations', 'channels', 'contact_center', 'ai_gateway') and fk.table_schema <> pk.table_schema")
+                "where fk.table_schema in ('tenancy', 'identity', 'audit', 'conversations', 'channels', 'contact_center', 'ai_gateway', 'agents') and fk.table_schema <> pk.table_schema")
             .SingleAsync();
 
         Assert.Equal(0, entreEsquemas);

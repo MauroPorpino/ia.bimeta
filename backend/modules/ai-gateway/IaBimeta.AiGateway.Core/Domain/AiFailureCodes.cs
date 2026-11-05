@@ -24,7 +24,7 @@ public static class AiFailureCodes
 
     // Limites do tenant (TenantLimitExceeded)
     public const string InputMessageLimit = "input-message-limit";
-    public const string ConcurrencyLimit = "concurrency-limit";
+    public const string ConcurrencyLimit = IaBimeta.AiGateway.Contracts.AiFailure.ConcurrencyLimitCode;
     public const string PeriodCallLimit = "period-call-limit";
     public const string PeriodTokenLimit = "period-token-limit";
     public const string PerCallTokenLimit = "per-call-token-limit";

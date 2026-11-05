@@ -118,7 +118,17 @@ public enum AiUsageCertainty
 /// <param name="Retryable">Se vale tentar de novo. Só <see cref="AiErrorKind.Transient"/>.</param>
 /// <param name="RetryAfter">A espera sugerida (limitada pelo AiGateway), só quando <paramref name="Retryable"/>.</param>
 /// <param name="Code">Um código estável para diagnóstico (do AiGateway ou do provedor). Nunca contém segredo, prompt nem resposta.</param>
-public sealed record AiFailure(AiErrorKind Kind, bool Retryable, TimeSpan? RetryAfter = null, string? Code = null);
+public sealed record AiFailure(AiErrorKind Kind, bool Retryable, TimeSpan? RetryAfter = null, string? Code = null)
+{
+    /// <summary>O código estável da saturação das chamadas simultâneas do tenant (ver <see cref="IsCapacityBusy"/>).</summary>
+    public const string ConcurrencyLimitCode = "concurrency-limit";
+
+    /// <summary>
+    /// Falta MOMENTÂNEA de capacidade: o limite de chamadas SIMULTÂNEAS do tenant está cheio (<see cref="AiErrorKind.TenantLimitExceeded"/>). Passa sozinha quando uma chamada termina: o consumidor
+    /// espera e tenta de novo, sem gastar tentativa. Os demais limites do tenant (período, tokens, tamanho do pedido) não passam sozinhos e são falha permanente do turno.
+    /// </summary>
+    public bool IsCapacityBusy => Kind == AiErrorKind.TenantLimitExceeded && Code == ConcurrencyLimitCode;
+}
 
 /// <summary>O custo ESTIMADO da chamada, calculado com a tabela de preços do catálogo. Não é fatura.</summary>
 public sealed record AiCostEstimate(decimal Amount, string Currency);

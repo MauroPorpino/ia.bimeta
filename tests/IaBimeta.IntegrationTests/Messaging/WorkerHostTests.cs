@@ -27,6 +27,11 @@ public sealed class WorkerHostTests(PostgresFixture banco)
         {
             ["ConnectionStrings:Default"] = banco.ConnectionString,
             ["Messaging:PollInterval"] = "00:00:00.200",
+
+            // O Agents (C2) também sobe neste host. Estes testes são do ContactCenter: o agrupamento longo impede que o executor de turnos de IA leve o turno que o handler do Agents grava para as
+            // sessões deles (nenhum turno fica devido durante o teste). O fluxo do Agents tem os testes próprios.
+            ["Agents:Options:QuietWindow"] = "01:00:00",
+            ["Agents:Options:MaxWait"] = "01:00:00",
             ["Worker:ReconcileInterval"] = "00:00:00.300",
             ["Worker:ReconcileMinimumAge"] = "00:00:00",
             ["Channels:Secrets:ActiveKeyId"] = PostgresFixture.IdDaChaveDeTeste,
@@ -198,9 +203,30 @@ public sealed class WorkerHostTests(PostgresFixture banco)
         var servicos = worker.Services.GetServices<IHostedService>().Select(s => s.GetType().Name).ToList();
         Assert.Contains("OutboxRelayService", servicos);
         Assert.Contains("ContactCenterReconciliationService", servicos);
+        Assert.Contains("AgentsTurnExecutorService", servicos);
+        Assert.Contains("AgentsReconciliationService", servicos);
         await using var escopo = worker.Services.CreateAsyncScope();
-        var tipos = escopo.ServiceProvider.GetServices<IEventHandler>().Select(h => $"{h.EventType}/{h.EventVersion}").OrderBy(t => t).ToList();
-        Assert.Equal(new[] { "conversations.handling-mode-changed/1", "conversations.session-closed/1", "conversations.session-transferred/1" }, tipos);
+
+        // Os handlers do ContactCenter (3) e os do Agents (7): cada um só grava no banco do próprio módulo, e o ContactCenter e o Agents consomem o mesmo evento, cada um com o inbox dele.
+        var tipos = escopo.ServiceProvider.GetServices<IEventHandler>().Select(h => $"{h.EventType}/{h.EventVersion}").OrderBy(t => t, StringComparer.Ordinal).ToList();
+        Assert.Equal(
+            new[]
+            {
+                "conversations.conversation-locale-changed/1",
+                "conversations.handling-mode-changed/1",
+                "conversations.handling-mode-changed/1",
+                "conversations.inbound-message-registered/1",
+                "conversations.message-content-failed/1",
+                "conversations.message-content-ready/1",
+                "conversations.session-closed/1",
+                "conversations.session-closed/1",
+                "conversations.session-transferred/1",
+                "conversations.session-transferred/1",
+            },
+            tipos);
+
+        // O Agents NÃO consome a falha de envio nem o evento de entrega: falha de envio não dispara IA (ARQ-24).
+        Assert.DoesNotContain(tipos, t => t.Contains("outbound-message", StringComparison.Ordinal));
         Assert.Single(worker.Services.GetServices<IOutboxRelay>());
         await Task.CompletedTask;
     }
@@ -212,6 +238,9 @@ public sealed class WorkerHostTests(PostgresFixture banco)
         Assert.Throws<InvalidOperationException>(() => Montar(c => c["Worker:ReconcileInterval"] = "00:00:00"));
         Assert.Throws<InvalidOperationException>(() => Montar(c => c["Messaging:MaxAttempts"] = "0"));
         Assert.Throws<InvalidOperationException>(() => Montar(c => c["Messaging:BatchSize"] = "5000"));
+        Assert.Throws<InvalidOperationException>(() => Montar(c => c["Agents:Options:MaxTurnAttempts"] = "0"));
+        Assert.Throws<InvalidOperationException>(() => Montar(c => c["Agents:Options:ModelCallTimeout"] = "00:05:00")); // o tempo do turno (lease) precisa passar o da chamada
+        Assert.Throws<InvalidOperationException>(() => Montar(c => { c["Agents:Options:QuietWindow"] = "00:00:20"; c["Agents:Options:MaxWait"] = "00:00:05"; }));
         await Task.CompletedTask;
     }
 }

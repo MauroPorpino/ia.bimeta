@@ -23,6 +23,7 @@ internal sealed class CenarioDeConversas
         Reais,
         Indisponiveis,
         Mensageria,
+        Agentes,
     }
 
     private readonly Canais _canais;
@@ -50,11 +51,15 @@ internal sealed class CenarioDeConversas
     /// Verdadeiro: a composição de mensageria (canais reais, outbox durável, relay e handlers, com o relógio de teste). Cada evento
     /// de estado fica gravado no outbox na mesma transação da mudança, e o teste roda o relay quando quer a entrega.
     /// </param>
-    public static async Task<CenarioDeConversas> CriarAsync(PostgresFixture banco, string prefixo, bool canaisReais = false, bool mensageria = false)
+    /// <param name="agentes">
+    /// Verdadeiro: a composição dos Agents (a de mensageria, mais o Agents e o provedor de IA dublê, com o relógio próprio dos Agents). O teste roda o relay e o executor de turnos quando quer.
+    /// </param>
+    public static async Task<CenarioDeConversas> CriarAsync(PostgresFixture banco, string prefixo, bool canaisReais = false, bool mensageria = false, bool agentes = false)
     {
         var tenant = await banco.RegistrarTenantAsync(prefixo);
         var organizacao = await banco.CriarOrganizacaoAsync(tenant, $"Organização {prefixo}");
-        return new CenarioDeConversas(banco, tenant, organizacao.Id, mensageria ? Canais.Mensageria : canaisReais ? Canais.Reais : Canais.Dubles);
+        return new CenarioDeConversas(
+            banco, tenant, organizacao.Id, agentes ? Canais.Agentes : mensageria ? Canais.Mensageria : canaisReais ? Canais.Reais : Canais.Dubles);
     }
 
     /// <summary>
@@ -71,6 +76,7 @@ internal sealed class CenarioDeConversas
         Canais.Reais => _banco.NovoEscopoComCanaisReais(contexto),
         Canais.Indisponiveis => _banco.NovoEscopoComCanaisIndisponiveis(contexto),
         Canais.Mensageria => _banco.NovoEscopoComMensageria(contexto),
+        Canais.Agentes => _banco.NovoEscopoComAgentes(contexto),
         _ => _banco.NovoEscopo(contexto),
     };
 
@@ -79,6 +85,7 @@ internal sealed class CenarioDeConversas
         Canais.Reais => _banco.EventosComCanaisReais,
         Canais.Indisponiveis => _banco.EventosComCanaisIndisponiveis,
         Canais.Mensageria => _banco.EventosComMensageria,
+        Canais.Agentes => _banco.EventosComAgentes,
         _ => _banco.Eventos,
     };
 

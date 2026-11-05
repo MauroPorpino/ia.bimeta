@@ -1,0 +1,127 @@
+using IaBimeta.Conversations.Contracts;
+
+namespace IaBimeta.Agents.Domain;
+
+/// <summary>
+/// A configuração do Agents (seção <c>Agents:Options</c>): agrupamento, interrupções, tentativas, tempos e capacidade (CONVERSATION-LIFECYCLE.md §14). Os valores padrão são a REFERÊNCIA
+/// inicial aprovada, a calibrar com dados reais: configuração, não constantes de código. O Agents controla estes parâmetros; o Conversations aplica regras fixas de aceitação e não os lê.
+/// No MVP os valores valem para todos os tenants (a configuração por tenant é evolução futura).
+/// </summary>
+public sealed class AgentsOptions
+{
+    /// <summary>A janela quieta do agrupamento: o turno espera isto depois da ÚLTIMA mensagem (GRP-1).</summary>
+    public TimeSpan QuietWindow { get; set; } = TimeSpan.FromSeconds(3);
+
+    /// <summary>O teto da espera do agrupamento, contado desde a PRIMEIRA mensagem pendente (GRP-1).</summary>
+    public TimeSpan MaxWait { get; set; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>Quantas interrupções (mensagem nova com o turno em andamento) a rajada admite sem resposta aceita; depois o turno passa a não ser interrompível (INT-1, T12).</summary>
+    public int MaxSupersedesPerBurst { get; set; } = 2;
+
+    /// <summary>As tentativas de um mesmo turno por falha transitória (ou saída inválida) antes de ele morrer (T10).</summary>
+    public int MaxTurnAttempts { get; set; } = 3;
+
+    /// <summary>A espera depois da primeira falha transitória; dobra a cada tentativa até <see cref="MaxRetryBackoff"/>.</summary>
+    public TimeSpan RetryBackoff { get; set; } = TimeSpan.FromSeconds(5);
+
+    public TimeSpan MaxRetryBackoff { get; set; } = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// O tempo que um executor tem para terminar um turno: vale como lease. Passado esse tempo sem conclusão, o turno é reivindicado de novo (o processo caiu). Precisa ser MAIOR que
+    /// o tempo limite da chamada ao modelo, com folga para registrar a resposta.
+    /// </summary>
+    public TimeSpan TurnMaxDuration { get; set; } = TimeSpan.FromSeconds(90);
+
+    /// <summary>O tempo limite de UMA chamada ao modelo (o AiGateway o limita ao máximo dele).</summary>
+    public TimeSpan ModelCallTimeout { get; set; } = TimeSpan.FromSeconds(45);
+
+    /// <summary>Quantas mensagens recentes entram no contexto do turno (o Conversations limita ao teto dele).</summary>
+    public int MaxInputMessages { get; set; } = 30;
+
+    /// <summary>O teto de tokens de saída de uma resposta (o AiGateway o limita ao teto do tenant e ao do modelo).</summary>
+    public int MaxOutputTokens { get; set; } = 600;
+
+    /// <summary>A espera por capacidade: o limite de chamadas simultâneas do tenant no AiGateway está cheio, e o turno volta depois sem gastar tentativa.</summary>
+    public TimeSpan CapacityRetry { get; set; } = TimeSpan.FromSeconds(3);
+
+    /// <summary>De quanto em quanto tempo um turno que espera conteúdo pendente reavalia o grupo.</summary>
+    public TimeSpan ContentRecheck { get; set; } = TimeSpan.FromSeconds(3);
+
+    /// <summary>A espera adicional por conteúdo pendente, por tipo (MED-2). Sem processador de mídia no MVP, a espera é curta; vencida, vale a política do tipo.</summary>
+    public TimeSpan AudioExtraWait { get; set; } = TimeSpan.FromSeconds(10);
+
+    public TimeSpan ImageExtraWait { get; set; } = TimeSpan.FromSeconds(10);
+
+    public TimeSpan DocumentExtraWait { get; set; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>Vídeo e outros tipos não têm processamento previsto: sem espera, vão direto ao atendente (MED-2).</summary>
+    public TimeSpan VideoAndOtherExtraWait { get; set; } = TimeSpan.Zero;
+
+    /// <summary>A idade máxima de um turno que só espera (capacidade ou reentrega do pedido de handoff): passada, ele morre em vez de esperar para sempre.</summary>
+    public TimeSpan MaxTurnAge { get; set; } = TimeSpan.FromMinutes(15);
+
+    /// <summary>Quantos turnos de um tenant rodam ao mesmo tempo no executor (contados no banco, entre todos os processos). Fica abaixo do limite de chamadas simultâneas do AiGateway.</summary>
+    public int MaxConcurrentTurnsPerTenant { get; set; } = 4;
+
+    /// <summary>Quantos turnos o executor leva a trabalho por ciclo, somando os tenants.</summary>
+    public int ExecutorBatchSize { get; set; } = 32;
+
+    /// <summary>Quantos turnos rodam em paralelo no mesmo processo.</summary>
+    public int ExecutorParallelism { get; set; } = 8;
+
+    /// <summary>De quanto em quanto tempo o executor procura turnos devidos.</summary>
+    public TimeSpan ExecutorInterval { get; set; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>A espera depois de o executor encerrar limpo (T11) ou de perder a vaga do tenant: sem contar tentativa.</summary>
+    public TimeSpan CleanShutdownRetry { get; set; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>O reconciliador (CON-15) só olha sessões cuja última mensagem tem pelo menos esta idade, para não disputar com o handler do evento.</summary>
+    public TimeSpan ReconcileMinimumAge { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>Quantas sessões abertas mais recentes cada tenant o reconciliador examina por ciclo.</summary>
+    public int ReconcileSessionsPerTenant { get; set; } = 100;
+
+    /// <summary>De quanto em quanto tempo o reconciliador roda.</summary>
+    public TimeSpan ReconcileInterval { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>Quantos tenants o reconciliador atende por ciclo.</summary>
+    public int ReconcileTenantBatchSize { get; set; } = 100;
+
+    /// <summary>A espera adicional para um tipo de conteúdo (MED-2).</summary>
+    public TimeSpan ExtraWaitFor(MessageKind kind) => kind switch
+    {
+        MessageKind.Audio => AudioExtraWait,
+        MessageKind.Image => ImageExtraWait,
+        MessageKind.Document => DocumentExtraWait,
+        _ => VideoAndOtherExtraWait,
+    };
+
+    /// <exception cref="InvalidOperationException">Algum valor é inválido: falha na partida, nunca no meio do processamento.</exception>
+    public void Validate()
+    {
+        var positivos = new[]
+        {
+            QuietWindow, MaxWait, RetryBackoff, MaxRetryBackoff, TurnMaxDuration, ModelCallTimeout, CapacityRetry, ContentRecheck, MaxTurnAge, ExecutorInterval, ReconcileInterval,
+        };
+        var naoNegativos = new[] { AudioExtraWait, ImageExtraWait, DocumentExtraWait, VideoAndOtherExtraWait, CleanShutdownRetry, ReconcileMinimumAge };
+
+        if (positivos.Any(t => t <= TimeSpan.Zero)
+            || naoNegativos.Any(t => t < TimeSpan.Zero)
+            || MaxWait < QuietWindow
+            || MaxRetryBackoff < RetryBackoff
+            || TurnMaxDuration <= ModelCallTimeout
+            || MaxSupersedesPerBurst < 0
+            || MaxTurnAttempts < 1
+            || MaxInputMessages is < 1 or > 200
+            || MaxOutputTokens < 16
+            || MaxConcurrentTurnsPerTenant < 1
+            || ExecutorBatchSize is < 1 or > 1000
+            || ExecutorParallelism is < 1 or > 64
+            || ReconcileSessionsPerTenant is < 1 or > 100
+            || ReconcileTenantBatchSize is < 1 or > 1000)
+        {
+            throw new InvalidOperationException(
+                "A configuração do Agents é inválida (tempos, tentativas, mensagens, tetos, capacidade ou lotes); o tempo do turno precisa passar o da chamada ao modelo.");
+        }
+    }
+}

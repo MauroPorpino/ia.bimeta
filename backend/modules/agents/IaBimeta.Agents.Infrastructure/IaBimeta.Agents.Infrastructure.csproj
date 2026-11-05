@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <!-- Os testes de integração exercitam o repositório, o handler e a reivindicação de turnos direto nos componentes. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="IaBimeta.IntegrationTests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
+    <!-- Mesmas versões dos demais módulos: o EF Core de execução fica alinhado ao Design e ao dotnet-ef. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.14" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.14" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.14">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\building-blocks\IaBimeta.Messaging\IaBimeta.Messaging.csproj" />
+    <ProjectReference Include="..\..\..\building-blocks\IaBimeta.SharedKernel\IaBimeta.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\conversations\IaBimeta.Conversations.Contracts\IaBimeta.Conversations.Contracts.csproj" />
+    <ProjectReference Include="..\IaBimeta.Agents.Core\IaBimeta.Agents.Core.csproj" />
+  </ItemGroup>
+
+</Project>
