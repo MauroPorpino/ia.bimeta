@@ -65,6 +65,12 @@ public sealed class ElevatedConversationGateway : IConversationGateway
     public Task<EffectView> GetEffectAsync(GetEffectQuery query, CancellationToken cancellationToken) =>
         RunAsync((queries, _) => queries.GetEffectAsync(query, cancellationToken));
 
+    public Task<RegisterHumanReplyResult> RegisterHumanReplyAsync(RegisterHumanReplyCommand command, CancellationToken cancellationToken) =>
+        RunAsync((_, handling) => handling.RegisterHumanReplyAsync(command, cancellationToken));
+
+    public Task<CloseSessionDelegatedResult> CloseSessionAsync(CloseSessionDelegatedCommand command, CancellationToken cancellationToken) =>
+        RunAsync((_, handling) => handling.CloseSessionDelegatedAsync(command, cancellationToken));
+
     private async Task<T> RunAsync<T>(Func<IConversationQueries, IHandlingCommands, Task<T>> action)
     {
         // Sem contexto confiável na operação em curso não há tenant a elevar: falha fechada.

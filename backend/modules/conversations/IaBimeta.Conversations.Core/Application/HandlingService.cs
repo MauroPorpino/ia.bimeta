@@ -404,6 +404,154 @@ public sealed class HandlingService : IHandlingCommands
         return new CloseSessionResult(true, true, sessao.StateVersion);
     }
 
+    public async Task<RegisterHumanReplyResult> RegisterHumanReplyAsync(RegisterHumanReplyCommand command, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        var contexto = _context.GetRequired();
+        contexto.Require(Permission.SystemOperation);
+
+        // A forma do pedido antes de qualquer acesso ao armazenamento. Anexos e destinatários (DP-05) e a citação ainda não existem: um bloco de canal ou uma citação é recusado, nunca ignorado.
+        var conteudo = command.Content;
+        if (conteudo is null
+            || string.IsNullOrWhiteSpace(conteudo.Text)
+            || conteudo.Text.Length > ConversationLimits.TextMaxLength
+            || conteudo.ChannelData is not null
+            || conteudo.InReplyToMessageId is not null
+            || command.OperationId == Guid.Empty
+            || command.AuthorUserId == Guid.Empty
+            || command.Precondition is null)
+        {
+            return new RegisterHumanReplyResult(RegisterHumanReplyOutcome.ContentRejected);
+        }
+
+        await using var trabalho = await _store.BeginAsync(cancellationToken);
+        var sessao = await trabalho.LockSessionAsync(command.SessionId, cancellationToken);
+        if (sessao is null)
+        {
+            return new RegisterHumanReplyResult(RegisterHumanReplyOutcome.SessionNotFound);
+        }
+
+        // 1. Idempotência ANTES das condições: o mesmo OperationId com o mesmo efeito devolve o resultado original; com outro efeito é recusado sem expor o original.
+        var existente = await trabalho.FindResendByRequestAsync(command.OperationId, cancellationToken);
+        if (existente is not null)
+        {
+            var mesmoEfeito = existente.SessionId == sessao.Id && existente.Author == MessageAuthor.Human && existente.AuthorRef == command.AuthorUserId && existente.Text == conteudo.Text;
+            return mesmoEfeito
+                ? new RegisterHumanReplyResult(
+                    RegisterHumanReplyOutcome.AlreadyApplied, existente.Id, existente.MessageSeq, sessao.StateVersion, existente.CreatedAt,
+                    command.FenceToken > 0 && sessao.IsFencedOut(command.FenceToken) ? FenceObservation.Overtaken : FenceObservation.Current, existente.DeliveryState)
+                : new RegisterHumanReplyResult(RegisterHumanReplyOutcome.OperationIdReused);
+        }
+
+        if (!sessao.IsOpen)
+        {
+            return new RegisterHumanReplyResult(RegisterHumanReplyOutcome.SessionClosed);
+        }
+
+        // 2. Cerca do executor, pré-condição de atendimento (modo, período, colocação e responsável) e versão do estado, tudo com a linha travada.
+        if (command.FenceToken < 0 || (command.FenceToken > 0 && sessao.IsFencedOut(command.FenceToken)))
+        {
+            return new RegisterHumanReplyResult(RegisterHumanReplyOutcome.FencedOut);
+        }
+
+        var base_ = command.Precondition;
+        var responsavelConfere = base_.ResponderMatch == ResponderMatch.Any || sessao.ResponderRef == base_.ResponderRef;
+        if (base_.Mode != HandlingMode.HumanAssisted
+            || sessao.HandlingMode != HandlingMode.HumanAssisted
+            || sessao.HandlingPeriod != base_.HandlingPeriod
+            || sessao.PlacementEpoch != base_.PlacementEpoch
+            || !responsavelConfere)
+        {
+            return new RegisterHumanReplyResult(RegisterHumanReplyOutcome.HandlingChanged);
+        }
+
+        if (sessao.StateVersion != command.ExpectedStateVersion)
+        {
+            return new RegisterHumanReplyResult(RegisterHumanReplyOutcome.StaleState);
+        }
+
+        var conversa = await trabalho.FindSessionConversationAsync(sessao, cancellationToken);
+        if (conversa is null)
+        {
+            return new RegisterHumanReplyResult(RegisterHumanReplyOutcome.ContentRejected);
+        }
+
+        // 3. Commit atômico: a mensagem de saída e o evento de envio juntos (o evento existe se, e somente se, a mensagem existe). O OperationId é também a chave de idempotência do efeito externo.
+        var agora = _clock.GetUtcNow();
+        var sequencia = sessao.NextOutboundSeq(agora);
+        var mensagem = Message.CreateHumanReply(
+            contexto.TenantId, sessao.Id, conversa.Id, conversa.ChannelInstanceId, sequencia, command.AuthorUserId, command.OperationId, conteudo.Text, agora, conversa.EffectiveLocale);
+        sessao.AdvanceFence(command.FenceToken);
+        trabalho.Add(mensagem);
+        await trabalho.CommitAsync(
+            new[]
+            {
+                ConversationEventFactory.Create(
+                    contexto.TenantId,
+                    sessao.Id,
+                    ConversationEventTypes.OutboundMessageRequested,
+                    new OutboundMessageRequestedV1(sessao.Id, conversa.Id, mensagem.Id, command.OperationId, null, mensagem.ChannelInstanceId),
+                    agora),
+            },
+            cancellationToken);
+
+        // A trilha registra QUEM respondeu e a qual sessão: nunca o texto (dado do cliente e do atendimento).
+        await _audit.WriteAsync(new AuditEntry("conversations.message.human-reply", "message", mensagem.Id.ToString(), AuditOutcome.Success), cancellationToken);
+        return new RegisterHumanReplyResult(
+            RegisterHumanReplyOutcome.Applied, mensagem.Id, mensagem.MessageSeq, sessao.StateVersion, agora, FenceObservation.Current);
+    }
+
+    public async Task<CloseSessionDelegatedResult> CloseSessionDelegatedAsync(CloseSessionDelegatedCommand command, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        var contexto = _context.GetRequired();
+        contexto.Require(Permission.SystemOperation);
+        var motivo = ConversationLimits.ValidateReason(command.ReasonCode);
+
+        await using var trabalho = await _store.BeginAsync(cancellationToken);
+        var sessao = await trabalho.LockSessionAsync(command.SessionId, cancellationToken);
+        if (sessao is null)
+        {
+            return new CloseSessionDelegatedResult(CloseSessionDelegatedOutcome.SessionNotFound);
+        }
+
+        // Já encerrada (por esta mesma operação repetida, ou por outra via): converge, sem evento novo. Avaliado ANTES das condições, que já não valem para uma sessão fechada.
+        if (!sessao.IsOpen)
+        {
+            return new CloseSessionDelegatedResult(CloseSessionDelegatedOutcome.AlreadyClosed, LastMessageSeq: sessao.LastMessageSeq, Reason: "closed");
+        }
+
+        if (command.FenceToken < 0 || (command.FenceToken > 0 && sessao.IsFencedOut(command.FenceToken)))
+        {
+            return new CloseSessionDelegatedResult(CloseSessionDelegatedOutcome.FencedOut);
+        }
+
+        var base_ = command.Precondition;
+        if (base_ is null || base_.Mode != HandlingMode.HumanAssisted || !sessao.IsInHandlingState(base_.Mode, base_.ResponderRef, base_.HandlingPeriod, base_.PlacementEpoch))
+        {
+            return new CloseSessionDelegatedResult(CloseSessionDelegatedOutcome.HandlingChanged);
+        }
+
+        if (sessao.StateVersion != command.ExpectedStateVersion)
+        {
+            return new CloseSessionDelegatedResult(CloseSessionDelegatedOutcome.StaleState);
+        }
+
+        var agora = _clock.GetUtcNow();
+        sessao.AdvanceFence(command.FenceToken);
+        sessao.Close(agora);
+        await trabalho.CommitAsync(
+            new[]
+            {
+                ConversationEventFactory.Create(
+                    contexto.TenantId, sessao.Id, ConversationEventTypes.SessionClosed, new SessionClosedV1(sessao.Id, motivo, sessao.LastMessageSeq), agora),
+            },
+            cancellationToken);
+
+        await _audit.WriteAsync(new AuditEntry("conversations.session.close", "session", sessao.Id.ToString(), AuditOutcome.Success), cancellationToken);
+        return new CloseSessionDelegatedResult(CloseSessionDelegatedOutcome.Applied, sessao.StateVersion, sessao.LastMessageSeq);
+    }
+
     public async Task<RequestResendResult> RequestResendAsync(RequestResendCommand command, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(command);

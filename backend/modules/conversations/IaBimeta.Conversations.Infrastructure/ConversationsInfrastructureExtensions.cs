@@ -41,6 +41,9 @@ public static class ConversationsInfrastructureExtensions
         services.AddScoped<ITurnCommands>(provider => provider.GetRequiredService<TurnService>());
         services.AddScoped<HandlingService>();
         services.AddScoped<IHandlingCommands>(provider => provider.GetRequiredService<HandlingService>());
+        services.AddScoped<IOutboundDispatchReader, OutboundDispatchReader>();
+        services.AddScoped<OutboundDispatchQueryService>();
+        services.AddScoped<IOutboundDispatchQueries>(provider => provider.GetRequiredService<OutboundDispatchQueryService>());
         services.AddScoped<ConversationQueryService>();
         services.AddScoped<IConversationQueries>(provider => provider.GetRequiredService<ConversationQueryService>());
 

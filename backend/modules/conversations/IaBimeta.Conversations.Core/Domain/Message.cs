@@ -267,6 +267,45 @@ public sealed class Message : ITenantOwned
         };
     }
 
+    /// <summary>
+    /// A resposta de um atendente humano (7ª operação, ADR 0014, seção A): texto livre, autor humano, nasce liberada para envio. A chave de idempotência da ação (o <c>OperationId</c>, também a chave
+    /// do efeito externo) fica em <see cref="ResendRequestId"/>, a mesma coluna que guarda a do reenvio: uma só pesquisa responde "esta ação do atendente já gerou mensagem?". Não cobre
+    /// mensagem do cliente (a cobertura é da IA) e não vem de turno.
+    /// </summary>
+    public static Message CreateHumanReply(
+        TenantId tenantId, Guid sessionId, Guid conversationId, ChannelInstanceId channelInstanceId, long messageSeq, Guid authorUserId, Guid operationId, string text, DateTimeOffset now,
+        Locale conversationLocale)
+    {
+        ArgumentNullException.ThrowIfNull(tenantId);
+        ArgumentNullException.ThrowIfNull(conversationLocale);
+
+        ValidateText(text, MessageKind.Text, required: true);
+
+        return new Message
+        {
+            Id = Guid.CreateVersion7(),
+            TenantId = tenantId,
+            SessionId = sessionId,
+            ConversationId = conversationId,
+            ChannelInstanceId = channelInstanceId,
+            Direction = MessageDirection.Outbound,
+            MessageSeq = messageSeq,
+            Author = MessageAuthor.Human,
+            AuthorRef = authorUserId,
+            Kind = MessageKind.Text,
+            ContentState = ContentState.Ready,
+            Text = text,
+            ReceivedAt = now,
+            OccurredAt = now,
+            DeliveryState = Contracts.DeliveryState.Requested,
+            ResendRequestId = operationId,
+            RequestedBy = authorUserId,
+            CreatedAt = now,
+            Locale = conversationLocale,
+            LocaleOrigin = MessageLocaleOrigin.ConversationLocale,
+        };
+    }
+
     /// <summary>O conteúdo da mídia ficou pronto. Só vale para mensagem do cliente ainda pendente.</summary>
     public ContentChangeOutcome SetContent(string text)
     {

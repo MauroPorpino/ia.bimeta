@@ -40,4 +40,10 @@ internal sealed class DirectConversationGateway : IConversationGateway
 
     public Task<EffectView> GetEffectAsync(GetEffectQuery query, CancellationToken cancellationToken) =>
         _queries.GetEffectAsync(query, cancellationToken);
+
+    public Task<RegisterHumanReplyResult> RegisterHumanReplyAsync(RegisterHumanReplyCommand command, CancellationToken cancellationToken) =>
+        _handling.RegisterHumanReplyAsync(command, cancellationToken);
+
+    public Task<CloseSessionDelegatedResult> CloseSessionAsync(CloseSessionDelegatedCommand command, CancellationToken cancellationToken) =>
+        _handling.CloseSessionDelegatedAsync(command, cancellationToken);
 }

@@ -19,6 +19,18 @@ public interface IHandlingCommands
     Task<CloseSessionResult> CloseSessionAsync(CloseSessionCommand command, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// A resposta de um atendente humano ao cliente (7ª operação do gateway elevado, ADR 0009 e ADR 0014, seção A). Só o contexto de SISTEMA do mesmo tenant a chama (o ContactCenter, depois de
+    /// decidir o acesso pela fila): grava a mensagem de saída e o evento de envio JUNTOS, de forma idempotente por <c>OperationId</c>, sob a pré-condição e a cerca do comando.
+    /// </summary>
+    Task<RegisterHumanReplyResult> RegisterHumanReplyAsync(RegisterHumanReplyCommand command, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// O encerramento do atendimento por quem o conduz (9ª operação do gateway elevado, ADR 0009 e ADR 0016, seção M). Só o contexto de SISTEMA do mesmo tenant a chama; aplica a pré-condição e a
+    /// cerca, encerra a sessão e publica <c>SessionClosedV1</c>. Repetir depois de encerrada converge em <c>AlreadyClosed</c>.
+    /// </summary>
+    Task<CloseSessionDelegatedResult> CloseSessionDelegatedAsync(CloseSessionDelegatedCommand command, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Ação do atendente: nova solicitação de saída vinculada a uma mensagem em falha definitiva (CONVERSATION-LIFECYCLE.md
     /// §11, COV-7). O autor é o usuário autenticado do <c>RequestContext</c>, nunca um parâmetro, e nenhum componente
     /// automático chama este comando. Não cria turno de IA e não altera a cobertura.

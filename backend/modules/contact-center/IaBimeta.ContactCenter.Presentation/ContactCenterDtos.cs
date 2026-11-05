@@ -14,6 +14,11 @@ public sealed record RequestHandoffRequest(Guid SessionId, Guid? QueueId, Guid R
 
 public sealed record ItemActionRequest(Guid RequestId, string? Reason);
 
+/// <summary>A resposta do atendente: o <c>RequestId</c> é a chave de idempotência (repetir o mesmo pedido devolve a mesma mensagem).</summary>
+public sealed record ReplyToItemRequest(Guid RequestId, string Text);
+
+public sealed record CloseItemRequest(Guid RequestId, string? ReasonCode);
+
 public sealed record AssignItemRequest(Guid UserId, Guid RequestId, string? Reason);
 
 public sealed record TransferItemRequest(Guid QueueId, Guid? UserId, Guid RequestId, string? Reason);

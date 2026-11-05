@@ -1,6 +1,7 @@
 using IaBimeta.ContactCenter.Application;
 using IaBimeta.ContactCenter.Domain;
 using IaBimeta.Conversations.Contracts;
+using IaBimeta.Conversations.Contracts.Commands;
 using IaBimeta.SharedKernel;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -201,6 +202,30 @@ public static class ContactCenterEndpoints
 
         itens.MapPost("/{id:guid}/return-to-ai", async (Guid id, ItemActionRequest pedido, QueueItemService servico, CancellationToken ct) =>
             Resultado(await servico.ReturnToAiAsync(id, pedido.RequestId, pedido.Reason, ct)));
+
+        // A resposta do atendente ao cliente e o encerramento do atendimento (7ª e 9ª operações do gateway elevado). O desfecho do Conversations vira o status HTTP.
+        itens.MapPost("/{id:guid}/reply", async (Guid id, ReplyToItemRequest pedido, QueueItemService servico, CancellationToken ct) =>
+        {
+            var resultado = await servico.ReplyAsync(id, pedido.RequestId, pedido.Text, ct);
+            return resultado.Outcome switch
+            {
+                RegisterHumanReplyOutcome.Applied or RegisterHumanReplyOutcome.AlreadyApplied => Results.Ok(resultado),
+                RegisterHumanReplyOutcome.ContentRejected => Results.Problem(title: "Resposta recusada", detail: "O conteúdo da resposta não é aceito.", statusCode: StatusCodes.Status400BadRequest),
+                RegisterHumanReplyOutcome.SessionNotFound => Results.NotFound(),
+                _ => Results.Problem(title: "O atendimento mudou", detail: $"A resposta não foi enviada ({resultado.Outcome}). Releia a conversa e tente de novo.", statusCode: StatusCodes.Status409Conflict),
+            };
+        });
+
+        itens.MapPost("/{id:guid}/close", async (Guid id, CloseItemRequest pedido, QueueItemService servico, CancellationToken ct) =>
+        {
+            var resultado = await servico.CloseAsync(id, pedido.RequestId, pedido.ReasonCode, ct);
+            return resultado.Outcome switch
+            {
+                CloseSessionDelegatedOutcome.Applied or CloseSessionDelegatedOutcome.AlreadyApplied or CloseSessionDelegatedOutcome.AlreadyClosed => Results.Ok(resultado),
+                CloseSessionDelegatedOutcome.SessionNotFound => Results.NotFound(),
+                _ => Results.Problem(title: "O atendimento mudou", detail: $"O encerramento não foi aplicado ({resultado.Outcome}). Releia a conversa e tente de novo.", statusCode: StatusCodes.Status409Conflict),
+            };
+        });
 
         // Só quem supervisiona a fila muda a prioridade; fica no histórico.
         itens.MapPost("/{id:guid}/priority", async (Guid id, SetPriorityRequest pedido, QueueItemService servico, CancellationToken ct) =>

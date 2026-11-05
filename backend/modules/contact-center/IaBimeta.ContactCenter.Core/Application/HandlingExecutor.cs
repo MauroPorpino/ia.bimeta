@@ -84,6 +84,13 @@ public sealed class HandlingExecutor
     private readonly TimeProvider _clock;
     private readonly IDeferredAudit _audit;
 
+    /// <summary>
+    /// A pré-condição do encerramento DIRETO do atendente (9ª operação, ADR 0018): o modo humano, o período, a colocação e o responsável EFETIVOS da sessão lida AGORA. Fica aqui, no único emissor das pré-condições
+    /// de atendimento (EmissoresPrivilegiadosTests), para que a base completa nunca seja montada em outro ponto do ContactCenter.
+    /// </summary>
+    internal static HandlingPrecondition CloseBasis(SessionView sessao) =>
+        new(sessao.ResponderRef, sessao.HandlingPeriod, HandlingMode.HumanAssisted, sessao.PlacementEpoch);
+
     public HandlingExecutor(IQueueItemRepository items, IQueueRepository queues, IConversationGateway conversations, TimeProvider clock, IDeferredAudit audit)
     {
         _items = items;

@@ -193,6 +193,12 @@ public interface IConversationGateway
     /// chamador (<see cref="EffectOutcome.Unavailable"/>).
     /// </summary>
     Task<EffectView> GetEffectAsync(GetEffectQuery query, CancellationToken cancellationToken);
+
+    /// <summary>A SÉTIMA operação da porta: a resposta do atendente ao cliente (ver <see cref="IHandlingCommands.RegisterHumanReplyAsync"/>).</summary>
+    Task<RegisterHumanReplyResult> RegisterHumanReplyAsync(RegisterHumanReplyCommand command, CancellationToken cancellationToken);
+
+    /// <summary>A NONA operação da porta: o encerramento do atendimento por quem o conduz (ver <see cref="IHandlingCommands.CloseSessionDelegatedAsync"/>).</summary>
+    Task<CloseSessionDelegatedResult> CloseSessionAsync(CloseSessionDelegatedCommand command, CancellationToken cancellationToken);
 }
 
 /// <summary>

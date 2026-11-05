@@ -77,13 +77,14 @@ public sealed class ElevatedConversationGatewayTests(PostgresFixture banco)
     }
 
     [Fact]
-    public void A_superficie_da_porta_e_fechada_seis_operacoes_a_sexta_so_le_e_nenhuma_generica()
+    public void A_superficie_da_porta_e_fechada_oito_operacoes_a_sexta_so_le_e_nenhuma_generica()
     {
         var metodos = typeof(IConversationGateway).GetMethods().Select(m => m.Name).OrderBy(n => n).ToArray();
 
-        // As cinco operações do ADR 0009 mais a consulta de efeito (somente leitura): nenhuma operação genérica de código privilegiado.
+        // As operações do ADR 0009 (a leitura da sessão e do histórico, a transição, o encaminhamento, a cerca), a consulta de efeito (somente leitura) e as duas do atendente (MVP, ADR 0018: a resposta ao cliente,
+        // a sétima, e o encerramento, a nona): nenhuma operação genérica de código privilegiado.
         Assert.Equal(
-            new[] { "FenceAsync", "GetEffectAsync", "GetHistoryAsync", "GetSessionAsync", "TransferAsync", "TransitionAsync" },
+            new[] { "CloseSessionAsync", "FenceAsync", "GetEffectAsync", "GetHistoryAsync", "GetSessionAsync", "RegisterHumanReplyAsync", "TransferAsync", "TransitionAsync" },
             metodos);
     }
 

@@ -2,6 +2,7 @@ using IaBimeta.Audit.Contracts;
 using IaBimeta.Audit.Contracts.Commands;
 using IaBimeta.ContactCenter.Domain;
 using IaBimeta.Conversations.Contracts;
+using IaBimeta.Conversations.Contracts.Commands;
 using IaBimeta.Conversations.Contracts.Queries;
 using IaBimeta.SharedKernel;
 
@@ -707,6 +708,124 @@ public sealed class QueueItemService
         return await BeginAndDriveAsync(
             aberto, requestId, OperationKind.ReturnToAi, aberto.Item.QueueId, null, esperado,
             () => aberto.Item.BeginReturnToAi(requestId, ator, motivo, _clock.GetUtcNow(), aberto.Context.Origin, BasisOf(sessao)), cancellationToken);
+    }
+
+    /// <summary>
+    /// A resposta do atendente ao cliente (7ª operação do gateway elevado; ADR 0014, seção A). Só o RESPONSÁVEL pela conversa responde (o supervisor opera a fila, mas não fala pelo atendente), e só enquanto
+    /// o atendimento humano é o do item. O <paramref name="requestId"/> é a chave de idempotência da ação: repetir o mesmo pedido devolve a mesma mensagem, sem duplicar o envio. A base da autorização (período,
+    /// colocação e responsável) é lida no Conversations AGORA e levada ao comando como pré-condição atômica.
+    /// <para>
+    /// SIMPLIFICAÇÃO DO MVP (registrada no ADR 0018): a ação é DIRETA, sem a intenção persistida nem o recibo do ContactCenter (a retomada por job): se o processo cair entre a decisão e a resposta, o cliente da API
+    /// repete o MESMO <paramref name="requestId"/> e o Conversations (idempotente por <c>OperationId</c>) converge. O token de cerca é zero (não há executor).
+    /// </para>
+    /// </summary>
+    /// <exception cref="ContactCenterResourceNotFoundException">O item não existe ou não é visível.</exception>
+    /// <exception cref="AccessDeniedException">O usuário não é o responsável pela conversa.</exception>
+    /// <exception cref="QueueItemConflictException">O atendimento mudou (outro período, modo ou responsável).</exception>
+    public async Task<RegisterHumanReplyResult> ReplyAsync(Guid itemId, Guid requestId, string text, CancellationToken cancellationToken = default)
+    {
+        var contexto = _context.GetRequired();
+        RequireId(requestId);
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            throw new ContactCenterValidationException("A resposta não pode ser vazia.");
+        }
+
+        var item = await _items.FindItemReadOnlyAsync(itemId, cancellationToken) ?? throw new ContactCenterResourceNotFoundException("Conversa na fila");
+        var acesso = await ResolveAccessAsync(contexto, item, cancellationToken);
+        if (!acesso.CanSee(item))
+        {
+            throw new ContactCenterResourceNotFoundException("Conversa na fila");
+        }
+
+        if (item.IsClosed)
+        {
+            throw new QueueItemConflictException(QueueItemConflict.ConcurrentChange, "A conversa já foi encerrada.");
+        }
+
+        if (contexto.Principal?.UserId is not { } autor || item.Status != QueueItemStatus.Assigned || item.AssignedUserId != autor)
+        {
+            throw await AuditedAccess.DenyAsync(_audit, "contact-center.item.reply", ItemResource, item.Id.ToString(), cancellationToken);
+        }
+
+        var sessao = await ReadEffectiveHandlingAsync(item, cancellationToken);
+        if (sessao is not { Status: SessionStatus.Open, HandlingMode: HandlingMode.HumanAssisted } || sessao.ResponderRef != autor)
+        {
+            throw new QueueItemConflictException(QueueItemConflict.ConcurrentChange, "A conversa não está mais sob o seu atendimento. Releia e tente de novo.");
+        }
+
+        var precondicao = new ReplyPrecondition(sessao.HandlingPeriod, sessao.PlacementEpoch, ResponderMatch.Exact, autor);
+        var resultado = await _conversations.RegisterHumanReplyAsync(
+            new RegisterHumanReplyCommand(sessao.Id, requestId, autor, precondicao, sessao.StateVersion, 0, new ReplyContent(text)), cancellationToken);
+
+        // A versão do estado mudou e a pré-condição ainda vale: relê a versão e repete com a MESMA pré-condição (uma vez). Se o atendimento mudou de verdade, a repetição devolve HandlingChanged.
+        if (resultado.Outcome == RegisterHumanReplyOutcome.StaleState && await _conversations.GetSessionAsync(sessao.Id, cancellationToken) is { } atual)
+        {
+            resultado = await _conversations.RegisterHumanReplyAsync(
+                new RegisterHumanReplyCommand(sessao.Id, requestId, autor, precondicao, atual.StateVersion, 0, new ReplyContent(text)), cancellationToken);
+        }
+
+        return resultado;
+    }
+
+    /// <summary>
+    /// O encerramento do atendimento por quem o conduz (9ª operação do gateway elevado; ADR 0016, seção M): o responsável pela conversa ou quem supervisiona a fila. A base é a mesma da resposta, e a
+    /// sessão encerrada converge em <see cref="CloseSessionDelegatedOutcome.AlreadyClosed"/>. O item é concluído pela projeção do <c>SessionClosedV1</c> (o Worker), como em qualquer encerramento. Mesma
+    /// simplificação do MVP da resposta: ação direta, idempotente pelo estado, sem intenção persistida.
+    /// </summary>
+    /// <exception cref="ContactCenterResourceNotFoundException">O item não existe ou não é visível.</exception>
+    /// <exception cref="AccessDeniedException">O usuário não opera esta conversa.</exception>
+    /// <exception cref="QueueItemConflictException">O atendimento mudou (outro período, modo ou responsável).</exception>
+    public async Task<CloseSessionDelegatedResult> CloseAsync(Guid itemId, Guid requestId, string? reasonCode, CancellationToken cancellationToken = default)
+    {
+        var contexto = _context.GetRequired();
+        RequireId(requestId);
+        var motivo = QueueItem.ValidateReason(reasonCode ?? "resolved");
+
+        var item = await _items.FindItemReadOnlyAsync(itemId, cancellationToken) ?? throw new ContactCenterResourceNotFoundException("Conversa na fila");
+        var acesso = await ResolveAccessAsync(contexto, item, cancellationToken);
+        if (!acesso.CanSee(item))
+        {
+            throw new ContactCenterResourceNotFoundException("Conversa na fila");
+        }
+
+        // O item já foi concluído (pela projeção do encerramento anterior; quem o via continua vendo): repetir a ação converge, sem erro e sem nenhuma chamada ao Conversations. Concluído, ele já não tem responsável.
+        if (item.IsClosed)
+        {
+            return new CloseSessionDelegatedResult(CloseSessionDelegatedOutcome.AlreadyClosed, Reason: "closed");
+        }
+
+        if (!acesso.CanWork(item))
+        {
+            throw await AuditedAccess.DenyAsync(_audit, "contact-center.item.close", ItemResource, item.Id.ToString(), cancellationToken);
+        }
+
+        var sessao = await ReadEffectiveHandlingAsync(item, cancellationToken);
+        if (sessao is null)
+        {
+            throw new ContactCenterResourceNotFoundException("Conversa");
+        }
+
+        if (sessao.Status == SessionStatus.Closed)
+        {
+            return new CloseSessionDelegatedResult(CloseSessionDelegatedOutcome.AlreadyClosed, LastMessageSeq: sessao.LastMessageSeq, Reason: "closed");
+        }
+
+        if (sessao.HandlingMode != HandlingMode.HumanAssisted || !acesso.CanWork(sessao.ResponderRef))
+        {
+            throw new QueueItemConflictException(QueueItemConflict.ConcurrentChange, "A conversa não está mais sob o seu atendimento. Releia e tente de novo.");
+        }
+
+        var precondicao = HandlingExecutor.CloseBasis(sessao);
+        var resultado = await _conversations.CloseSessionAsync(
+            new CloseSessionDelegatedCommand(sessao.Id, requestId, contexto.Principal?.UserId, contexto.Origin, precondicao, sessao.StateVersion, 0, motivo), cancellationToken);
+        if (resultado.Outcome == CloseSessionDelegatedOutcome.StaleState && await _conversations.GetSessionAsync(sessao.Id, cancellationToken) is { } atual)
+        {
+            resultado = await _conversations.CloseSessionAsync(
+                new CloseSessionDelegatedCommand(sessao.Id, requestId, contexto.Principal?.UserId, contexto.Origin, precondicao, atual.StateVersion, 0, motivo), cancellationToken);
+        }
+
+        return resultado;
     }
 
     /// <summary>
