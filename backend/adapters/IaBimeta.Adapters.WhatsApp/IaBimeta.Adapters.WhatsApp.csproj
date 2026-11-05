@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <!-- Os testes de unidade exercitam o parser, o pedido e os erros direto nos componentes. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="IaBimeta.Adapters.WhatsApp.Tests" />
+  </ItemGroup>
+
+  <!-- O HttpClient, o HMAC e o System.Text.Json vêm da plataforma (nenhum SDK, nenhum pacote). O FrameworkReference só traz as abstrações de DI da extensão AddWhatsAppAdapter. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <!-- DEP-2: um adaptador referencia só o Contracts do módulo dono (Channels). -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\modules\channels\IaBimeta.Channels.Contracts\IaBimeta.Channels.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>
