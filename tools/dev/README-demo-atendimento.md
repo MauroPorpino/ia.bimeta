@@ -1,0 +1,51 @@
+# Demonstração do atendimento de ponta a ponta (sem crédito e sem chamada paga)
+
+Mostra, na sua máquina, o fluxo completo do MVP: **cliente no WhatsApp → Receiver (webhook assinado) → Conversations e Agents → resposta da IA → envio pelo WhatsApp → transferência para a fila → atendente na interface React (assumir, responder, encerrar)**. Os dois provedores externos são **simulações locais**: uma "OpenAI" e uma "Graph API da Meta" em `127.0.0.1`. Nada sai da máquina e nenhuma credencial real é usada (as do canal são sintéticas, só de desenvolvimento).
+
+## Peças
+
+| Peça | O que é |
+|---|---|
+| `Start-OpenAiSimulada.ps1` (5199) | responde a Responses API. Se o cliente pede um atendente, ou fala de preço, **transfere**; senão, **responde** com um texto simulado |
+| `Start-WhatsAppSimulado.ps1` (5198) | a Graph API da Meta: imprime cada mensagem que sairia pelo WhatsApp (é o "celular do cliente") |
+| Api (5155) e Worker | os de verdade, com o perfil `simulador-ia` (tenant `demo-ia`, IA e canal de demonstração preparados) |
+| `frontend/` (5173) | a interface do atendente |
+| `Send-MensagemWhatsApp.ps1` | faz o papel da Meta: envia ao Receiver um webhook **assinado** (HMAC-SHA256 com o App Secret) |
+
+## Antes (uma vez), no seu terminal
+
+1. PostgreSQL de desenvolvimento no ar (porta 5433) e a string de conexão nos user-secrets do Api. O Api **aplica as migrations pendentes** (inclusive as novas do Channels) no banco configurado.
+2. Chaves mestras e modelo (qualquer modelo serve, a "OpenAI" é local):
+
+   ```powershell
+   .\tools\dev\Set-ChaveMestraDosCanais.ps1
+   .\tools\dev\Set-ConfiguracaoDeIa.ps1 -ModeloId gpt-5-mini -PrecoEntradaPorMilhao 0.25 -PrecoSaidaPorMilhao 2.00
+   ```
+
+3. Dependências da interface: `cd frontend; npm install` (Node: `C:\Projetos\ferramentas\node-v24.22.1-win-x64`).
+
+## Subir tudo
+
+```powershell
+.\tools\dev\Start-DemoAtendimento.ps1
+```
+
+Abre uma janela para cada peça. Depois que o Api subir, cadastre uma chave de IA qualquer (ela só vai para a "OpenAI" local) com `.\tools\dev\Set-ChaveDaOpenAI.ps1`.
+
+## Roteiro da demonstração
+
+1. **A IA responde.** `.\tools\dev\Send-MensagemWhatsApp.ps1 -Texto 'Ola, tudo bem?'`. Na janela do **WhatsApp simulado** aparece a resposta da IA para o cliente. (A mensagem e a resposta também estão em `GET /simulator/sessions/{id}`.)
+2. **A IA transfere.** `.\tools\dev\Send-MensagemWhatsApp.ps1 -Texto 'Quero falar com um atendente' -Nome Pedro -Numero 5511988887777`. O cliente recebe o aviso da transferência (janela do WhatsApp simulado) e a conversa aparece na fila, em **Aguardando**, na interface.
+3. **O atendente atende.** Em `http://localhost:5173`, entre com tenant `demo-ia`, `admin@demo-ia.local` e `DevLocal-Admin-2026!`. Abra a conversa, **Assumir**, escreva a resposta e envie: ela aparece na janela do WhatsApp simulado. O cliente responde com outro `Send-MensagemWhatsApp.ps1` (mesmo `-Numero`): quem responde agora é o humano, a IA não fala.
+4. **Encerrar.** **Encerrar** na interface (com confirmação): a sessão fecha e o item sai da fila.
+
+## O que é de verdade e o que é simulado
+
+- **De verdade:** Receiver com verificação de assinatura, Inbox durável, deduplicação, Conversations, Agents, AiGateway (ledger e limites), ContactCenter (fila, atribuição, resposta e encerramento), Sender com a disciplina de efeito externo (intenção antes da chamada, `SendUnknown` sem reenvio), adaptador do WhatsApp, PostgreSQL.
+- **Simulado:** a OpenAI e a Graph API da Meta (servidores locais) e a Meta chamando o webhook (o script).
+- **Para o WhatsApp real:** uma URL pública (HTTPS) para o Api, o override do webhook por conta na Meta apontando para o caminho de `POST /channels/accounts/{id}/webhook`, e as credenciais reais cadastradas (`PUT /channels/accounts/{id}/secrets/{AppSecret|AccessToken|WebhookVerifyToken}`). Depende do número de teste da Meta (item 5.2 do ADR 0011).
+
+## Observações
+
+- A mensagem da IA enviada pelo simulador antigo (`/simulator/inbound`) usa um canal sem número cadastrado: o Sender a marca como falha (`channel-inactive`). Use o webhook, como acima.
+- O ensaio automatizado dessa mesma cadeia, com os mesmos componentes e a `OpenAI` e a `Graph API` simuladas por HTTP, está em `tests/IaBimeta.IntegrationTests/Api/FluxoWhatsAppTests.cs`.
