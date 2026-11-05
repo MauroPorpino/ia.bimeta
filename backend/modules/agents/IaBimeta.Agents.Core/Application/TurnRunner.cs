@@ -369,32 +369,58 @@ public sealed class TurnRunner
 
         if (!turno.NoticeDone && concessao is not null && snapshot is not null && !string.IsNullOrWhiteSpace(definicao?.HandoffNoticeText))
         {
-            var aviso = await RegisterAsync(turno, concessao, snapshot, ReplyKind.Informative, definicao.HandoffNoticeText, Array.Empty<Guid>(), ct);
-            switch (aviso.Outcome)
+            // O aviso afirma ao cliente que ele vai ser transferido, e depois da transferência a IA já não pode falar (as cercas do Conversations). Por isso ele só sai se as regras de roteamento
+            // aceitam o pedido AGORA (verificação somente de leitura, nada é gravado). Recusado, seja de vez (nenhuma fila atende a conversa) ou por agora (fila pausada, fora do horário), o cliente
+            // não recebe uma promessa que não se cumpre: o pedido de verdade segue, e se um dia passar, o aviso sai antes dele (a retomada verifica de novo).
+            var verificacao = await _handoff.RequestHandoffAsync(new RequestHandoffCommand(turno.SessionId, turno.Id, reason, CheckOnly: true), CancellationToken.None);
+            switch (verificacao.Outcome)
             {
-                case RegisterReplyOutcome.Accepted:
-                case RegisterReplyOutcome.AlreadyRegistered:
-                    await ApplyAsync(turno.Id, lane, t => { t.RecordNoticeDone(_clock.GetUtcNow()); return null; });
-                    break;
+                case RequestHandoffOutcome.SessionEnded:
+                    return await CancelAsync(turno, lane, "session-ended");
 
-                case RegisterReplyOutcome.NotAiResponder:
-                    // O humano já assumiu: não há o que transferir.
+                case RequestHandoffOutcome.Refused when verificacao.Code == AlreadyHandledByHuman:
                     return await CancelAsync(turno, lane, "handled-by-human");
 
-                case RegisterReplyOutcome.TurnNotActive:
-                    // Substituído ou cancelado por quem tem a autoridade: este executor sai.
-                    return Lost();
+                case RequestHandoffOutcome.Routable:
+                    var resultadoDoAviso = await RegisterNoticeAsync(turno, lane, concessao, snapshot, definicao.HandoffNoticeText, ct);
+                    if (resultadoDoAviso is not null)
+                    {
+                        return resultadoDoAviso;
+                    }
 
-                case RegisterReplyOutcome.SessionNotFound:
-                    return await CancelAsync(turno, lane, "session-not-found");
-
-                default:
-                    // StaleInput, StaleState ou forma recusada: o aviso não sai (chegou mensagem nova, ou o estado mudou), mas a transferência continua.
                     break;
             }
         }
 
         return await RequestHandoffAsync(turno, lane, reason, endReason, failure, concessao);
+    }
+
+    /// <summary>Registra o aviso de transferência (uma resposta determinística do tenant). Devolve um resultado quando o turno termina aqui (o humano já assumiu, ou o turno foi perdido); nulo para seguir ao pedido.</summary>
+    private async Task<TurnRunResult?> RegisterNoticeAsync(AiTurn turno, long lane, TurnGrant concessao, TurnSnapshot snapshot, string texto, CancellationToken ct)
+    {
+        var aviso = await RegisterAsync(turno, concessao, snapshot, ReplyKind.Informative, texto, Array.Empty<Guid>(), ct);
+        switch (aviso.Outcome)
+        {
+            case RegisterReplyOutcome.Accepted:
+            case RegisterReplyOutcome.AlreadyRegistered:
+                await ApplyAsync(turno.Id, lane, t => { t.RecordNoticeDone(_clock.GetUtcNow()); return null; });
+                return null;
+
+            case RegisterReplyOutcome.NotAiResponder:
+                // O humano já assumiu: não há o que transferir.
+                return await CancelAsync(turno, lane, "handled-by-human");
+
+            case RegisterReplyOutcome.TurnNotActive:
+                // Substituído ou cancelado por quem tem a autoridade: este executor sai.
+                return Lost();
+
+            case RegisterReplyOutcome.SessionNotFound:
+                return await CancelAsync(turno, lane, "session-not-found");
+
+            default:
+                // StaleInput, StaleState ou forma recusada: o aviso não sai (chegou mensagem nova, ou o estado mudou), mas a transferência continua.
+                return null;
+        }
     }
 
     /// <summary>Retoma um handoff já decidido (o processo caiu, ou o ContactCenter respondeu <c>Pending</c>): repete o pedido e, se o aviso ainda não saiu, o registra antes.</summary>

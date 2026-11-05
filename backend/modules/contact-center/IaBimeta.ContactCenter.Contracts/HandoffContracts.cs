@@ -25,7 +25,13 @@ public interface IHandoffRequests
 /// <param name="RequestId">A chave de idempotência do pedido (por exemplo, o <c>TurnId</c> do turno que decidiu transferir). Não pode ser vazio.</param>
 /// <param name="Reason">Código do motivo: de 1 a 100 caracteres, letras minúsculas, números e <c>_.-</c> (por exemplo, <c>ai-decision.price</c>).</param>
 /// <param name="QueueId">A fila pedida, ou nulo para o roteamento decidir.</param>
-public sealed record RequestHandoffCommand(Guid SessionId, Guid RequestId, string Reason, Guid? QueueId = null);
+/// <param name="CheckOnly">
+/// Só PERGUNTA se um pedido feito agora seria aceito pelas regras de roteamento (cobertura, rota, pausa, horário, atendente da conversa), SEM gravar nada: não cria item, não muda o
+/// estado da conversa, não guarda o <paramref name="RequestId"/> nem audita recusa. O resultado é <see cref="RequestHandoffOutcome.Routable"/> ou a mesma recusa (com a mesma classificação de
+/// transitória ou definitiva) que o pedido de verdade devolveria. Serve a quem precisa saber ANTES de avisar o cliente de uma transferência (depois dela a IA já não responde): não garante o
+/// resultado do pedido seguinte (a fila pode pausar nesse intervalo), só evita prometer o que as regras já recusam.
+/// </param>
+public sealed record RequestHandoffCommand(Guid SessionId, Guid RequestId, string Reason, Guid? QueueId = null, bool CheckOnly = false);
 
 /// <summary>
 /// O que aconteceu com o pedido. Só os três primeiros valores significam que a conversa está (ou ficará, no <see cref="Pending"/>) em atendimento
@@ -57,6 +63,9 @@ public enum RequestHandoffOutcome
     /// outra operação.
     /// </summary>
     Refused = 6,
+
+    /// <summary>Só com <see cref="RequestHandoffCommand.CheckOnly"/>: as regras aceitariam o pedido agora, e nada foi gravado.</summary>
+    Routable = 7,
 }
 
 /// <summary>

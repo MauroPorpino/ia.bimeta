@@ -264,13 +264,27 @@ internal sealed class ScriptedGateway : IAiGateway
 
 internal sealed class FakeHandoff : IHandoffRequests
 {
+    /// <summary>O pedido DE VERDADE (cria o item). Padrão: aceito.</summary>
     public Func<RequestHandoffCommand, RequestHandoffResult> Behavior { get; set; } =
         _ => new RequestHandoffResult(RequestHandoffOutcome.Completed, Guid.NewGuid(), Guid.NewGuid());
 
+    /// <summary>A verificação somente de leitura (<c>CheckOnly</c>) que antecede o aviso de transferência. Padrão: roteável agora.</summary>
+    public Func<RequestHandoffCommand, RequestHandoffResult> CheckBehavior { get; set; } = _ => new RequestHandoffResult(RequestHandoffOutcome.Routable);
+
+    /// <summary>Só os pedidos de verdade.</summary>
     public List<RequestHandoffCommand> Requests { get; } = new();
+
+    /// <summary>Só as verificações (nada é gravado por elas).</summary>
+    public List<RequestHandoffCommand> Checks { get; } = new();
 
     public Task<RequestHandoffResult> RequestHandoffAsync(RequestHandoffCommand command, CancellationToken cancellationToken = default)
     {
+        if (command.CheckOnly)
+        {
+            Checks.Add(command);
+            return Task.FromResult(CheckBehavior(command));
+        }
+
         Requests.Add(command);
         return Task.FromResult(Behavior(command));
     }

@@ -18,32 +18,49 @@ namespace IaBimeta.ContactCenter.Application;
 public sealed class HandoffRequests : IHandoffRequests
 {
     private readonly Func<Guid, Guid?, Guid, string, CancellationToken, Task<QueueItemOperationResult>> _handoff;
+    private readonly Func<Guid, Guid?, CancellationToken, Task>? _check;
 
     /// <summary>Delega ao caso de uso que já existe. É o único construtor público (o que a injeção de dependência usa).</summary>
     public HandoffRequests(QueueItemService items)
-        : this((items ?? throw new ArgumentNullException(nameof(items))).RequestHandoffAsync)
+        : this((items ?? throw new ArgumentNullException(nameof(items))).RequestHandoffAsync, items.CheckHandoffRouteAsync)
     {
     }
 
     /// <summary>A mesma fachada sobre uma função: permite provar, sem banco, a ordem e a origem dos argumentos entregues ao caso de uso.</summary>
-    internal HandoffRequests(Func<Guid, Guid?, Guid, string, CancellationToken, Task<QueueItemOperationResult>> handoff)
+    internal HandoffRequests(
+        Func<Guid, Guid?, Guid, string, CancellationToken, Task<QueueItemOperationResult>> handoff, Func<Guid, Guid?, CancellationToken, Task>? check = null)
     {
         _handoff = handoff;
+        _check = check;
     }
 
     public Task<RequestHandoffResult> RequestHandoffAsync(RequestHandoffCommand command, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(command);
 
+        // CheckOnly: só pergunta se as regras aceitariam agora (nada é gravado). A mesma tradução das recusas vale para os dois caminhos.
+        if (command.CheckOnly)
+        {
+            var verificar = _check ?? throw new InvalidOperationException("Esta fachada não sabe verificar o roteamento sem gravar.");
+            return TranslateResultAsync(async () =>
+            {
+                await verificar(command.SessionId, command.QueueId, cancellationToken);
+                return new RequestHandoffResult(RequestHandoffOutcome.Routable);
+            });
+        }
+
         return TranslateAsync(() => _handoff(command.SessionId, command.QueueId, command.RequestId, command.Reason, cancellationToken));
     }
 
     /// <summary>Executa a operação e traduz o resultado e as recusas de negócio. É a única lógica desta fachada, e é testável sem banco.</summary>
-    internal static async Task<RequestHandoffResult> TranslateAsync(Func<Task<QueueItemOperationResult>> operation)
+    internal static Task<RequestHandoffResult> TranslateAsync(Func<Task<QueueItemOperationResult>> operation) =>
+        TranslateResultAsync(async () => FromOperation(await operation()));
+
+    private static async Task<RequestHandoffResult> TranslateResultAsync(Func<Task<RequestHandoffResult>> operation)
     {
         try
         {
-            return FromOperation(await operation());
+            return await operation();
         }
         catch (ContactCenterRuleException regra)
         {

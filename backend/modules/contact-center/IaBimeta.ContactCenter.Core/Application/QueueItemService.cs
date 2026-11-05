@@ -166,6 +166,64 @@ public sealed class QueueItemService
         throw ultimaRecusa!;
     }
 
+    /// <summary>
+    /// A pergunta "um pedido de atendimento humano feito agora seria aceito?" (<c>CheckOnly</c> do contrato de handoff). SOMENTE LEITURA: usa o mesmo roteador e as mesmas pré-condições de
+    /// <see cref="RequestHandoffAsync"/> (conversa visível e gerível, fila pedida, cobertura, rota, pausa, horário, atendente da conversa), mas não registra intenção, recibo, item, transição nem auditoria
+    /// de recusa: quem pergunta só quer saber, e o pedido de verdade audita o que for recusado. Volta sem exceção quando as regras aceitariam; senão lança a MESMA recusa do pedido real.
+    /// </summary>
+    public async Task CheckHandoffRouteAsync(Guid sessionId, Guid? queueId, CancellationToken cancellationToken = default)
+    {
+        var contexto = _context.GetRequired();
+
+        var sessao = await _conversations.GetSessionAsync(sessionId, cancellationToken);
+        if (sessao is null || !contexto.IsAllowed(Permission.ConversationRead, sessao.OrganizationId))
+        {
+            throw new ContactCenterResourceNotFoundException("Conversa");
+        }
+
+        // A mesma permissão do pedido de verdade, sem a trilha: quem não pode pedir também não pode perguntar.
+        if (!contexto.IsAllowed(Permission.ConversationManage, sessao.OrganizationId))
+        {
+            throw new AccessDeniedException(Permission.ConversationManage);
+        }
+
+        ServiceQueue? pedida = null;
+        if (queueId is { } filaPedida)
+        {
+            pedida = await _queues.FindQueueReadOnlyAsync(filaPedida, cancellationToken);
+            if (pedida is null || pedida.OrganizationId != sessao.OrganizationId || !contexto.IsAllowed(Permission.QueueRead, pedida.OrganizationId))
+            {
+                throw new ContactCenterResourceNotFoundException("Fila");
+            }
+        }
+
+        // A conversa que já está em fila não tem o que prever: o pedido de verdade só reconhece o que já existe.
+        if (await _items.FindActiveBySessionAsync(sessao.Id, cancellationToken) is not null)
+        {
+            return;
+        }
+
+        if (sessao.Status == SessionStatus.Closed)
+        {
+            throw new ContactCenterRuleException(ContactCenterRule.SessionClosed, "A conversa está encerrada.");
+        }
+
+        var agora = _clock.GetUtcNow();
+        var decisao = pedida is not null
+            ? await _router.ResolveRequestedAsync(sessao, pedida, agora, cancellationToken)
+            : await _router.ResolveByRulesAsync(sessao, agora, cancellationToken);
+        if (decisao.Candidates.Count == 0)
+        {
+            var recusa = decisao.Refusals.Count > 0 ? decisao.Refusals[0].Rule : ContactCenterRule.NoRoute;
+            throw new ContactCenterRuleException(recusa, RefusalMessage(recusa));
+        }
+
+        if (sessao.HandlingMode == HandlingMode.HumanAssisted && sessao.ResponderRef is not null)
+        {
+            throw new ContactCenterRuleException(ContactCenterRule.ConversationAlreadyHandledByHuman, "A conversa já tem um atendente humano definido.");
+        }
+    }
+
     private async Task<QueueItemOperationResult> EnterAsync(
         SessionView sessao, RouteCandidate candidato, Guid requestId, string motivo, RequestContext contexto, DateTimeOffset agora, CancellationToken cancellationToken)
     {

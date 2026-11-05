@@ -88,6 +88,10 @@ public sealed class AgentsHandoffAndFailureTests(PostgresFixture banco)
         Assert.StartsWith("handoff-refused-", resultado.Code);
         Assert.Equal(HandlingMode.AiAutonomous, (await a.C.SessaoAsync(entrada.SessionId))!.HandlingMode);
         Assert.Empty(await a.ItensDaFilaAsync());
+
+        // O cliente NÃO foi avisado de uma transferência que as regras recusam (a verificação antecede o aviso): a conversa não recebeu promessa nenhuma.
+        Assert.Empty(await a.RespostasDaIAAsync(entrada.SessionId));
+        Assert.False((await a.UnicoTurnoAsync(entrada.SessionId)).NoticeDone);
     }
 
     [Fact]
@@ -105,9 +109,10 @@ public sealed class AgentsHandoffAndFailureTests(PostgresFixture banco)
 
         Assert.Equal(TurnRunOutcome.Retrying, primeira.Outcome);
         var turno = await a.UnicoTurnoAsync(entrada.SessionId);
-        Assert.Equal((AiTurnState.Ready, 1, "ai-decision.schedule", true), (turno.State, turno.Attempts, turno.HandoffReason, turno.NoticeDone));
+        Assert.Equal((AiTurnState.Ready, 1, "ai-decision.schedule", false), (turno.State, turno.Attempts, turno.HandoffReason, turno.NoticeDone));
+        Assert.Empty(await a.RespostasDaIAAsync(entrada.SessionId)); // fila pausada: nada de aviso por agora
 
-        // A fila volta e o recuo passa: o mesmo pedido (mesmo TurnId) conclui, sem nova chamada ao modelo e sem repetir o aviso.
+        // A fila volta e o recuo passa: o mesmo pedido (mesmo TurnId) conclui, sem nova chamada ao modelo. Agora as regras aceitam, e o aviso sai UMA vez, antes do pedido.
         await a.C.RetomarAsync(fila);
         a.Avancar(TimeSpan.FromSeconds(6));
         var segunda = Assert.Single(await a.ExecutarAsync());

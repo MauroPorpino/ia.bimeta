@@ -54,7 +54,9 @@ public sealed class HandoffRequestsTests
     {
         var propriedades = typeof(RequestHandoffCommand).GetProperties().Select(p => p.Name).ToArray();
 
-        Assert.Equal(new[] { "SessionId", "RequestId", "Reason", "QueueId" }, propriedades);
+        Assert.Equal(new[] { "SessionId", "RequestId", "Reason", "QueueId", "CheckOnly" }, propriedades);
+        Assert.Equal(typeof(bool), typeof(RequestHandoffCommand).GetProperty("CheckOnly")!.PropertyType);
+        Assert.False(new RequestHandoffCommand(Guid.NewGuid(), Guid.NewGuid(), "ai-decision.price").CheckOnly); // o padrão é o pedido de verdade
         Assert.Equal(typeof(Guid?), typeof(RequestHandoffCommand).GetProperty("QueueId")!.PropertyType);
     }
 
@@ -62,7 +64,7 @@ public sealed class HandoffRequestsTests
     public void O_resultado_do_contrato_e_um_enum_e_as_recusas_nunca_se_confundem_com_sucesso()
     {
         Assert.Equal(
-            new[] { "Completed", "AlreadyApplied", "Pending", "SessionEnded", "NotRoutable", "Refused" },
+            new[] { "Completed", "AlreadyApplied", "Pending", "SessionEnded", "NotRoutable", "Refused", "Routable" },
             Enum.GetNames<RequestHandoffOutcome>());
     }
 
@@ -314,5 +316,71 @@ public sealed class HandoffRequestsTests
         var resultado = await fachada.RequestHandoffAsync(new RequestHandoffCommand(Sessao, Pedido, "motivo"));
 
         Assert.Equal(RequestHandoffOutcome.NotRoutable, resultado.Outcome);
+    }
+
+    // CheckOnly: a pergunta "seria aceito agora?" não grava nada e traduz as recusas como o pedido de verdade
+
+    [Fact]
+    public async Task CheckOnly_pergunta_ao_caso_de_leitura_nunca_ao_pedido_de_verdade_e_devolve_Routable()
+    {
+        (Guid Sessao, Guid? Fila, CancellationToken Token)? verificado = null;
+        var pediuDeVerdade = false;
+        var fachada = new HandoffRequests(
+            (_, _, _, _, _) =>
+            {
+                pediuDeVerdade = true;
+                return Task.FromResult(Resultado(OperationOutcome.Completed));
+            },
+            (sessao, fila, token) =>
+            {
+                verificado = (sessao, fila, token);
+                return Task.CompletedTask;
+            });
+        using var cancelamento = new CancellationTokenSource();
+
+        var resultado = await fachada.RequestHandoffAsync(new RequestHandoffCommand(Sessao, Pedido, "ai-decision.price", Fila, CheckOnly: true), cancelamento.Token);
+
+        Assert.Equal(new RequestHandoffResult(RequestHandoffOutcome.Routable), resultado);
+        Assert.Equal((Sessao, (Guid?)Fila, cancelamento.Token), verificado);
+        Assert.False(pediuDeVerdade); // a verificação nunca cria item nem muda a conversa
+    }
+
+    [Theory]
+    [InlineData(ContactCenterRule.NoRoute, RequestHandoffOutcome.NotRoutable, false, "no-route")]
+    [InlineData(ContactCenterRule.QueueDoesNotCoverSession, RequestHandoffOutcome.NotRoutable, false, "queue-does-not-cover-session")]
+    [InlineData(ContactCenterRule.QueuePaused, RequestHandoffOutcome.NotRoutable, true, "queue-paused")]
+    [InlineData(ContactCenterRule.QueueClosed, RequestHandoffOutcome.NotRoutable, true, "queue-closed")]
+    [InlineData(ContactCenterRule.ConversationAlreadyHandledByHuman, RequestHandoffOutcome.Refused, false, "already-handled-by-human")]
+    [InlineData(ContactCenterRule.SessionClosed, RequestHandoffOutcome.SessionEnded, false, "session-closed")]
+    public async Task CheckOnly_recusado_tem_a_mesma_classificacao_transitoria_ou_definitiva_do_pedido_de_verdade(ContactCenterRule regra, RequestHandoffOutcome desfecho, bool retentavel, string codigo)
+    {
+        var fachada = new HandoffRequests((_, _, _, _, _) => throw new ContactCenterRuleException(regra, "x"), (_, _, _) => throw new ContactCenterRuleException(regra, "x"));
+
+        var verificacao = await fachada.RequestHandoffAsync(new RequestHandoffCommand(Sessao, Pedido, "motivo", CheckOnly: true));
+        var real = await fachada.RequestHandoffAsync(new RequestHandoffCommand(Sessao, Pedido, "motivo"));
+
+        Assert.Equal(new RequestHandoffResult(desfecho, null, null, retentavel, codigo), verificacao);
+        Assert.Equal(real, verificacao);
+    }
+
+    [Fact]
+    public async Task CheckOnly_com_conversa_invisivel_ou_acesso_negado_e_recusa_sem_revelar_qual_dos_dois()
+    {
+        var invisivel = new HandoffRequests((_, _, _, _, _) => throw new InvalidOperationException(), (_, _, _) => throw new ContactCenterResourceNotFoundException("Conversa"));
+        var negado = new HandoffRequests((_, _, _, _, _) => throw new InvalidOperationException(), (_, _, _) => throw new AccessDeniedException(Permission.ConversationManage));
+
+        var a = await invisivel.RequestHandoffAsync(new RequestHandoffCommand(Sessao, Pedido, "motivo", CheckOnly: true));
+        var b = await negado.RequestHandoffAsync(new RequestHandoffCommand(Sessao, Pedido, "motivo", CheckOnly: true));
+
+        Assert.Equal(a, b);
+        Assert.Equal((RequestHandoffOutcome.Refused, false, "session-unavailable"), (a.Outcome, a.Retryable, a.Code));
+    }
+
+    [Fact]
+    public async Task CheckOnly_numa_fachada_sem_verificacao_falha_alto_em_vez_de_devolver_Routable()
+    {
+        var fachada = new HandoffRequests((_, _, _, _, _) => Task.FromResult(Resultado(OperationOutcome.Completed)));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fachada.RequestHandoffAsync(new RequestHandoffCommand(Sessao, Pedido, "motivo", CheckOnly: true)));
     }
 }
