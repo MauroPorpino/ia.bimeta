@@ -11,8 +11,11 @@ namespace IaBimeta.Api.Channels;
 /// </summary>
 internal static class ChannelWebhookEndpoints
 {
-    /// <summary>O teto do corpo: admite o lote do provedor com folga e recusa o que não é webhook.</summary>
-    public const int MaxBodyBytes = 1_048_576;
+    /// <summary>
+    /// O teto do corpo: admite o lote do provedor com folga e recusa o que não é webhook. A Meta documenta payloads de webhook de ATÉ 3 MB (consulta de 06/11/2026): o teto é 4 MiB, porque um 413 faria a Meta reenviar o
+    /// mesmo lote por até 7 dias.
+    /// </summary>
+    public const int MaxBodyBytes = 4_194_304;
 
     private const string Origin = "channels-receiver";
     private const string SignatureHeader = "X-Hub-Signature-256";

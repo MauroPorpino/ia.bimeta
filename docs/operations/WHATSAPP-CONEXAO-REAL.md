@@ -1,5 +1,7 @@
 # Conectar um número real do WhatsApp (Meta Cloud API) ao ia.bimeta
 
+> **Primeiro teste real com o número de teste da Meta (túnel HTTPS, IA simulada, passo a passo): veja `HOMOLOGACAO-META.md`.**
+
 Procedimento para ligar **uma conta WhatsApp Business real** de um tenant ao ia.bimeta, com segurança e **sem enviar mensagem alguma antes de a configuração ser provada**. Vale para o MVP (texto, um número por conta, chat). Fatos da Meta conferidos na documentação oficial em 05/11/2026 (`developers.facebook.com/documentation/business-messaging/whatsapp/...`: `webhooks/create-webhook-endpoint`, `webhooks/override`, `access-tokens`, `throughput`, `support/error-codes`); a Meta muda essas páginas, então confirme antes de um go-live.
 
 > **Regra de ouro:** token de acesso, App Secret, token de verificação e a URL do webhook são **segredos**. Nunca em arquivo versionado, log, ticket, chat ou captura de tela. Os scripts pedem os valores sem eco e o ia.bimeta os guarda **cifrados** (AES-256-GCM, amarrados ao tenant); nenhuma resposta da API os devolve.

@@ -27,6 +27,24 @@
         "Tenancy__Development__SeedAdministrators__2__Password": "DevLocal-Admin-2026!"
       }
     },
+    "homologacao-meta": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": false,
+      "applicationUrl": "http://localhost:5155;http://localhost:5156",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "Channels__Webhook__PublicListenerPort": "5156",
+        "Tenancy__Development__Ai__Enabled": "true",
+        "Tenancy__Development__Ai__TenantSlug": "homologacao",
+        "Tenancy__Development__SeedTenants__3__Slug": "homologacao",
+        "Tenancy__Development__SeedTenants__3__Name": "Tenant de homologacao Meta",
+        "Tenancy__Development__SeedAdministrators__3__TenantSlug": "homologacao",
+        "Tenancy__Development__SeedAdministrators__3__Email": "admin@homologacao.local",
+        "Tenancy__Development__SeedAdministrators__3__DisplayName": "Atendente de homologacao",
+        "Tenancy__Development__SeedAdministrators__3__Password": "DevLocal-Admin-2026!"
+      }
+    },
     "https": {
       "commandName": "Project",
       "dotnetRunMessages": true,

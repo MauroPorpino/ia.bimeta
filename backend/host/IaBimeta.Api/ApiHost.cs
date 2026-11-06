@@ -170,8 +170,12 @@ public static class ApiHost
                 }));
         });
 
+        var ingressoPublico = builder.Configuration.GetSection("Channels:Webhook").Get<PublicIngressOptions>() ?? new PublicIngressOptions();
+
         var app = builder.Build();
 
+        // O ingresso PÚBLICO (túnel HTTPS) só alcança o webhook do provedor: nada de login, simulador nem cabeçalho de desenvolvimento pela internet. Primeiro da fila, antes de qualquer outra coisa.
+        app.UseMiddleware<PublicIngressGuard>(ingressoPublico);
         app.UseRateLimiter();
         app.UseMiddleware<RequestContextMiddleware>();
 

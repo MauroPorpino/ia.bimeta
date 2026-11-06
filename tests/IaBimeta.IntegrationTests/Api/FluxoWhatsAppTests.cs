@@ -62,8 +62,9 @@ public sealed class FluxoWhatsAppTests(PostgresFixture banco)
         var lixo = System.Text.Encoding.UTF8.GetBytes("{\"nao\":\"e um webhook\"}");
         Assert.Equal(HttpStatusCode.BadRequest, await e.EnviarWebhookAsync(lixo));
 
-        // Corpo acima do limite: 413 (nenhum byte além do limite é lido).
-        var grande = new byte[1_048_576 + 10];
+        // Corpo acima do limite (4 MiB: a Meta documenta payloads de até 3 MB): 413, e nenhum byte além do limite é lido. Um corpo de 3 MB (o máximo documentado) NÃO é recusado por tamanho: chega à assinatura (401 sem ela).
+        Assert.Equal(HttpStatusCode.Unauthorized, await e.EnviarWebhookAsync(new byte[3_000_000], semAssinatura: true));
+        var grande = new byte[IaBimeta.Api.Channels.ChannelWebhookEndpoints.MaxBodyBytes + 10];
         Assert.Equal(HttpStatusCode.RequestEntityTooLarge, await e.EnviarWebhookAsync(grande));
 
         Assert.Equal(0, await LinhasDoInboxAsync(e));

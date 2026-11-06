@@ -27,17 +27,19 @@
     https://atendimento.exemplo.com.br). So usado para imprimir a URL completa.
 
 .EXAMPLE
-    .\tools\ops\Conectar-ContaWhatsApp.ps1 -Tenant meu-tenant -Email admin@meu.com -OrganizacaoId <guid> -UnidadeId <guid> `
+    .\tools\ops\Conectar-ContaWhatsApp.ps1 -Tenant meu-tenant -Email admin@meu.com `
         -WabaId 123456789012345 -PhoneNumberId 109876543210987 -NomeDoNumero 'Atendimento Matriz' `
         -UrlPublica https://atendimento.exemplo.com.br
+    (sem -OrganizacaoId/-UnidadeId: usa a unica organizacao do tenant e a matriz dela, criando a matriz se faltar)
 #>
 [CmdletBinding()]
 param(
     [string]$Url = 'http://localhost:5155',
     [Parameter(Mandatory = $true)][string]$Tenant,
     [Parameter(Mandatory = $true)][string]$Email,
-    [Parameter(Mandatory = $true)][guid]$OrganizacaoId,
-    [Parameter(Mandatory = $true)][guid]$UnidadeId,
+    # Opcionais: se omitidos, usa a unica organizacao do tenant e a matriz dela (e cria a matriz "Matriz" se o tenant ainda nao tem unidade).
+    [string]$OrganizacaoId = '',
+    [string]$UnidadeId = '',
     [Parameter(Mandatory = $true)][string]$WabaId,
     [Parameter(Mandatory = $true)][string]$PhoneNumberId,
     [Parameter(Mandatory = $true)][string]$NomeDoNumero,
@@ -50,6 +52,9 @@ param(
     # que a Meta ja conhece). Use esta chave so para TROCAR as credenciais (rotacao): o token de verificacao novo
     # precisara ser cadastrado de novo no painel da Meta.
     [switch]$RegravarCredenciais,
+
+    # So o TOKEN DE ACESSO: troca o token (por exemplo, o temporario da Meta que expirou) e MANTEM o App Secret e o token de verificacao (nada muda no painel da Meta).
+    [switch]$RegravarTokenDeAcesso,
 
     # Opcionais: se omitidos, sao pedidos sem eco. So use em automacao/ensaio, nunca digitando o valor na linha de comando.
     [System.Security.SecureString]$Senha,
@@ -97,6 +102,23 @@ $login = Invoke-Api -Metodo Post -Caminho '/auth/login' -Corpo @{ tenant = $Tena
 $senhaSegura = $null
 $token = [string]$login.token
 
+# 1b. Organizacao e unidade: as informadas, ou a unica organizacao do tenant e a matriz dela (criada se nao existir).
+if ($OrganizacaoId -eq '') {
+    $organizacoes = @(Invoke-Api -Metodo Get -Caminho '/organizations' -Token $token | ForEach-Object { $_ })
+    if ($organizacoes.Count -ne 1) { throw ('O tenant tem ' + $organizacoes.Count + ' organizacoes: informe -OrganizacaoId.') }
+    $OrganizacaoId = [string]$organizacoes[0].id
+}
+if ($UnidadeId -eq '') {
+    $unidades = @(Invoke-Api -Metodo Get -Caminho ('/organizations/' + $OrganizacaoId + '/business-units') -Token $token | ForEach-Object { $_ })
+    $matriz = $unidades | Where-Object { [string]$_.kind -eq 'Headquarters' } | Select-Object -First 1
+    if ($null -eq $matriz) { $matriz = $unidades | Select-Object -First 1 }
+    if ($null -eq $matriz) {
+        $matriz = Invoke-Api -Metodo Post -Caminho ('/organizations/' + $OrganizacaoId + '/business-units') -Token $token -Corpo @{ name = 'Matriz'; kind = 'Headquarters' }
+        Write-Host ('Unidade "Matriz" criada: ' + $matriz.id)
+    }
+    $UnidadeId = [string]$matriz.id
+}
+
 # 2. Conta e numero: reaproveita o que ja existe (o script pode ser repetido).
 # No PowerShell 5.1 a lista JSON chega como UM objeto (um array dentro do pipeline): o ForEach-Object a desagrega, para o filtro olhar cada conta.
 $contas = @(Invoke-Api -Metodo Get -Caminho '/channels/accounts' -Token $token | ForEach-Object { $_ })
@@ -132,6 +154,7 @@ function Set-Credencial {
 $jaCadastradas = @($conta.secrets | ForEach-Object { [string]$_.kind })
 function Test-Mantida {
     param([string]$Papel)
+    if ($Papel -eq 'AccessToken' -and $RegravarTokenDeAcesso) { return $false }
     return (($jaCadastradas -contains $Papel) -and -not $RegravarCredenciais)
 }
 
