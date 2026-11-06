@@ -226,6 +226,26 @@ public sealed class StatusDoAmbienteTests(PostgresFixture banco)
         Assert.Contains("RESULTADO: sem falha crítica; 2 ponto(s) de atenção.", saida);
     }
 
+
+    [Fact]
+    public async Task A_retencao_aparece_na_visao_geral_com_o_agendamento_e_a_empresa_inexistente_na_politica_vira_atencao()
+    {
+        var tenant = await banco.RegistrarTenantAsync("stret");
+        await using var ligado = await ApiServer.StartAsync("Production", Configuracao(k => k["Retention:Schedule:Enabled"] = "true"));
+        await using var desligado = await ApiServer.StartAsync("Production", Configuracao());
+        await using var fantasma = await ApiServer.StartAsync("Production", Configuracao(k => k["Retention:Tenants:fantasma-do-status:Sessions"] = "5"));
+
+        var (_, comAgendamento) = await StatusAsync(ligado, null);
+        var (_, semAgendamento) = await StatusAsync(desligado, null);
+        var (_, comFantasma) = await StatusAsync(fantasma, null);
+        var (_, deUmaEmpresa) = await StatusAsync(desligado, tenant.Slug);
+
+        Assert.Contains("RETENÇÃO", comAgendamento);
+        Assert.Contains("expurgo agendado todo dia a partir das 06:00 UTC", comAgendamento);
+        Assert.Contains("agendamento do expurgo DESLIGADO", semAgendamento);
+        Assert.Contains("[ATENCAO] a política de retenção não pôde ser avaliada: A empresa 'fantasma-do-status'", comFantasma);
+        Assert.DoesNotContain("RETENÇÃO", deUmaEmpresa); // a retenção é do ambiente todo: a conferência de uma empresa não a inclui
+    }
     // Verificações do ambiente
 
     [Fact]

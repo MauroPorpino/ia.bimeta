@@ -45,6 +45,9 @@ public sealed class RetentionOptions
     /// <summary>Sobrescritas por empresa (o slug do tenant), só das categorias citadas.</summary>
     public Dictionary<string, Dictionary<RetentionCategory, int>> Tenants { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>O agendamento do expurgo técnico pelo Worker (ADR 0026). Desligado por padrão: ligar é uma decisão de quem opera.</summary>
+    public RetentionScheduleOptions Schedule { get; set; } = new();
+
     public int DaysFor(RetentionCategory category, string? tenantSlug = null)
     {
         if (tenantSlug is not null && Tenants.TryGetValue(tenantSlug, out var sobrescritas) && sobrescritas.TryGetValue(category, out var dias))
@@ -58,6 +61,8 @@ public sealed class RetentionOptions
     /// <exception cref="InvalidOperationException">Algum valor é inválido.</exception>
     public void Validate()
     {
+        Schedule.Validate();
+
         foreach (var categoria in Enum.GetValues<RetentionCategory>())
         {
             if (!Days.ContainsKey(categoria))
@@ -94,6 +99,49 @@ public sealed class RetentionOptions
                 throw new InvalidOperationException($"A retenção das marcas do Inbox ({nome}) deve ser maior que a dos eventos processados.");
             }
         }
+    }
+}
+
+/// <summary>
+/// O agendamento do expurgo TÉCNICO no Worker (seção <c>Retention:Schedule</c>): uma execução por dia, a partir de <see cref="TimeOfDayUtc"/>. Só as categorias técnicas, com os prazos por empresa e os bloqueios de
+/// segurança (marcas do Inbox bloqueadas por morto antigo); nunca dado pessoal. Se o Worker estava fora do ar na hora marcada, executa assim que sobe (o expurgo é idempotente). Falha tenta de novo depois de
+/// <see cref="RetryAfter"/>.
+/// </summary>
+public sealed class RetentionScheduleOptions
+{
+    public bool Enabled { get; set; }
+
+    /// <summary>A hora do dia (UTC) a partir da qual a execução diária fica devida. Padrão 06:00 UTC (madrugada de Brasília, fora do horário de atendimento).</summary>
+    public TimeSpan TimeOfDayUtc { get; set; } = TimeSpan.FromHours(6);
+
+    /// <summary>A espera para tentar de novo depois de uma falha.</summary>
+    public TimeSpan RetryAfter { get; set; } = TimeSpan.FromMinutes(15);
+
+    /// <summary>De quanto em quanto tempo o Worker confere se a execução está devida.</summary>
+    public TimeSpan CheckInterval { get; set; } = TimeSpan.FromMinutes(1);
+
+    /// <exception cref="InvalidOperationException">A hora do dia está fora de 00:00 a 24:00, a espera é menor que um minuto ou a conferência é menor que 100 ms.</exception>
+    public void Validate()
+    {
+        if (TimeOfDayUtc < TimeSpan.Zero || TimeOfDayUtc >= TimeSpan.FromHours(24) || RetryAfter < TimeSpan.FromMinutes(1) || CheckInterval < TimeSpan.FromMilliseconds(100))
+        {
+            throw new InvalidOperationException("Retention:Schedule é inválido: TimeOfDayUtc deve ficar entre 00:00 e 24:00, RetryAfter deve ser de pelo menos 1 minuto e CheckInterval, de pelo menos 100 ms.");
+        }
+    }
+
+    /// <summary>
+    /// A execução está devida: o agendamento está ligado, já passou a hora do dia e ainda não houve sucesso desde essa hora. Sem sucesso anterior (o Worker acabou de subir), executa assim que a hora de hoje passou:
+    /// quem estava fora do ar na hora marcada recupera ao voltar.
+    /// </summary>
+    public bool IsDue(DateTimeOffset now, DateTimeOffset? lastSuccess)
+    {
+        if (!Enabled)
+        {
+            return false;
+        }
+
+        var hoje = new DateTimeOffset(now.UtcDateTime.Date, TimeSpan.Zero) + TimeOfDayUtc;
+        return now >= hoje && (lastSuccess is null || lastSuccess < hoje);
     }
 }
 

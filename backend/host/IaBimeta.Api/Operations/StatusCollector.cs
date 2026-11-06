@@ -6,6 +6,7 @@ using IaBimeta.Channels.Infrastructure;
 using IaBimeta.ContactCenter.Infrastructure;
 using IaBimeta.Conversations.Infrastructure;
 using IaBimeta.Identity.Infrastructure;
+using IaBimeta.Messaging;
 using IaBimeta.SharedKernel;
 using IaBimeta.Tenancy.Contracts;
 using IaBimeta.Tenancy.Contracts.Queries;
@@ -105,7 +106,50 @@ internal static class StatusCollector
             }
         }
 
+        // A retenção é do ambiente todo: numa conferência de UMA empresa não entra.
+        if (so is null)
+        {
+            await CheckRetentionAsync(root, linhas, cancellationToken);
+        }
+
         return new StatusReport(agora, linhas);
+    }
+
+    /// <summary>
+    /// A retenção técnica em modo relatório (nada é alterado): o que está vencido esperando o expurgo, o que está BLOQUEADO (evento morto antigo que impede o expurgo das marcas do Inbox) e se o agendamento do Worker
+    /// está ligado. Vencido com o agendamento desligado é atenção: o dado técnico só se acumula.
+    /// </summary>
+    private static async Task CheckRetentionAsync(IServiceProvider root, List<StatusLine> linhas, CancellationToken cancellationToken)
+    {
+        const string secao = "Retenção";
+        var opcoes = root.GetRequiredService<RetentionOptions>();
+        var agenda = opcoes.Schedule.Enabled ? $"expurgo agendado todo dia a partir das {opcoes.Schedule.TimeOfDayUtc:hh\\:mm} UTC" : "agendamento do expurgo DESLIGADO";
+        try
+        {
+            var relatorio = await RetentionRunner.RunAsync(root, dryRun: true, cancellationToken);
+            foreach (var bloqueada in relatorio.Results.Where(r => r.Skipped is not null))
+            {
+                linhas.Add(new StatusLine(secao, HealthSeverity.Warning, $"{bloqueada.Task} [{bloqueada.Pass}]: {bloqueada.Skipped}",
+                    "Trate os eventos mortos (reenfileirar ou descartar com autorização) para o expurgo das marcas do Inbox voltar a andar."));
+            }
+
+            var vencidas = relatorio.Results.Where(r => r.Skipped is null).Sum(r => r.Eligible);
+            if (vencidas > 0 && !opcoes.Schedule.Enabled)
+            {
+                linhas.Add(new StatusLine(secao, HealthSeverity.Warning, $"{vencidas} linha(s) técnica(s) vencida(s) esperando expurgo; {agenda}.",
+                    "Ligue Retention:Schedule:Enabled no Worker ou rode tools\\ops\\Retencao-De-Dados.ps1 -Expurgar -Confirmar (veja docs/operations/RETENCAO-DE-DADOS.md)."));
+            }
+            else
+            {
+                linhas.Add(new StatusLine(secao, HealthSeverity.Ok, $"{vencidas} linha(s) técnica(s) vencida(s) esperando expurgo; {agenda}."));
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or NpgsqlException)
+        {
+            // A mensagem das falhas de configuração é nossa (cita o slug da configuração, nunca segredo); a de banco, só o tipo.
+            var detalhe = ex is InvalidOperationException ? ex.Message : ex.GetType().Name;
+            linhas.Add(new StatusLine(secao, HealthSeverity.Warning, $"a política de retenção não pôde ser avaliada: {detalhe}", "Corrija a seção Retention da configuração (docs/operations/RETENCAO-DE-DADOS.md) e rode de novo."));
+        }
     }
 
     private static async Task<string> SlugOfAsync(IServiceProvider root, Dictionary<Guid, string> cache, Guid id, CancellationToken cancellationToken)

@@ -1,10 +1,11 @@
 using IaBimeta.SharedKernel;
+using Microsoft.Extensions.DependencyInjection;
 
-namespace IaBimeta.Api.Retention;
+namespace IaBimeta.Messaging;
 
-internal sealed record DeadLetterSummary(string Outbox, int Count, DateTimeOffset? Oldest);
+public sealed record DeadLetterSummary(string Outbox, int Count, DateTimeOffset? Oldest);
 
-internal sealed record RetentionRunReport(
+public sealed record RetentionRunReport(
     IReadOnlyList<RetentionPass> Passes,
     IReadOnlyList<RetentionTaskResult> Results,
     IReadOnlyList<DeadLetterSummary> DeadLetters);
@@ -14,7 +15,7 @@ internal sealed record RetentionRunReport(
 /// A ordem é a da categoria (eventos processados antes das marcas do Inbox). O expurgo das marcas é BLOQUEADO enquanto houver evento morto mais antigo que o corte da passada: reenfileirar um morto depois de a
 /// marca sumir poderia repetir o efeito dele.
 /// </summary>
-internal static class RetentionRunner
+public static class RetentionRunner
 {
     public static async Task<RetentionRunReport> RunAsync(IServiceProvider root, bool dryRun, CancellationToken cancellationToken = default)
     {

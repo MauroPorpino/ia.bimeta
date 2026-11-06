@@ -136,6 +136,16 @@ public static class WorkerHost
         builder.Services.AddSingleton<AgentsTurnExecutor>();
         builder.Services.AddSingleton<AgentsReconciler>();
         builder.Services.AddHostedService<OutboxRelayService>();
+
+        // O expurgo técnico agendado (ADR 0026): as mesmas tarefas do comando "retention purge" do Api, só dado técnico, com os prazos por empresa e os bloqueios de segurança. Desligado por padrão
+        // (Retention:Schedule:Enabled). Dado pessoal e registros de referência não têm tarefa de expurgo.
+        builder.Services.AddIdentityRetention();
+        builder.Services.AddOutboxRetention<ConversationsDbContext>("conversations");
+        builder.Services.AddOutboxRetention<ChannelsDbContext>("channels");
+        builder.Services.AddInboxRetention<ChannelsDbContext>("channels");
+        builder.Services.AddInboxRetention<AgentsDbContext>("agents");
+        builder.Services.AddInboxRetention<ContactCenterDbContext>("contact_center");
+        builder.Services.AddHostedService<RetentionSchedulerService>();
         builder.Services.AddHostedService<ContactCenterReconciliationService>();
         builder.Services.AddHostedService<AgentsTurnExecutorService>();
         builder.Services.AddHostedService<AgentsReconciliationService>();

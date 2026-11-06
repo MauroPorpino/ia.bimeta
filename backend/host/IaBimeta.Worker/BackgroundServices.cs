@@ -190,3 +190,87 @@ internal sealed class ContactCenterReconciliationService : BackgroundService
         }
     }
 }
+
+/// <summary>
+/// O expurgo TÉCNICO agendado (ADR 0026): uma vez por dia, a partir da hora configurada em <c>Retention:Schedule</c>, roda as mesmas tarefas do comando <c>retention purge</c> (sessões vencidas, tokens de redefinição
+/// encerrados, contadores de login parados, eventos processados do outbox e marcas do Inbox), com os prazos por empresa e os bloqueios de segurança (marcas do Inbox bloqueadas por evento morto antigo). Nunca toca mensagens,
+/// contatos, atendimentos, usuários, auditoria nem ledger de IA: essas tabelas não têm tarefa de expurgo. Desligado por padrão. O log traz só contagens, nunca dado de empresa ou de cliente.
+/// </summary>
+internal sealed class RetentionSchedulerService : BackgroundService
+{
+    private readonly IServiceProvider _root;
+    private readonly RetentionOptions _options;
+    private readonly TimeProvider _clock;
+    private readonly ILogger<RetentionSchedulerService> _logger;
+
+    public RetentionSchedulerService(IServiceProvider root, RetentionOptions options, TimeProvider clock, ILogger<RetentionSchedulerService> logger)
+    {
+        _root = root;
+        _options = options;
+        _clock = clock;
+        _logger = logger;
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        var agenda = _options.Schedule;
+        if (!agenda.Enabled)
+        {
+            _logger.LogInformation("O expurgo técnico agendado está desligado (Retention:Schedule:Enabled).");
+            return;
+        }
+
+        _logger.LogInformation("Expurgo técnico agendado: diário, a partir das {Hora} UTC.", agenda.TimeOfDayUtc);
+        DateTimeOffset? ultimoSucesso = null;
+        DateTimeOffset? tentarDepoisDe = null;
+        using var relogio = new PeriodicTimer(agenda.CheckInterval);
+
+        try
+        {
+            do
+            {
+                var agora = _clock.GetUtcNow();
+                if (tentarDepoisDe is { } depois && agora < depois)
+                {
+                    continue;
+                }
+
+                if (!agenda.IsDue(agora, ultimoSucesso))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var relatorio = await RetentionRunner.RunAsync(_root, dryRun: false, stoppingToken);
+                    var removidos = relatorio.Results.Sum(r => r.Deleted);
+                    var bloqueadas = relatorio.Results.Count(r => r.Skipped is not null);
+                    _logger.LogInformation("Expurgo técnico concluído: {Removidos} linha(s) removida(s) por {Tarefas} tarefa(s) em {Passadas} passada(s); {Bloqueadas} bloqueada(s).",
+                        removidos, relatorio.Results.Select(r => r.Task).Distinct().Count(), relatorio.Passes.Count, bloqueadas);
+                    foreach (var bloqueada in relatorio.Results.Where(r => r.Skipped is not null))
+                    {
+                        _logger.LogWarning("Expurgo técnico bloqueado em {Tarefa}: {Motivo}", bloqueada.Task, bloqueada.Skipped);
+                    }
+
+                    ultimoSucesso = agora;
+                    tentarDepoisDe = null;
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    // Só o tipo: a mensagem de uma falha de banco ou de configuração pode trazer detalhe. Tenta de novo depois da espera configurada.
+                    tentarDepoisDe = agora + agenda.RetryAfter;
+                    _logger.LogError("O expurgo técnico agendado falhou ({ErrorType}); nova tentativa depois de {Espera}.", ex.GetType().Name, agenda.RetryAfter);
+                }
+            }
+            while (await relogio.WaitForNextTickAsync(stoppingToken));
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Parada normal do host.
+        }
+    }
+}

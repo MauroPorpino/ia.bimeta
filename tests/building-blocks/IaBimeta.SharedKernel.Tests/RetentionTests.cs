@@ -136,3 +136,77 @@ public class RetentionTests
         Assert.Throws<InvalidOperationException>(() => new ConfiguredRetentionPolicy(opcoes, (_, _) => Task.FromResult<Guid?>(null)));
     }
 }
+
+/// <summary>O agendamento do expurgo técnico no Worker (ADR 0026): quando a execução diária está devida e a validação das opções.</summary>
+public class RetentionScheduleTests
+{
+    private static readonly DateTimeOffset Hoje = new(2026, 11, 6, 0, 0, 0, TimeSpan.Zero);
+
+    private static RetentionScheduleOptions Ligado(double hora = 6) => new() { Enabled = true, TimeOfDayUtc = TimeSpan.FromHours(hora) };
+
+    [Fact]
+    public void Vem_desligado_e_desligado_nunca_esta_devido()
+    {
+        var padrao = new RetentionScheduleOptions();
+
+        Assert.False(padrao.Enabled);
+        Assert.False(padrao.IsDue(Hoje.AddHours(12), null));
+        Assert.Equal(TimeSpan.FromHours(6), padrao.TimeOfDayUtc);
+    }
+
+    [Fact]
+    public void Antes_da_hora_marcada_nao_esta_devido_e_depois_dela_sim()
+    {
+        Assert.False(Ligado().IsDue(Hoje.AddHours(5).AddMinutes(59), null));
+        Assert.True(Ligado().IsDue(Hoje.AddHours(6), null));
+        Assert.True(Ligado().IsDue(Hoje.AddHours(23), null));
+    }
+
+    [Fact]
+    public void Depois_de_um_sucesso_de_hoje_so_volta_a_ficar_devido_no_dia_seguinte()
+    {
+        var sucessoDeHoje = Hoje.AddHours(6).AddMinutes(1);
+
+        Assert.False(Ligado().IsDue(Hoje.AddHours(10), sucessoDeHoje));
+        Assert.False(Ligado().IsDue(Hoje.AddDays(1).AddHours(5), sucessoDeHoje)); // amanhã, antes da hora
+        Assert.True(Ligado().IsDue(Hoje.AddDays(1).AddHours(6), sucessoDeHoje));
+    }
+
+    [Fact]
+    public void Quem_estava_fora_do_ar_na_hora_marcada_executa_ao_voltar_e_um_sucesso_de_ontem_nao_vale_para_hoje()
+    {
+        var sucessoDeOntem = Hoje.AddDays(-1).AddHours(6);
+
+        Assert.True(Ligado().IsDue(Hoje.AddHours(15), null)); // o Worker acabou de subir, às 15h
+        Assert.True(Ligado().IsDue(Hoje.AddHours(7), sucessoDeOntem));
+    }
+
+    [Theory]
+    [InlineData(-1.0, 15, 1000)]
+    [InlineData(24.0, 15, 1000)]
+    [InlineData(6.0, 0.5, 1000)]
+    [InlineData(6.0, 15, 50)]
+    public void Opcoes_invalidas_sao_recusadas_e_a_validacao_vale_para_a_politica_inteira(double hora, double retryMinutos, int verificacaoMs)
+    {
+        var agenda = new RetentionScheduleOptions
+        {
+            Enabled = true,
+            TimeOfDayUtc = TimeSpan.FromHours(hora),
+            RetryAfter = TimeSpan.FromMinutes(retryMinutos),
+            CheckInterval = TimeSpan.FromMilliseconds(verificacaoMs),
+        };
+
+        Assert.Throws<InvalidOperationException>(agenda.Validate);
+        Assert.Throws<InvalidOperationException>(() => new RetentionOptions { Schedule = agenda }.Validate());
+    }
+
+    [Fact]
+    public void A_politica_padrao_continua_valida_com_o_agendamento_dentro()
+    {
+        var opcoes = new RetentionOptions();
+
+        opcoes.Validate();
+
+        Assert.False(opcoes.Schedule.Enabled);
+    }
+}

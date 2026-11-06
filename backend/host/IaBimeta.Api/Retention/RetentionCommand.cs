@@ -1,3 +1,4 @@
+using IaBimeta.Messaging;
 using IaBimeta.SharedKernel;
 using Npgsql;
 
