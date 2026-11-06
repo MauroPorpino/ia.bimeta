@@ -38,6 +38,19 @@ Seção `Retention` (arquivo de configuração ou variáveis de ambiente, por ex
 - Uma empresa citada que **não existe** faz o comando recusar a execução (nunca se aplica um prazo suposto, que poderia apagar mais cedo que o combinado).
 - O **relay do Worker** expurga os eventos processados do outbox, de hora em hora, com o prazo de cada empresa (sem a seção `Retention`, vale o padrão de 7 dias). A chave antiga `Messaging:ProcessedRetention` só vale onde **não** há política registrada (relay isolado, testes); nos hosts, use `Retention:Days:ProcessedEvents`. As demais categorias só são expurgadas pelo comando, nunca sozinhas.
 
+## Expurgo agendado (ADR 0026)
+
+O Worker pode rodar o expurgo técnico **sozinho, uma vez por dia**: as mesmas tarefas do comando `retention purge`, com os prazos por empresa e os bloqueios de segurança, sem tocar em dado pessoal ou de referência. **Desligado por padrão.**
+
+```json
+{ "Retention": { "Schedule": { "Enabled": true, "TimeOfDayUtc": "06:00:00", "RetryAfter": "00:15:00" } } }
+```
+
+- A execução fica devida a partir de `TimeOfDayUtc` (padrão 06:00 UTC, madrugada de Brasília). Se o Worker estava fora do ar na hora marcada, executa assim que sobe; depois de um sucesso, só no dia seguinte (o expurgo é idempotente). Falha: registra só o **tipo** da falha e tenta de novo depois de `RetryAfter` (mínimo 1 minuto); nada é apagado numa execução que falhou antes de começar (por exemplo, empresa inexistente na política).
+- O log do Worker traz só contagens ("N linha(s) removida(s) por M tarefa(s)") e, se houver, o aviso de tarefa **bloqueada** (marcas do Inbox por evento morto antigo). Nunca nome de empresa ou dado de cliente.
+- O `Status-Ambiente.ps1` mostra na seção **Retenção**: quanto está vencido esperando expurgo, os bloqueios e se o agendamento está ligado (vencido com o agendamento desligado é atenção).
+- Faça um **backup antes de ligar** a primeira vez, rode `retention report` e confira os números: o expurgo é irreversível.
+
 ## Relatório e expurgo
 
 ```powershell
