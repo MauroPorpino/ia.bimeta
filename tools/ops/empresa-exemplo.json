@@ -1,0 +1,45 @@
+// Descricao de uma empresa para tools\ops\Novo-Tenant.ps1. Copie este arquivo, ajuste e rode:
+//   .\tools\ops\Novo-Tenant.ps1 -Arquivo .\minha-empresa.json -PedirSegredos
+// NENHUM segredo vai aqui: os campos terminados em "Env" sao o NOME de uma variavel de ambiente.
+{
+  "tenant": {
+    "slug": "laboratorio-exemplo",          // minusculas, numeros e hifens (3 a 40 caracteres); e o que se digita na tela de entrada
+    "name": "Laboratorio Exemplo"
+  },
+  "administrator": {
+    "email": "admin@laboratorio-exemplo.local",
+    "displayName": "Administrador",
+    "passwordEnv": "EXEMPLO_SENHA_ADMIN"     // sem a variavel, a senha e GERADA e mostrada uma unica vez
+  },
+  "organization": {
+    "name": "Laboratorio Exemplo",
+    "unitName": "Matriz"
+  },
+  "queue": { "name": "Atendimento humano" },
+  "ai": {
+    "providerId": "openai",
+    "modelId": "gpt-5-mini",                 // precisa constar em AiGateway:Catalog:Models (tools\dev\Set-ConfiguracaoDeIa.ps1)
+    "instructions": "Voce e a assistente virtual do Laboratorio Exemplo. Responda em portugues do Brasil, de forma curta e cordial. Voce nao conhece precos, agenda nem resultados de exames: nesses casos, ou se o cliente pedir uma pessoa, transfira para um atendente.",
+    "handoffNotice": "Vou chamar uma pessoa da nossa equipe. Um instante!",
+    "faq": [
+      { "question": "Qual o horario de atendimento?", "answer": "De segunda a sexta, das 7h as 17h, e aos sabados, das 7h as 11h." },
+      { "question": "Preciso de jejum para o hemograma?", "answer": "Em geral nao. A orientacao oficial depende do pedido medico: confirme com o atendente." }
+    ],
+    "apiKeyEnv": "EXEMPLO_CHAVE_IA"          // a chave BYOK do provedor; na demonstracao com a OpenAI simulada, qualquer texto serve
+  },
+  "whatsApp": {
+    "mode": "simulated"                      // "simulated": conta sintetica para a Meta simulada local. Para a Meta real, veja "real" abaixo
+    // "mode": "real",
+    // "accountName": "Conta do Laboratorio",
+    // "wabaId": "COLE_O_WABA_ID",
+    // "phoneNumberId": "COLE_O_PHONE_NUMBER_ID",
+    // "displayPhoneNumber": "+55 11 3000-0000",
+    // "appSecretEnv": "EXEMPLO_WA_APP_SECRET",
+    // "accessTokenEnv": "EXEMPLO_WA_ACCESS_TOKEN",
+    // "verifyTokenEnv": "EXEMPLO_WA_VERIFY_TOKEN"   // opcional: sem ele, e gerado e mostrado uma vez
+  },
+  "attendants": [
+    { "email": "ana@laboratorio-exemplo.local", "displayName": "Ana Atendente", "passwordEnv": "EXEMPLO_SENHA_ANA" },
+    { "email": "bruno@laboratorio-exemplo.local", "displayName": "Bruno Atendente" }
+  ]
+}

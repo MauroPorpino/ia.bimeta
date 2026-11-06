@@ -51,6 +51,10 @@ Para ver a Central de Atendimento com **dois atendentes** e várias conversas (A
 6. Para ver o aviso de conta pausada: como administrador, `POST /channels/accounts/{id}/sending/pause`; as duas abas mostram a faixa em até 15 s, e a resposta seguinte falha ("falha no envio"). `.../sending/resume` retoma.
 7. Para ver a queda de conexão: pare o Api. A faixa de reconexão aparece, a tela não esvazia e o texto digitado fica; ao subir o Api de novo a faixa some e tudo é relido.
 
+## Uma empresa nova (tenant) com tudo configurado
+
+Além do tenant `demo-ia` (preparado pelo perfil `simulador-ia`), qualquer empresa pode ser colocada em funcionamento **por um arquivo JSON e um comando**, sem editar perfil nenhum: tenant, administrador, fila, agente de IA (instruções e perguntas frequentes), modelo e chave da IA, conta de WhatsApp simulada e atendentes. Veja `docs/operations/NOVA-EMPRESA.md` (e `tools\ops\Novo-Tenant.ps1 -Arquivo ... -SoValidar` para só conferir o arquivo). Depois, `Send-MensagemWhatsApp.ps1 -Tenant <slug>` faz o papel do cliente dessa empresa, com os mesmos simuladores.
+
 ## O que é de verdade e o que é simulado
 
 - **De verdade:** Receiver com verificação de assinatura, Inbox durável, deduplicação, Conversations, Agents, AiGateway (ledger e limites), ContactCenter (fila, atribuição, resposta e encerramento), Sender com a disciplina de efeito externo (intenção antes da chamada, `SendUnknown` sem reenvio), adaptador do WhatsApp, PostgreSQL.
