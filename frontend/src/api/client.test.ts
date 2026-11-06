@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { GUID, chamadasDe, criarFetch, item, json, problema } from '../test/helpers';
-import { ApiError, createApi, descreverErro } from './client';
+import { ApiError, createApi, descreverErro, ehFalhaDeConexao } from './client';
 import { aoSair, definirSessao, obterToken } from './session';
 
 const ITEM = item();
@@ -92,6 +92,26 @@ describe('cliente da API: sessão e erros', () => {
 
     expect(erro.status).toBe(502);
     expect(descreverErro(erro)).toContain('API indisponível');
+  });
+
+  it('falta de conexão: rede caída, proxy sem a API (502/503/504 e 500 vazio) contam; erro da própria API (com corpo) não conta', async () => {
+    const erroDe = async (resposta: Response | Error) => {
+      vi.stubGlobal('fetch', resposta instanceof Error ? vi.fn().mockRejectedValue(resposta) : vi.fn().mockResolvedValue(resposta));
+      return createApi().listarMinhasFilas().catch((e: unknown) => e);
+    };
+
+    expect(ehFalhaDeConexao(await erroDe(new TypeError('Failed to fetch')))).toBe(true);
+    expect(ehFalhaDeConexao(await erroDe(new Response(null, { status: 502 })))).toBe(true);
+    expect(ehFalhaDeConexao(await erroDe(new Response(null, { status: 503 })))).toBe(true);
+    expect(ehFalhaDeConexao(await erroDe(new Response(null, { status: 504 })))).toBe(true);
+    expect(ehFalhaDeConexao(await erroDe(new Response(null, { status: 500 })))).toBe(true);
+    expect(ehFalhaDeConexao(await erroDe(new Response('Internal Server Error', { status: 500 })))).toBe(true); // texto que não é JSON
+
+    expect(ehFalhaDeConexao(await erroDe(problema(500, 'Erro interno', 'Falha ao processar.')))).toBe(false);
+    expect(ehFalhaDeConexao(await erroDe(problema(409, 'Conflito')))).toBe(false);
+    expect(ehFalhaDeConexao(await erroDe(problema(403, 'Acesso negado')))).toBe(false);
+    expect(ehFalhaDeConexao(await erroDe(new Response(null, { status: 404 })))).toBe(false);
+    expect(ehFalhaDeConexao(new Error('qualquer outro'))).toBe(false);
   });
 
   it('monta a consulta da lista só com os filtros informados', async () => {

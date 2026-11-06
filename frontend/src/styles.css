@@ -542,3 +542,38 @@ label {
   color: var(--erro-texto);
   font-size: 0.85em;
 }
+
+/* Conexão e envio (consolidação do ContactCenter) */
+.faixa-conexao {
+  padding: 0.4rem 1rem;
+  font-size: 0.9em;
+}
+
+.faixa-conexao.offline {
+  background: var(--erro-fundo);
+  color: var(--erro-texto);
+}
+
+.faixa-conexao.restabelecida {
+  background: var(--balao-ia);
+  color: var(--texto);
+}
+
+.faixa-envio {
+  display: flex;
+  flex-direction: column;
+}
+
+.faixa-envio-item {
+  margin: 0;
+  padding: 0.35rem 1rem;
+  background: var(--aviso-fundo);
+  color: var(--aviso-texto);
+  font-size: 0.9em;
+}
+
+.faixa-envio-item.pausada,
+.aviso-envio.pausada {
+  background: var(--erro-fundo);
+  color: var(--erro-texto);
+}

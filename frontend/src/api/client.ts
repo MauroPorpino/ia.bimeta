@@ -17,6 +17,7 @@ import type {
   QueueItemOperationResult,
   QueueItemStatus,
   ReplyRequest,
+  SendingAlert,
   ServiceQueue,
 } from './types';
 
@@ -27,15 +28,31 @@ export class ApiError extends Error {
   readonly detail: string | null;
   /** Extensão `code` do ProblemDetails (QueueItemConflict em 409, ContactCenterRule em 422). */
   readonly code: string | null;
+  /** A resposta de erro veio SEM o corpo de problema da API (vazia ou que não é JSON): quem respondeu foi um proxy, não a API. */
+  readonly semCorpo: boolean;
 
-  constructor(status: number, title: string, detail: string | null = null, code: string | null = null) {
+  constructor(status: number, title: string, detail: string | null = null, code: string | null = null, semCorpo = false) {
     super(detail ?? title);
     this.name = 'ApiError';
     this.status = status;
     this.title = title;
     this.detail = detail;
     this.code = code;
+    this.semCorpo = semCorpo;
   }
+}
+
+/**
+ * O erro é de CONEXÃO (a API não foi alcançada: rede caída, servidor desligado ou o proxy sem resposta), e não uma
+ * resposta da API. A tela trata como "sem conexão": mostra a faixa de reconexão e continua tentando sozinha.
+ */
+export function ehFalhaDeConexao(erro: unknown): boolean {
+  if (!(erro instanceof ApiError)) {
+    return false;
+  }
+  // 502, 503 e 504 são o proxy dizendo que não alcançou a API; o proxy do Vite com a API desligada responde 500 vazio.
+  // Um 500 COM corpo de problema é erro da própria API (ela está no ar): não é falta de conexão.
+  return erro.status === 0 || erro.status === 502 || erro.status === 503 || erro.status === 504 || (erro.status >= 500 && erro.semCorpo);
 }
 
 /** Texto para a faixa de erro: título e detalhe quando houver, sem repetir. */
@@ -157,7 +174,7 @@ export function createApi(opcoes: ApiOptions = {}) {
     const status = resposta.status;
     const titulo = problema?.title ?? tituloPadrao(status);
     const detalhe = problema?.detail ?? (problema ? null : detalhePadrao(status));
-    return new ApiError(status, titulo, detalhe, typeof problema?.code === 'string' ? problema.code : null);
+    return new ApiError(status, titulo, detalhe, typeof problema?.code === 'string' ? problema.code : null, problema === null);
   }
 
   /** Executa uma ação com efeito, com o requestId guardado por chave (ver `idsPendentes`). */
@@ -196,6 +213,9 @@ export function createApi(opcoes: ApiOptions = {}) {
     obterConversa: (itemId: string) => requisitar<Conversation>('GET', `${rotaItem(itemId)}/conversation`),
     obterMensagens: (itemId: string, p: MessagesParams = {}) =>
       requisitar<Page<Message>>('GET', `${rotaItem(itemId)}/messages`, { consulta: { take: p.take, order: p.order } }),
+
+    // ---- Canais: aviso de contas com envio pausado (aviso secundário: quem chama não mostra erro dele)
+    listarAlertasDeEnvio: () => requisitar<SendingAlert[]>('GET', '/channels/sending-alerts'),
 
     // ---- Presença
     obterPresenca: () => requisitar<AgentPresence>('GET', '/contact-center/me/presence'),

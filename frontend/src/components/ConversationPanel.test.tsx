@@ -221,7 +221,7 @@ describe('ConversationPanel: o que o atendente pode fazer', () => {
     expect(screen.queryByRole('button', { name: 'Assumir' })).toBeNull();
   });
 
-  it('conflito ao assumir: mostra título e detalhe da API e relê o estado', async () => {
+  it('conflito ao assumir: explica que outro atendente assumiu (sem faixa de erro) e relê o estado', async () => {
     const f = cenario(AGUARDANDO, [], () => ({
       [`POST /contact-center/items/${ID}/claim`]: problema(409, 'Conflito', 'Outro atendente assumiu a conversa.', 'AlreadyAssigned'),
     }));
@@ -231,8 +231,9 @@ describe('ConversationPanel: o que o atendente pode fazer', () => {
 
     await usuario.click(await screen.findByRole('button', { name: 'Assumir' }));
 
-    await waitFor(() => expect(aoErroDeAcao).toHaveBeenCalledWith('Conflito: Outro atendente assumiu a conversa.'));
+    expect(await screen.findByText(/Outro atendente assumiu este atendimento antes de você/)).toBeTruthy();
     await waitFor(() => expect(chamadasDe(f, ROTA_ITEM).length).toBeGreaterThanOrEqual(2));
+    expect(aoErroDeAcao).not.toHaveBeenCalledWith(expect.any(String)); // perder a corrida não é erro: a nota basta
   });
 
   it('claim ainda não confirmado (202, Pending): avisa para repetir e mantém o botão', async () => {
@@ -387,7 +388,7 @@ describe('ConversationPanel: responder', () => {
     await usuario.type(campo, 'Olá');
     await usuario.click(screen.getByRole('button', { name: 'Responder' }));
 
-    await waitFor(() => expect(aoErroDeAcao).toHaveBeenCalledWith('Regra não atendida: A janela de atendimento terminou.'));
+    await waitFor(() => expect(aoErroDeAcao).toHaveBeenCalledWith('Regra não atendida: A janela de atendimento terminou.', false));
     expect(campo.value).toBe('Olá');
     expect((screen.getByRole('button', { name: 'Responder' }) as HTMLButtonElement).disabled).toBe(false);
   });

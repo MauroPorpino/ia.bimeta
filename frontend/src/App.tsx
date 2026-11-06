@@ -1,21 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createApi, descreverErro, type ApiClient } from './api/client';
+import { createApi, descreverErro, ehFalhaDeConexao, type ApiClient } from './api/client';
 import { aoSair, encerrarSessaoLocal, restaurarSessao } from './api/session';
-import type { CurrentUser } from './api/types';
+import type { CurrentUser, SendingAlert } from './api/types';
+import { AlertasDeEnvio } from './components/AlertasDeEnvio';
+import { ConexaoBanner } from './components/ConexaoBanner';
 import { ConversationPanel } from './components/ConversationPanel';
 import { ErrorBanner, type Aviso } from './components/ErrorBanner';
 import { LoginScreen } from './components/LoginScreen';
 import { QueuePanel } from './components/QueuePanel';
-import { useNomesDosContatos } from './hooks';
+import { useCacheDeConversas, useEstadoDaConexao, useNomesDosContatos, usePolling } from './hooks';
 
 interface AppProps {
   /** Para testes. Por padrão, o cliente real (via proxy `/api`). */
   api?: ApiClient;
   intervaloFilaMs?: number;
   intervaloConversaMs?: number;
+  intervaloAlertasMs?: number;
 }
 
-export function App({ api: apiFornecida, intervaloFilaMs, intervaloConversaMs }: AppProps) {
+export function App({ api: apiFornecida, intervaloFilaMs, intervaloConversaMs, intervaloAlertasMs }: AppProps) {
   const api = useMemo(() => apiFornecida ?? createApi(), [apiFornecida]);
   const [autenticado, setAutenticado] = useState(() => restaurarSessao() !== null);
   const [avisoDeEntrada, setAvisoDeEntrada] = useState<string | null>(null);
@@ -45,7 +48,15 @@ export function App({ api: apiFornecida, intervaloFilaMs, intervaloConversaMs }:
     );
   }
 
-  return <Atendimento api={api} saidaManual={saidaManual} intervaloFilaMs={intervaloFilaMs} intervaloConversaMs={intervaloConversaMs} />;
+  return (
+    <Atendimento
+      api={api}
+      saidaManual={saidaManual}
+      intervaloFilaMs={intervaloFilaMs}
+      intervaloConversaMs={intervaloConversaMs}
+      intervaloAlertasMs={intervaloAlertasMs}
+    />
+  );
 }
 
 interface AtendimentoProps {
@@ -53,40 +64,60 @@ interface AtendimentoProps {
   saidaManual: { current: boolean };
   intervaloFilaMs?: number;
   intervaloConversaMs?: number;
+  intervaloAlertasMs?: number;
+}
+
+interface ErroDeRede {
+  texto: string;
+  /** A API nem foi alcançada: vira a faixa de conexão, não uma linha de erro. */
+  semConexao: boolean;
 }
 
 /** A área logada: cabeçalho, faixa de erros e as duas colunas (fila à esquerda, conversa à direita). */
-function Atendimento({ api, saidaManual, intervaloFilaMs, intervaloConversaMs }: AtendimentoProps) {
+function Atendimento({ api, saidaManual, intervaloFilaMs, intervaloConversaMs, intervaloAlertasMs = 15_000 }: AtendimentoProps) {
   const [me, setMe] = useState<CurrentUser | null>(null);
   const [erroAoCarregarUsuario, setErroAoCarregarUsuario] = useState<string | null>(null);
   const [tentativa, setTentativa] = useState(0);
   const [itemSelecionado, setItemSelecionado] = useState<string | null>(null);
   const [versaoDaLista, setVersaoDaLista] = useState(0);
-  const [errosDeRede, setErrosDeRede] = useState<Record<string, string>>({});
-  const [erroDeAcao, setErroDeAcao] = useState<string | null>(null);
+  const [errosDeRede, setErrosDeRede] = useState<Record<string, ErroDeRede>>({});
+  const [erroDeAcao, setErroDeAcao] = useState<ErroDeRede | null>(null);
+  const [alertasDeEnvio, setAlertasDeEnvio] = useState<SendingAlert[]>([]);
   const { nomes, garantir } = useNomesDosContatos(api);
+  // Histórico e rascunhos de todas as conversas abertas nesta sessão: trocar de atendimento e voltar não perde nada.
+  const cache = useCacheDeConversas();
+  const semConexao = Object.values(errosDeRede).some((e) => e.semConexao);
+  const { estado: estadoDaConexao, pulso } = useEstadoDaConexao(semConexao);
 
   useEffect(() => {
     let vivo = true;
-    setErroAoCarregarUsuario(null);
+    let temporizador: ReturnType<typeof setTimeout> | undefined;
     api
       .me()
       .then((usuario) => {
         if (vivo) {
+          setErroAoCarregarUsuario(null);
           setMe(usuario);
         }
       })
       .catch((erro: unknown) => {
         if (vivo) {
           setErroAoCarregarUsuario(descreverErro(erro));
+          if (ehFalhaDeConexao(erro)) {
+            // API fora ao abrir a tela: tenta de novo sozinho (o botão "Tentar novamente" continua valendo).
+            temporizador = setTimeout(() => setTentativa((t) => t + 1), intervaloFilaMs ?? 3000);
+          }
         }
       });
     return () => {
       vivo = false;
+      if (temporizador !== undefined) {
+        clearTimeout(temporizador);
+      }
     };
-  }, [api, tentativa]);
+  }, [api, tentativa, intervaloFilaMs]);
 
-  const aoErroDeRede = useCallback((origem: string, texto: string | null) => {
+  const aoErroDeRede = useCallback((origem: string, texto: string | null, semConexaoComApi = false) => {
     setErrosDeRede((atual) => {
       if (texto === null) {
         if (!(origem in atual)) {
@@ -95,11 +126,22 @@ function Atendimento({ api, saidaManual, intervaloFilaMs, intervaloConversaMs }:
         const { [origem]: _removido, ...resto } = atual;
         return resto;
       }
-      return atual[origem] === texto ? atual : { ...atual, [origem]: texto };
+      const anterior = atual[origem];
+      return anterior?.texto === texto && anterior.semConexao === semConexaoComApi
+        ? atual
+        : { ...atual, [origem]: { texto, semConexao: semConexaoComApi } };
     });
   }, []);
 
-  const aoErroDeAcao = useCallback((texto: string | null) => setErroDeAcao(texto), []);
+  const aoErroDeAcao = useCallback((texto: string | null, semConexaoComApi = false) => setErroDeAcao(texto === null ? null : { texto, semConexao: semConexaoComApi }), []);
+
+  // O erro de uma ação que falhou por falta de conexão perde o sentido quando a conexão volta: some sozinho.
+  useEffect(() => {
+    if (estadoDaConexao === 'restabelecida') {
+      setErroDeAcao((atual) => (atual?.semConexao ? null : atual));
+    }
+  }, [estadoDaConexao]);
+
   const aoAlterar = useCallback(() => setVersaoDaLista((v) => v + 1), []);
 
   async function sair() {
@@ -112,10 +154,31 @@ function Atendimento({ api, saidaManual, intervaloFilaMs, intervaloConversaMs }:
     encerrarSessaoLocal();
   }
 
-  // Vários carregamentos periódicos falham juntos quando a API cai: a faixa mostra cada mensagem uma vez só.
+  // O aviso de contas de WhatsApp pausadas é secundário: se a consulta falha (API fora, versão antiga), a tela segue sem erro e com o último aviso.
+  usePolling(
+    async (ativo) => {
+      try {
+        const lista = await api.listarAlertasDeEnvio();
+        if (ativo()) {
+          setAlertasDeEnvio(Array.isArray(lista) ? lista : []);
+        }
+      } catch {
+        // mantém o último aviso conhecido
+      }
+    },
+    intervaloAlertasMs,
+    pulso,
+  );
+
+  // Vários carregamentos periódicos falham juntos quando a API cai: a faixa mostra cada mensagem uma vez só. Falha de
+  // conexão não entra aqui: ela tem a faixa própria de reconexão.
   const avisos: Aviso[] = [
-    ...[...new Set(Object.values(errosDeRede))].map((texto) => ({ id: `rede-${texto}`, texto, dispensavel: false })),
-    ...(erroDeAcao ? [{ id: 'acao', texto: erroDeAcao, dispensavel: true }] : []),
+    ...[...new Set(Object.values(errosDeRede).filter((e) => !e.semConexao).map((e) => e.texto))].map((texto) => ({
+      id: `rede-${texto}`,
+      texto,
+      dispensavel: false,
+    })),
+    ...(erroDeAcao ? [{ id: 'acao', texto: erroDeAcao.texto, dispensavel: true }] : []),
     ...(erroAoCarregarUsuario ? [{ id: 'usuario', texto: erroAoCarregarUsuario, dispensavel: false }] : []),
   ];
 
@@ -137,7 +200,9 @@ function Atendimento({ api, saidaManual, intervaloFilaMs, intervaloConversaMs }:
         </div>
       </header>
 
+      <ConexaoBanner estado={estadoDaConexao} />
       <ErrorBanner avisos={avisos} onDispensar={dispensar} />
+      <AlertasDeEnvio alertas={alertasDeEnvio} />
 
       {me === null ? (
         <main className="carregando">
@@ -160,7 +225,7 @@ function Atendimento({ api, saidaManual, intervaloFilaMs, intervaloConversaMs }:
             garantirNomes={garantir}
             onErroDeRede={aoErroDeRede}
             onErroDeAcao={aoErroDeAcao}
-            versaoDaLista={versaoDaLista}
+            versaoDaLista={versaoDaLista + pulso}
             intervaloMs={intervaloFilaMs}
           />
           {itemSelecionado ? (
@@ -174,6 +239,9 @@ function Atendimento({ api, saidaManual, intervaloFilaMs, intervaloConversaMs }:
               onErroDeAcao={aoErroDeAcao}
               onAlterado={aoAlterar}
               onVoltar={() => setItemSelecionado(null)}
+              cache={cache}
+              alertasDeEnvio={alertasDeEnvio}
+              pulso={pulso}
               intervaloMs={intervaloConversaMs}
             />
           ) : (

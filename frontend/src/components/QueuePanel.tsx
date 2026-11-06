@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { descreverErro, type ApiClient } from '../api/client';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { descreverErro, ehFalhaDeConexao, type ApiClient } from '../api/client';
 import type { AgentPresence, AgentStatus, CurrentUser, QueueItem, ServiceQueue } from '../api/types';
 import { ROTULO_PRESENCA, rotuloSemNome, situacaoDoItem, tempoDecorrido } from '../format';
 import { usePolling } from '../hooks';
@@ -13,10 +13,10 @@ interface Props {
   onSelecionar: (itemId: string) => void;
   nomes: Record<string, string>;
   garantirNomes: (itemIds: string[]) => void;
-  /** Erro de carregamento periódico (some sozinho quando o polling se recupera). `null` limpa. */
-  onErroDeRede: (origem: string, texto: string | null) => void;
+  /** Erro de carregamento periódico (some sozinho quando o polling se recupera). `null` limpa. `semConexao`: a API nem foi alcançada. */
+  onErroDeRede: (origem: string, texto: string | null, semConexao?: boolean) => void;
   /** Erro de uma ação do atendente (fica até ser dispensado). */
-  onErroDeAcao: (texto: string | null) => void;
+  onErroDeAcao: (texto: string | null, semConexao?: boolean) => void;
   /** Muda para forçar uma releitura imediata (depois de uma ação na conversa). */
   versaoDaLista: number;
   intervaloMs?: number;
@@ -26,6 +26,17 @@ const POR_ABA: Record<Aba, { rotulo: string; vazio: string }> = {
   waiting: { rotulo: 'Aguardando', vazio: 'Nenhum atendimento aguardando.' },
   mine: { rotulo: 'Meus', vazio: 'Você não tem atendimentos em andamento.' },
 };
+
+/** "Aguardando (3)": o contador só aparece quando há conversas. Um texto só, para o nome acessível da aba sair inteiro. */
+function rotuloDaAba(aba: Aba, quantidade: number): string {
+  return quantidade > 0 ? `${POR_ABA[aba].rotulo} (${quantidade})` : POR_ABA[aba].rotulo;
+}
+
+/** O título da aba do navegador com a contagem de conversas esperando na frente, sem acumular prefixos. */
+function tituloComContagem(base: string, aguardando: number): string {
+  const limpo = base.replace(/^\(\d+\)\s*/, '');
+  return aguardando > 0 ? `(${aguardando}) ${limpo}`.trim() : limpo;
+}
 
 export function QueuePanel({
   api,
@@ -42,80 +53,83 @@ export function QueuePanel({
   const [aba, setAba] = useState<Aba>('waiting');
   const [filaId, setFilaId] = useState('');
   const [filas, setFilas] = useState<ServiceQueue[]>([]);
-  const [itens, setItens] = useState<QueueItem[] | null>(null);
+  // As duas listas são lidas juntas a cada ciclo: o contador da outra aba avisa de uma conversa nova mesmo com o atendente em "Meus".
+  const [listas, setListas] = useState<Record<Aba, QueueItem[] | null>>({ waiting: null, mine: null });
   const [presenca, setPresenca] = useState<AgentPresence | null>(null);
   const [mudandoPresenca, setMudandoPresenca] = useState(false);
 
-  // Filas do atendente e presença: uma vez ao abrir.
-  useEffect(() => {
-    let vivo = true;
-    api
-      .listarMinhasFilas()
-      .then((lista) => {
-        if (vivo) {
-          setFilas(lista);
-          onErroDeRede('filas', null);
-        }
-      })
-      .catch((erro: unknown) => {
-        if (vivo) {
-          onErroDeRede('filas', descreverErro(erro));
-        }
-      });
-    api
-      .obterPresenca()
-      .then((p) => {
-        if (vivo) {
-          setPresenca(p);
-          onErroDeRede('presenca', null);
-        }
-      })
-      .catch((erro: unknown) => {
-        if (vivo) {
-          onErroDeRede('presenca', descreverErro(erro));
-        }
-      });
-    return () => {
-      vivo = false;
-    };
-  }, [api, onErroDeRede]);
+  // Filas do atendente e presença são lidas uma vez, mas a leitura se REPETE a cada ciclo enquanto não der certo: com a API fora
+  // ao abrir a tela, o erro (e a faixa de conexão) sairia sozinho na volta, em vez de ficar preso.
+  const filasCarregadas = useRef(false);
+  const presencaCarregada = useRef(false);
 
-  // A lista: a cada 3 s, e na hora quando a aba, o filtro ou a versão mudam.
+  // As listas: a cada 3 s, e na hora quando o filtro ou a versão mudam (uma ação na conversa, a conexão que voltou).
   usePolling(
     async (ativo) => {
+      if (!filasCarregadas.current) {
+        try {
+          const lista = await api.listarMinhasFilas();
+          if (ativo()) {
+            filasCarregadas.current = true;
+            setFilas(lista);
+            onErroDeRede('filas', null);
+          }
+        } catch (erro) {
+          if (ativo()) {
+            onErroDeRede('filas', descreverErro(erro), ehFalhaDeConexao(erro));
+          }
+        }
+      }
+      if (!presencaCarregada.current) {
+        try {
+          const p = await api.obterPresenca();
+          if (ativo()) {
+            presencaCarregada.current = true;
+            setPresenca(p);
+            onErroDeRede('presenca', null);
+          }
+        } catch (erro) {
+          if (ativo()) {
+            onErroDeRede('presenca', descreverErro(erro), ehFalhaDeConexao(erro));
+          }
+        }
+      }
       try {
-        const lista = await api.listarItens({
-          status: aba === 'waiting' ? 'Waiting' : 'Assigned',
-          assignedToMe: aba === 'mine',
-          queueId: filaId || undefined,
-          take: 50,
-        });
+        const [aguardando, meus] = await Promise.all([
+          api.listarItens({ status: 'Waiting', queueId: filaId || undefined, take: 50 }),
+          api.listarItens({ status: 'Assigned', assignedToMe: true, queueId: filaId || undefined, take: 50 }),
+        ]);
         if (ativo()) {
-          setItens(lista);
+          setListas({ waiting: aguardando, mine: meus });
           onErroDeRede('fila', null);
-          garantirNomes(lista.map((i) => i.id));
+          garantirNomes([...aguardando, ...meus].map((i) => i.id));
         }
       } catch (erro) {
         if (ativo()) {
-          onErroDeRede('fila', descreverErro(erro));
+          onErroDeRede('fila', descreverErro(erro), ehFalhaDeConexao(erro));
         }
       }
     },
     intervaloMs,
-    `${aba}|${filaId}|${versaoDaLista}`,
+    `${filaId}|${versaoDaLista}`,
   );
+
+  const itens = listas[aba];
+  const aguardandoAgora = listas.waiting?.length ?? 0;
+
+  // O título da aba do navegador mostra quantas conversas esperam: o atendente que está em outra janela vê que chegou trabalho.
+  useEffect(() => {
+    const original = tituloComContagem(document.title, 0);
+    document.title = tituloComContagem(original, aguardandoAgora);
+    return () => {
+      document.title = original;
+    };
+  }, [aguardandoAgora]);
 
   const nomeDaFila = useMemo(() => new Map(filas.map((f) => [f.id, f.name])), [filas]);
 
-  function trocarAba(nova: Aba) {
-    if (nova !== aba) {
-      setItens(null);
-      setAba(nova);
-    }
-  }
-
   function trocarFila(id: string) {
-    setItens(null);
+    setListas({ waiting: null, mine: null });
     setFilaId(id);
   }
 
@@ -128,7 +142,7 @@ export function QueuePanel({
       setPresenca(await api.definirPresenca(status));
       onErroDeAcao(null);
     } catch (erro) {
-      onErroDeAcao(descreverErro(erro));
+      onErroDeAcao(descreverErro(erro), ehFalhaDeConexao(erro));
     } finally {
       setMudandoPresenca(false);
     }
@@ -166,9 +180,9 @@ export function QueuePanel({
             aria-selected={aba === chave}
             aria-controls="lista-itens"
             className={aba === chave ? 'aba ativa' : 'aba'}
-            onClick={() => trocarAba(chave)}
+            onClick={() => setAba(chave)}
           >
-            {POR_ABA[chave].rotulo}
+            {rotuloDaAba(chave, listas[chave]?.length ?? 0)}
           </button>
         ))}
       </div>

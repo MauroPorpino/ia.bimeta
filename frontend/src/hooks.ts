@@ -1,6 +1,72 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ApiClient } from './api/client';
 import { ApiError } from './api/client';
+import { CacheDeConversas } from './cache';
+
+/** Uma memória de conversas e rascunhos por montagem da área logada (some no logout). */
+export function useCacheDeConversas(): CacheDeConversas {
+  const ref = useRef<CacheDeConversas | null>(null);
+  ref.current ??= new CacheDeConversas();
+  return ref.current;
+}
+
+export type EstadoDaConexao = 'online' | 'offline' | 'restabelecida';
+
+const MS_DA_FAIXA_RESTABELECIDA = 4000;
+
+/**
+ * O estado da conexão com a API, visto pelos carregamentos periódicos (`semConexao`: algum falhou por não alcançar o
+ * servidor) e pelo próprio navegador (eventos online/offline). Quando a conexão volta, mostra "restabelecida" por
+ * alguns segundos e devolve um `pulso` novo, que o chamador usa para reler tudo na hora, sem esperar o próximo ciclo.
+ * O pulso também muda quando a aba volta a ficar visível (o navegador atrasa os temporizadores das abas escondidas).
+ */
+export function useEstadoDaConexao(semConexao: boolean): { estado: EstadoDaConexao; pulso: number } {
+  const [navegadorOffline, setNavegadorOffline] = useState(() => typeof navigator !== 'undefined' && navigator.onLine === false);
+  const [restabelecida, setRestabelecida] = useState(false);
+  const [pulso, setPulso] = useState(0);
+  const estavaSemConexao = useRef(false);
+
+  const fora = semConexao || navegadorOffline;
+
+  useEffect(() => {
+    const voltou = () => {
+      setNavegadorOffline(false);
+      setPulso((p) => p + 1);
+    };
+    const caiu = () => setNavegadorOffline(true);
+    const visivel = () => {
+      if (document.visibilityState === 'visible') {
+        setPulso((p) => p + 1);
+      }
+    };
+    window.addEventListener('online', voltou);
+    window.addEventListener('offline', caiu);
+    document.addEventListener('visibilitychange', visivel);
+    return () => {
+      window.removeEventListener('online', voltou);
+      window.removeEventListener('offline', caiu);
+      document.removeEventListener('visibilitychange', visivel);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (fora) {
+      estavaSemConexao.current = true;
+      setRestabelecida(false);
+      return undefined;
+    }
+    if (!estavaSemConexao.current) {
+      return undefined;
+    }
+    estavaSemConexao.current = false;
+    setRestabelecida(true);
+    setPulso((p) => p + 1);
+    const temporizador = setTimeout(() => setRestabelecida(false), MS_DA_FAIXA_RESTABELECIDA);
+    return () => clearTimeout(temporizador);
+  }, [fora]);
+
+  return { estado: fora ? 'offline' : restabelecida ? 'restabelecida' : 'online', pulso };
+}
 
 /**
  * Chama `carregar` agora e, depois de cada conclusão, de novo após `intervaloMs` (polling sem sobreposição e sem WebSocket).

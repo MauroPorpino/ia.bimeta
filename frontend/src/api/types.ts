@@ -147,6 +147,22 @@ export interface ActionResult {
   messageId?: string;
 }
 
+// ---------------------------------------------------------------- Channels
+
+/**
+ * Conta de WhatsApp com o envio pausado ou esperando o provedor (GET /channels/sending-alerts, ADR 0022). Traz só o que
+ * explica a demora de uma resposta: nunca o motivo técnico da pausa, a vazão nem credencial.
+ */
+export interface SendingAlert {
+  accountId: string;
+  accountName: string;
+  paused: boolean;
+  /** Enquanto não passar deste instante, o provedor mandou a conta esperar (limite de taxa). */
+  cooldownUntil: string | null;
+  /** Os números da conta (`Message.channelInstanceId`). */
+  channelInstanceIds: string[];
+}
+
 // ---------------------------------------------------------------- Conversations
 
 export type MessageDirection = 'Inbound' | 'Outbound';

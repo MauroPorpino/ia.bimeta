@@ -87,15 +87,48 @@ describe('QueuePanel', () => {
     renderizar();
     await screen.findByRole('button', { name: /Mauro/ });
 
-    await usuario.click(screen.getByRole('tab', { name: 'Meus' }));
+    await usuario.click(await screen.findByRole('tab', { name: /^Meus/ }));
 
     const botao = await screen.findByRole('button', { name: /Pedro/ });
     expect(botao.textContent).toContain('Com você');
     expect(botao.textContent).toContain('há 2 h 10 min');
     expect(screen.queryByRole('button', { name: /Mauro/ })).toBeNull();
     const consultas = chamadasDe(f, 'GET /contact-center/items').map((c) => Object.fromEntries(c.consulta));
-    expect(consultas.at(-1)).toEqual({ status: 'Assigned', assignedToMe: 'true', take: '50' });
-    expect(screen.getByRole('tab', { name: 'Meus' }).getAttribute('aria-selected')).toBe('true');
+    expect(consultas).toContainEqual({ status: 'Assigned', assignedToMe: 'true', take: '50' });
+    expect(screen.getByRole('tab', { name: /^Meus/ }).getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('lê as duas listas juntas: o contador de cada aba aparece e a troca de aba não pisca nem refaz o pedido', async () => {
+    const f = rotasBase();
+    vi.stubGlobal('fetch', f);
+    const usuario = userEvent.setup();
+    renderizar();
+
+    expect((await screen.findByRole('tab', { name: 'Aguardando (1)' })).getAttribute('aria-selected')).toBe('true');
+    expect(await screen.findByRole('tab', { name: 'Meus (1)' })).toBeTruthy();
+    const pedidosAntes = chamadasDe(f, 'GET /contact-center/items').length;
+
+    await usuario.click(screen.getByRole('tab', { name: 'Meus (1)' }));
+
+    expect(screen.getByRole('button', { name: /Pedro/ })).toBeTruthy(); // na hora, sem "Carregando..."
+    expect(chamadasDe(f, 'GET /contact-center/items')).toHaveLength(pedidosAntes);
+  });
+
+  it('chegou conversa nova enquanto o atendente está em "Meus": o contador de "Aguardando" sobe e o título da página avisa', async () => {
+    let aguardando: QueueItem[] = [AGUARDANDO];
+    vi.stubGlobal('fetch', rotasBase({ 'GET /contact-center/items': ({ consulta }) => json(consulta.get('status') === 'Assigned' ? [MEU] : aguardando) }));
+    const usuario = userEvent.setup();
+    const tituloOriginal = 'Atendimento - ia.bimeta';
+    document.title = tituloOriginal;
+    const { unmount } = renderizar({ intervaloMs: 20 });
+    await usuario.click(await screen.findByRole('tab', { name: /^Meus/ }));
+
+    aguardando = [AGUARDANDO, item({ id: '10000000-0000-4000-8000-000000000009' })];
+
+    expect(await screen.findByRole('tab', { name: 'Aguardando (2)' })).toBeTruthy();
+    await waitFor(() => expect(document.title).toBe(`(2) ${tituloOriginal}`));
+    unmount();
+    expect(document.title).toBe(tituloOriginal);
   });
 
   it('filtra por fila usando as filas do atendente', async () => {
@@ -162,14 +195,64 @@ describe('QueuePanel', () => {
     vi.stubGlobal('fetch', rotasBase({ 'GET /contact-center/items': problema(403, 'Acesso negado', 'Você não tem permissão para esta operação.') }));
     const { aoErroDeRede } = renderizar();
 
-    await waitFor(() => expect(aoErroDeRede).toHaveBeenCalledWith('fila', 'Acesso negado: Você não tem permissão para esta operação.'));
+    await waitFor(() => expect(aoErroDeRede).toHaveBeenCalledWith('fila', 'Acesso negado: Você não tem permissão para esta operação.', false));
     expect(screen.getByRole('tab', { name: 'Aguardando' })).toBeTruthy();
   });
 
-  it('com a API fora do ar, a faixa recebe o erro de rede', async () => {
+  it('com a API fora do ar, avisa que é falta de conexão (a área logada mostra a faixa de reconexão)', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
     const { aoErroDeRede } = renderizar();
 
-    await waitFor(() => expect(aoErroDeRede).toHaveBeenCalledWith('fila', expect.stringContaining('Sem conexão com a API')));
+    await waitFor(() => expect(aoErroDeRede).toHaveBeenCalledWith('fila', expect.stringContaining('Sem conexão com a API'), true));
+  });
+
+  it('API fora ao abrir a tela: filas e presença são lidas de novo quando ela volta, e os erros de conexão saem (nada fica preso)', async () => {
+    let fora = true;
+    const base = rotasBase();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof fetch>(async (entrada, init) => {
+        if (fora) {
+          throw new TypeError('Failed to fetch');
+        }
+        return base(entrada, init);
+      }),
+    );
+    const { aoErroDeRede } = renderizar({ intervaloMs: 20 });
+    await waitFor(() => expect(aoErroDeRede).toHaveBeenCalledWith('filas', expect.stringContaining('Sem conexão'), true));
+    await waitFor(() => expect(aoErroDeRede).toHaveBeenCalledWith('presenca', expect.stringContaining('Sem conexão'), true));
+
+    fora = false;
+
+    await waitFor(() => expect(aoErroDeRede).toHaveBeenCalledWith('filas', null));
+    await waitFor(() => expect(aoErroDeRede).toHaveBeenCalledWith('presenca', null));
+    await waitFor(() => expect(aoErroDeRede).toHaveBeenCalledWith('fila', null));
+    expect(within(screen.getByLabelText('Fila')).getByRole('option', { name: 'Atendimento geral' })).toBeTruthy();
+    expect((screen.getByLabelText('Minha presença') as HTMLSelectElement).value).toBe('Offline');
+  });
+
+  it('filas e presença já lidas não são pedidas de novo a cada ciclo', async () => {
+    const f = rotasBase();
+    vi.stubGlobal('fetch', f);
+    renderizar({ intervaloMs: 20 });
+    await screen.findByRole('button', { name: /Mauro/ });
+    await new Promise((resolve) => setTimeout(resolve, 150)); // vários ciclos
+
+    expect(chamadasDe(f, 'GET /contact-center/me/queues')).toHaveLength(1);
+    expect(chamadasDe(f, 'GET /contact-center/me/presence')).toHaveLength(1);
+    expect(chamadasDe(f, 'GET /contact-center/items').length).toBeGreaterThan(2);
+  });
+
+  it('erro HTTP da API não é falta de conexão: a lista que já estava na tela continua', async () => {
+    let falhar = false;
+    const f = rotasBase({ 'GET /contact-center/items': () => (falhar ? problema(500, 'Erro no servidor') : json([AGUARDANDO])) });
+    vi.stubGlobal('fetch', f);
+    const { aoErroDeRede } = renderizar({ intervaloMs: 20 });
+    await screen.findByRole('button', { name: /Mauro/ });
+
+    falhar = true;
+
+    await waitFor(() => expect(aoErroDeRede).toHaveBeenCalledWith('fila', expect.stringContaining('Erro no servidor'), false));
+    expect(screen.getByRole('button', { name: /Mauro/ })).toBeTruthy();
   });
 });
