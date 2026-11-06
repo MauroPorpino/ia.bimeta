@@ -84,7 +84,7 @@ Só com a prontidão **aprovada com `-Live`**: ative o número (`.\tools\ops\Con
 
 ## 5. Operação: vazão, limite de taxa e pausa
 
-- **Vazão (SND-2):** balde de fichas **por conta**, guardado no banco (vale entre instâncias do Worker). Padrão 80 mensagens/s; ajuste por conta com `PUT /channels/accounts/{id}/sending/throughput` `{"messagesPerSecond": 20}` (1 a 1000; `null` volta ao padrão). Uma espera curta é feita dentro do envio; uma espera longa devolve a entrega ao relay.
+- **Vazão (SND-2):** balde de fichas **por conta**, guardado no banco (vale entre instâncias do Worker). Padrão 80 mensagens/s; ajuste por conta com `PUT /channels/accounts/{id}/sending/throughput` `{"messagesPerSecond": 20}` (1 a 1000; `null` volta ao padrão). Uma espera curta é feita dentro do envio; uma espera longa **adia** a entrega no relay (`Defer`) **sem gastar tentativa**. A mensagem tem **validade operacional** (`Channels:Sending:MaxQueueAge`, 15 min): passou dela esperando, falha de forma visível (`expired`) em vez de ficar parada.
 - **Limite de taxa da Meta (429):** os códigos de limite da conta (130429, 80007, 4) e qualquer HTTP 429 com corpo de erro completo fazem a **conta inteira** esperar o `Retry-After` (ou 5 s, no máximo 5 min), sem gastar tentativa das outras conversas; a mensagem é repetida (até 3 chamadas). O limite do **par** remetente–destinatário (131056, 1 mensagem a cada 6 s para o mesmo cliente) repete só aquela mensagem.
 - **Resultado ambíguo** (tempo esgotado, 5xx, 429 sem corpo de erro): `SendUnknown`, **nunca** reenviado automaticamente.
 - **Pausa (SND-6):** erro que atinge a **conta** (token expirado/inválido 190/0, permissão 3/10, conta restrita 368, HTTP 401/403) **pausa a conta**. Pausada, as próximas mensagens **falham na hora** (`account-paused`, visíveis ao atendente) e **não chegam à Meta**. O erro fica na auditoria e na métrica `channels.account.paused`.
@@ -97,6 +97,26 @@ Só com a prontidão **aprovada com `-Live`**: ative o número (`.\tools\ops\Con
 3. `Test-ProntidaoWhatsApp.ps1 -Live` até passar.
 4. **Retome:** `POST /channels/accounts/{id}/sending/resume`. A retomada **só ocorre** se o provedor aceitar o token para cada número ativo (uma leitura, nenhuma mensagem); senão responde 409 e a conta continua pausada. A vazão volta de forma gradual (o balde recomeça com 1 ficha).
 5. As mensagens que falharam **não são reenviadas sozinhas**: o atendente responde de novo ao cliente.
+
+## 5.1 Diagnóstico do envio (rotina diária e de incidente)
+
+```powershell
+.\tools\ops\Get-DiagnosticoDeEnvio.ps1 -Url https://atendimento.exemplo.com.br -Tenant meu-tenant -Email admin@meu.com
+```
+
+Somente leitura. Mostra as **contas pausadas** ou esperando a Meta, as **mensagens que pedem atenção**, as contagens da janela (24 h por padrão) e as **entradas mortas**. Código de saída **0** (nada a apontar), **1** (só falhas definitivas ou envios incertos: alguém precisa ver) ou **2** (problema estrutural). Nunca traz texto de mensagem nem credencial.
+
+| Problema | O que significa | O que fazer |
+|---|---|---|
+| `stale-before-sender` | O Conversations liberou a mensagem e ela **não chegou ao Sender** (evento pendente ou morto no relay) | Confira o Worker (no ar? relay do Conversations?); o relay trata mortos sozinho e a falha aparece ao atendente |
+| `stale-at-sender` / `stuck-dispatching` | Chegou ao Sender e está sem desfecho / parada | Espera por vazão ou conta limitada (veja `accounts`); persistindo, reinicie o Worker: o novo Worker decide pelo que está gravado |
+| `unnotified` | Desfecho gravado e ainda não informado ao Conversations | O Sender repete a notificação na próxima entrega; persistindo, veja o Worker |
+| `send-unknown` | A Meta **pode** ter recebido (tempo esgotado, 5xx, processo que caiu no meio da chamada) | **Nunca reenvie às cegas.** Confira no aparelho do cliente / WhatsApp Manager; o atendente decide responder de novo |
+| `failed` | Falha definitiva. Códigos: `account-paused`, `account-error`, `window-closed`, `rate-limited`, `expired`, `relay-dead` | O atendente vê o selo "falha no envio" na fila e **responde de novo** |
+
+**Entrada morta** = mensagem do cliente que não chegou ao Conversations (o evento do webhook esgotou as tentativas). Depois de corrigir a causa: `Get-DiagnosticoDeEnvio.ps1 ... -ReenfileirarEntradaMorta <id do evento>` (auditado; a deduplicação por identificador do provedor impede duplicar).
+
+**O que o sistema faz sozinho quando um envio morre no relay** (ADR 0020): grava o estado final, informa o Conversations (que mostra `falha no envio` na mensagem) e o ContactCenter (selo na fila e aviso na conversa) **sem nunca chamar a Meta de novo**; se a chamada já tinha começado, o estado é `SendUnknown`, nunca falha afirmada. A falha **sai da fila** quando o atendente responde de novo.
 
 ## 6. Desfazer / parar
 

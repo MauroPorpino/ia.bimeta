@@ -1,6 +1,6 @@
 # ADR 0019 — Preparação para o WhatsApp real: vazão por conta (SND-2), pausa de conta (SND-6), sonda do número e teste de prontidão
 
-- **Status:** **Proposto para ratificação.** Implementado em 05/11/2026 sob a autorização do decisor para preparar a operação com o WhatsApp Cloud API real, com autonomia em decisões técnicas rotineiras. Nenhuma mensagem real foi enviada e nenhuma chamada à Meta foi feita: tudo foi provado contra a Graph API simulada.
+- **Status:** **Aceito para o MVP (ratificado pelo decisor em 05/11/2026).** Implementado em 05/11/2026 sob a autorização do decisor para preparar a operação com o WhatsApp Cloud API real, com autonomia em decisões técnicas rotineiras. Nenhuma mensagem real foi enviada e nenhuma chamada à Meta foi feita: tudo foi provado contra a Graph API simulada.
 - **Data:** 05/11/2026
 - **Decisor:** Mauro Porpino
 - **Referências:** ADR 0011 (A.2 itens 5, 7, 9 e 11; E), ADR 0018; `docs/architecture/BOUNDARIES.md` §12.4 (SND-2, SND-6) e §12.8; procedimento operacional em `docs/operations/WHATSAPP-CONEXAO-REAL.md`
@@ -28,7 +28,7 @@ O ADR 0018 deixou como pendências reais para operar com a Meta o **balde de fic
 - Verificação do **App Secret** sem um webhook real (a Meta só o prova ao entregar um webhook assinado) e do número de exibição contra o cadastro além do aviso.
 - Teste com o número de teste da Meta (5.2) e confirmação de `biz_opaque_callback_data` no envio.
 - Mensagens que falharam por pausa **não** são reenviadas sozinhas (o ADR 0009 8ª operação, `RequestDelegatedResend`, segue fora do MVP).
-- `Retry` do relay por espera longa gasta tentativas (`MaxAttempts` 8): um evento que esgote as tentativas vai aos mortos sem o Conversations ser avisado (limitação anterior do relay, agora mais exposta pela espera).
+- ~~`Retry` do relay por espera longa gasta tentativas; um evento que esgote as tentativas vai aos mortos sem o Conversations ser avisado~~ — **resolvido no ADR 0020** (`Defer` não gasta tentativa, com validade operacional; o relay trata os mortos e o Sender registra a falha final, visível ao atendente).
 
 ## Consequências
 
