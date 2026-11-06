@@ -9,6 +9,7 @@ import { ConversationPanel } from './components/ConversationPanel';
 import { ErrorBanner, type Aviso } from './components/ErrorBanner';
 import { LoginScreen } from './components/LoginScreen';
 import { QueuePanel } from './components/QueuePanel';
+import { TrocarSenha } from './components/TrocarSenha';
 import { useCacheDeConversas, useEstadoDaConexao, useNomesDosContatos, usePolling } from './hooks';
 
 interface AppProps {
@@ -79,6 +80,7 @@ function Atendimento({ api, saidaManual, intervaloFilaMs, intervaloConversaMs, i
   const [me, setMe] = useState<CurrentUser | null>(null);
   const [erroAoCarregarUsuario, setErroAoCarregarUsuario] = useState<string | null>(null);
   const [tentativa, setTentativa] = useState(0);
+  const [trocandoSenha, setTrocandoSenha] = useState(false);
   const [itemSelecionado, setItemSelecionado] = useState<string | null>(null);
   const [versaoDaLista, setVersaoDaLista] = useState(0);
   const [errosDeRede, setErrosDeRede] = useState<Record<string, ErroDeRede>>({});
@@ -220,11 +222,16 @@ function Atendimento({ api, saidaManual, intervaloFilaMs, intervaloConversaMs, i
         <h1>ia.bimeta - Atendimento</h1>
         <div className="topo-usuario">
           {me && <span>{me.displayName}</span>}
+          <button type="button" className="btn" aria-expanded={trocandoSenha} onClick={() => setTrocandoSenha((aberto) => !aberto)}>
+            Trocar senha
+          </button>
           <button type="button" className="btn" onClick={() => void sair()}>
             Sair
           </button>
         </div>
       </header>
+
+      {trocandoSenha && <TrocarSenha api={api} onFechar={() => setTrocandoSenha(false)} />}
 
       <ConexaoBanner estado={estadoDaConexao} />
       <ErrorBanner avisos={avisos} onDispensar={dispensar} />

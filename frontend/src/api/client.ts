@@ -3,6 +3,7 @@ import type {
   ActionResult,
   AgentPresence,
   AgentStatus,
+  ChangePasswordRequest,
   CloseRequest,
   Conversation,
   CurrentUser,
@@ -16,6 +17,7 @@ import type {
   QueueItem,
   QueueItemOperationResult,
   QueueItemStatus,
+  RedeemPasswordResetRequest,
   ReplyRequest,
   SendingAlert,
   ServiceQueue,
@@ -213,6 +215,9 @@ export function createApi(opcoes: ApiOptions = {}) {
     login: (pedido: LoginRequest) => requisitar<LoginResponse>('POST', '/auth/login', { corpo: pedido, semSessao: true }),
     me: () => requisitar<CurrentUser>('GET', '/auth/me'),
     logout: () => requisitar<void>('POST', '/auth/logout'),
+    // Troca da própria senha (exige a atual; as outras sessões caem e esta continua) e uso do token de redefinição (anônimo; todas as sessões da pessoa caem).
+    trocarSenha: (pedido: ChangePasswordRequest) => requisitar<void>('PUT', '/auth/me/password', { corpo: pedido }),
+    redefinirSenha: (pedido: RedeemPasswordResetRequest) => requisitar<void>('POST', '/auth/password-reset/redeem', { corpo: pedido, semSessao: true }),
 
     // ---- Fila
     listarMinhasFilas: () => requisitar<ServiceQueue[]>('GET', '/contact-center/me/queues'),

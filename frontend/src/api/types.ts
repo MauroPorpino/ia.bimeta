@@ -16,6 +16,20 @@ export interface LoginRequest {
   password: string;
 }
 
+/** Troca da PRÓPRIA senha (a atual é exigida). */
+export interface ChangePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
+}
+
+/** Uso do token de redefinição emitido pelo administrador ou pelo operador (anônimo). */
+export interface RedeemPasswordResetRequest {
+  tenant: string;
+  email: string;
+  token: string;
+  newPassword: string;
+}
+
 export interface LoginResponse {
   token: string;
   expiresAt: string;
