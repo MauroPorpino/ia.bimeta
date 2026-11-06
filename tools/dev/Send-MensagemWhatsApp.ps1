@@ -11,6 +11,9 @@
 .EXAMPLE
     .\tools\dev\Send-MensagemWhatsApp.ps1 -Texto 'Ola, tudo bem?'
     .\tools\dev\Send-MensagemWhatsApp.ps1 -Texto 'Quero falar com um atendente' -Nome 'Pedro' -Numero 5511988887777
+
+    # Uma conversa longa (130 mensagens do mesmo cliente), para ver o historico em paginas na interface:
+    .\tools\dev\Send-MensagemWhatsApp.ps1 -Texto 'mensagem' -Nome 'Historia' -Numero 5511999990301 -Quantidade 130
 #>
 [CmdletBinding()]
 param(
@@ -18,7 +21,10 @@ param(
     [string]$Nome = 'Mauro',
     [string]$Numero = '5511999990001',
     [string]$Url = 'http://localhost:5155',
-    [string]$Tenant = 'demo-ia'
+    [string]$Tenant = 'demo-ia',
+
+    # Quantas mensagens enviar (com mais de uma, cada texto ganha " (i/N)" e o id do provedor e unico).
+    [ValidateRange(1, 1000)][int]$Quantidade = 1
 )
 
 Set-StrictMode -Version Latest
@@ -32,8 +38,13 @@ catch {
     exit 1
 }
 
+$textoBase = $Texto
+$lote = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+for ($indice = 1; $indice -le $Quantidade; $indice++) {
+$Texto = $textoBase
+if ($Quantidade -gt 1) { $Texto = $textoBase + ' (' + $indice + '/' + $Quantidade + ')' }
 $agora = [DateTimeOffset]::UtcNow
-$idDaMensagem = 'wamid.SIM' + $agora.ToUnixTimeMilliseconds()
+$idDaMensagem = 'wamid.SIM' + $lote + '-' + $indice
 $payload = @{
     object = 'whatsapp_business_account'
     entry = @(@{
@@ -63,4 +74,5 @@ catch {
     if ($null -ne $_.Exception.Response) { $codigo = [int]$_.Exception.Response.StatusCode }
     Write-Host ('FALHA: o Receiver respondeu HTTP ' + $codigo + '.')
     exit 1
+}
 }

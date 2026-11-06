@@ -27,7 +27,7 @@ export function LoginScreen({ api, aviso, onEntrou }: Props) {
     setErro(null);
     try {
       const resposta = await api.login({ tenant: tenant.trim(), email: email.trim(), password: senha });
-      definirSessao(resposta.token, resposta.expiresAt);
+      definirSessao(resposta.token, resposta.expiresAt, tenant);
       setSenha('');
       onEntrou();
     } catch (falha) {

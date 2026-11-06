@@ -577,3 +577,78 @@ label {
   background: var(--erro-fundo);
   color: var(--erro-texto);
 }
+
+/* Histórico paginado, mensagens novas e texto guardado */
+.mensagens {
+  position: relative;
+}
+
+.mais-antigas {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.4rem 1rem;
+  background: var(--superficie);
+  border-bottom: 1px solid var(--borda);
+}
+
+.mais-antigas p {
+  margin: 0;
+}
+
+.erro-anteriores {
+  color: var(--erro-texto);
+  font-size: 0.9em;
+}
+
+.btn-pequeno {
+  padding: 0.2rem 0.7rem;
+  font-size: 0.9em;
+}
+
+.aviso-novas {
+  position: absolute;
+  right: 1.2rem;
+  bottom: 0.8rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.marcador-novas {
+  align-self: stretch;
+  text-align: center;
+  color: var(--primaria);
+  font-size: 0.8em;
+  font-weight: 600;
+  border-top: 1px solid var(--primaria);
+  margin-top: 0.4rem;
+  padding-top: 0.15rem;
+}
+
+.etiqueta-nova {
+  background: var(--primaria);
+  color: var(--primaria-texto);
+  border-color: transparent;
+}
+
+.texto-guardado {
+  padding: 0.6rem 1rem;
+  background: var(--aviso-fundo);
+  color: var(--aviso-texto);
+  border-top: 1px solid var(--borda);
+}
+
+.texto-guardado p {
+  margin: 0 0 0.4rem;
+  font-size: 0.9em;
+}
+
+.texto-guardado textarea {
+  width: 100%;
+  font: inherit;
+  resize: vertical;
+}
+
+.texto-guardado .acoes {
+  margin-top: 0.4rem;
+}

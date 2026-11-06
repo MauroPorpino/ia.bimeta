@@ -10,4 +10,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
   reiniciarSessaoParaTeste();
+  // Rascunhos e conversa aberta ficam no armazenamento do navegador: nenhum teste pode herdar os do anterior.
+  localStorage.clear();
+  sessionStorage.clear();
 });

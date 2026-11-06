@@ -39,18 +39,14 @@ function rotasBase(itens: QueueItem[], extras: Parameters<typeof criarFetch>[0] 
 describe('App: operação diária', () => {
   it('trocar de atendimento e voltar: o histórico e o rascunho de cada um continuam como estavam', async () => {
     logar();
-    let leiturasDoMauro = 0;
+    let apiDoMauroFora = false;
     const f = criarFetch({
       ...rotasBase([MAURO, PEDRO]),
       ...rotasDoItem(MAURO, 'Mauro', 'Pergunta do Mauro'),
       ...rotasDoItem(PEDRO, 'Pedro', 'Pergunta do Pedro'),
-      // A partir da segunda leitura, a API do Mauro não responde: o que aparece ao voltar vem da memória da tela.
-      [`GET /contact-center/items/${MAURO.id}/messages`]: () => {
-        leiturasDoMauro += 1;
-        return leiturasDoMauro === 1
-          ? json({ items: [mensagem({ text: 'Pergunta do Mauro' })], nextCursor: null })
-          : new Promise<Response>(() => undefined);
-      },
+      // Depois da primeira exibição, a API do Mauro deixa de responder: o que aparece ao voltar vem da memória da tela.
+      [`GET /contact-center/items/${MAURO.id}/messages`]: () =>
+        apiDoMauroFora ? new Promise<Response>(() => undefined) : json({ items: [mensagem({ text: 'Pergunta do Mauro' })], nextCursor: null }),
     });
     vi.stubGlobal('fetch', f);
     const usuario = userEvent.setup();
@@ -58,6 +54,7 @@ describe('App: operação diária', () => {
 
     await usuario.click(await screen.findByRole('button', { name: /Mauro/ }));
     await screen.findByText('Pergunta do Mauro');
+    apiDoMauroFora = true;
     await usuario.type(await screen.findByLabelText('Resposta ao cliente'), 'Rascunho para o Mauro');
 
     await usuario.click(screen.getByRole('button', { name: /Pedro/ }));

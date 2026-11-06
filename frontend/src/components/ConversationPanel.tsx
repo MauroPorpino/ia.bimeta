@@ -1,7 +1,7 @@
-import { useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
-import { ApiError, descreverErro, ehFalhaDeConexao, type ApiClient } from '../api/client';
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { ApiError, descreverErro, ehFalhaDeConexao, ehRejeicaoDefinitiva, novoGuid, type ApiClient } from '../api/client';
 import type { CurrentUser, Message, QueueItem, SendingAlert } from '../api/types';
-import { CacheDeConversas, mesclarMensagens } from '../cache';
+import { CacheDeConversas, aplicarPaginaAnterior, aplicarPaginaRecente } from '../cache';
 import { rotuloSemNome, situacaoDoItem } from '../format';
 import { usePolling } from '../hooks';
 import { alertaDoNumero } from './AlertasDeEnvio';
@@ -21,8 +21,9 @@ interface Props {
   /** Só para telas estreitas: volta à lista. */
   onVoltar?: () => void;
   /**
-   * Memória do histórico e dos rascunhos, dona da área logada: trocar de conversa e voltar encontra tudo como estava.
-   * Sem ela, o painel usa uma memória própria (só dele). O chamador monta o painel com `key={itemId}`.
+   * Memória do histórico, da rolagem, do "visto até" e dos rascunhos, dona da área logada: trocar de conversa e voltar
+   * encontra tudo como estava (e, com o armazenamento local, também depois de recarregar a página). Sem ela, o painel usa
+   * uma memória própria (só dele). O chamador monta o painel com `key={itemId}`.
    */
   cache?: CacheDeConversas;
   /** Contas de WhatsApp com envio pausado ou esperando: avisa, ao lado do campo de resposta, quando o número desta conversa está afetado. */
@@ -32,9 +33,15 @@ interface Props {
   intervaloMs?: number;
 }
 
+/** A releitura periódica traz só as mensagens mais recentes. */
 const TAMANHO_DA_PAGINA = 100;
+/** Cada pedido de mensagens anteriores traz esta quantidade. */
+const TAMANHO_DA_PAGINA_ANTIGA = 50;
 
 type Acao = 'claim' | 'release' | 'return-to-ai' | 'reply' | 'close';
+
+/** Como a ação terminou: provou que não teve efeito (`rejeitada`), concluiu, ou o resultado é incerto (rede, 5xx, ainda não confirmada). */
+type Situacao = 'concluida' | 'rejeitada' | 'incerta';
 
 export function ConversationPanel({
   api,
@@ -57,18 +64,32 @@ export function ConversationPanel({
   // O que já se sabe desta conversa aparece na hora; o polling só atualiza.
   const [item, setItem] = useState<QueueItem | null>(() => memoria.ler(itemId)?.item ?? null);
   const [mensagens, setMensagens] = useState<Message[]>(() => memoria.ler(itemId)?.mensagens ?? []);
-  const [temMais, setTemMais] = useState(() => memoria.ler(itemId)?.temMais ?? false);
+  const [cursorAnterior, setCursorAnterior] = useState<string | null>(() => memoria.ler(itemId)?.cursorAnterior ?? null);
+  const [carregandoAnteriores, setCarregandoAnteriores] = useState(false);
+  const [erroAnteriores, setErroAnteriores] = useState<string | null>(null);
   const [indisponivel, setIndisponivel] = useState(false);
   const [versao, setVersao] = useState(0);
+  // Até onde o atendente tinha visto e onde estava na rolagem quando abriu esta conversa.
+  const [vistoNaAbertura] = useState(() => memoria.lerVisto(itemId));
+  const [rolagemInicial] = useState(() => memoria.lerRolagem(itemId));
 
   const [texto, setTexto] = useState(() => memoria.lerRascunho(itemId));
   const [ocupado, setOcupado] = useState<Acao | null>(null);
   const [confirmandoEncerrar, setConfirmandoEncerrar] = useState(false);
   const [nota, setNota] = useState<string | null>(null);
+  const [copiado, setCopiado] = useState(false);
   // O estado `ocupado` só muda no próximo render: este ref fecha a janela de um segundo clique no mesmo instante.
   const emAndamento = useRef(false);
+  const buscandoAnteriores = useRef(false);
   // Para avisar a fila UMA vez quando a conversa sai do alcance (e não a cada ciclo de polling).
   const indisponivelAntes = useRef(false);
+  const montado = useRef(true);
+  useEffect(() => {
+    montado.current = true;
+    return () => {
+      montado.current = false;
+    };
+  }, []);
 
   usePolling(
     async (ativo) => {
@@ -79,13 +100,11 @@ export function ConversationPanel({
         ]);
         if (ativo()) {
           // A API devolve do mais novo para o mais antigo; a tela mostra em ordem cronológica, sem duplicar o que já tinha.
-          const anterior = memoria.ler(itemId);
-          const todas = mesclarMensagens(anterior?.mensagens ?? [], pagina.items);
-          const temMaisAntigas = pagina.nextCursor !== null;
-          memoria.gravar(itemId, { item: itemAtual, mensagens: todas, temMais: temMaisAntigas });
-          setItem(itemAtual);
-          setMensagens(todas);
-          setTemMais(temMaisAntigas);
+          const nova = aplicarPaginaRecente(memoria.ler(itemId), itemAtual, pagina);
+          memoria.gravar(itemId, nova);
+          setItem(nova.item);
+          setMensagens(nova.mensagens);
+          setCursorAnterior(nova.cursorAnterior);
           indisponivelAntes.current = false;
           setIndisponivel(false);
           onErroDeRede('conversa', null);
@@ -97,11 +116,12 @@ export function ConversationPanel({
         if (erro instanceof ApiError && (erro.status === 404 || erro.status === 403)) {
           // Fora do alcance: o atendimento terminou, outro atendente o assumiu (para quem não é o responsável a leitura passa a
           // ser negada) ou o acesso mudou. Não mostra mais a conversa nem as ações, esquece o histórico guardado e deixa a
-          // fila se atualizar uma vez. Se ela voltar a ficar disponível (devolvida à fila), a próxima leitura a traz de novo.
+          // fila se atualizar uma vez. O texto que o atendente digitou NÃO é apagado (continua guardado e visível). Se a
+          // conversa voltar a ficar disponível (devolvida à fila), a próxima leitura a traz de novo.
           memoria.esquecer(itemId);
           setItem(null);
           setMensagens([]);
-          setTemMais(false);
+          setCursorAnterior(null);
           onErroDeRede('conversa', null);
           if (!indisponivelAntes.current) {
             indisponivelAntes.current = true;
@@ -117,12 +137,51 @@ export function ConversationPanel({
     `${itemId}|${versao}|${pulso}`,
   );
 
+  /** Carrega a página de mensagens mais antigas (pelo cursor da API) e a junta ao histórico, sem repetir nenhuma. */
+  async function carregarAnteriores() {
+    const entrada = memoria.ler(itemId);
+    const cursor = entrada?.cursorAnterior;
+    if (!entrada || !cursor || buscandoAnteriores.current) {
+      return;
+    }
+    buscandoAnteriores.current = true;
+    setCarregandoAnteriores(true);
+    setErroAnteriores(null);
+    try {
+      const pagina = await api.obterMensagens(itemId, { take: TAMANHO_DA_PAGINA_ANTIGA, order: 'NewestFirst', cursor });
+      const atual = memoria.ler(itemId);
+      if (atual) {
+        const nova = aplicarPaginaAnterior(atual, pagina);
+        memoria.gravar(itemId, nova);
+        if (montado.current) {
+          setMensagens(nova.mensagens);
+          setCursorAnterior(nova.cursorAnterior);
+        }
+      }
+    } catch (erro) {
+      if (montado.current) {
+        setErroAnteriores(
+          ehFalhaDeConexao(erro) ? 'Sem conexão: não foi possível carregar as mensagens anteriores.' : `Não foi possível carregar as mensagens anteriores. ${descreverErro(erro)}`,
+        );
+      }
+    } finally {
+      buscandoAnteriores.current = false;
+      if (montado.current) {
+        setCarregandoAnteriores(false);
+      }
+    }
+  }
+
   function mudarTexto(novo: string) {
     setTexto(novo);
     memoria.gravarRascunho(itemId, novo);
   }
 
-  async function executar(acao: Acao, chamar: () => Promise<{ outcome?: string; item?: QueueItem } | undefined>): Promise<boolean> {
+  async function executar(
+    acao: Acao,
+    chamar: () => Promise<{ outcome?: string; item?: QueueItem } | undefined>,
+    aoTerminar?: (situacao: Situacao) => void,
+  ): Promise<boolean> {
     if (emAndamento.current) {
       return false;
     }
@@ -133,9 +192,11 @@ export function ConversationPanel({
     try {
       const resultado = await chamar();
       if (resultado?.outcome === 'Pending') {
+        aoTerminar?.('incerta');
         setNota('A operação foi registrada, mas o servidor ainda não a confirmou. Repita a ação para concluir.');
         return false;
       }
+      aoTerminar?.('concluida');
       if (resultado?.outcome === 'SessionEnded') {
         setNota('A sessão terminou: o atendimento foi encerrado.');
       }
@@ -146,6 +207,7 @@ export function ConversationPanel({
       onAlterado();
       return true;
     } catch (erro) {
+      aoTerminar?.(ehRejeicaoDefinitiva(erro) ? 'rejeitada' : 'incerta');
       const conflitoAoAssumir = acao === 'claim' && erro instanceof ApiError && erro.status === 409;
       // Perder a corrida ao assumir não é falha: a nota abaixo explica, sem faixa de erro vermelha.
       if (conflitoAoAssumir) {
@@ -178,6 +240,10 @@ export function ConversationPanel({
   const aguardando = item?.status === 'Waiting';
   const nome = nomeDoContato ?? rotuloSemNome(itemId);
   const alertaDeEnvio = alertaDoNumero(alertasDeEnvio, mensagens[mensagens.length - 1]?.channelInstanceId);
+  const temTextoGuardado = texto.trim() !== '';
+  // Texto digitado numa conversa em que o atendente já não pode responder (outro a assumiu, foi encerrada, saiu do alcance):
+  // continua guardado e visível, nunca some junto com o campo.
+  const mostrarTextoGuardado = temTextoGuardado && !assumidoPorMim && (item !== null || indisponivel);
 
   async function enviar(evento?: FormEvent) {
     evento?.preventDefault();
@@ -185,12 +251,27 @@ export function ConversationPanel({
     if (!enviado || !assumidoPorMim) {
       return;
     }
-    const ok = await executar('reply', () => api.responder(itemId, enviado));
+    // O envio que ficou sem resultado (queda da conexão, página recarregada no meio) deixou o requestId guardado: o MESMO
+    // texto reenviado o reaproveita, e o servidor reconhece o pedido em vez de mandar a mensagem duas vezes.
+    const guardado = memoria.lerPendente(itemId);
+    const requestId = guardado && guardado.texto === enviado ? guardado.requestId : novoGuid();
+    memoria.gravarPendente(itemId, { requestId, texto: enviado });
+    const ok = await executar(
+      'reply',
+      () => api.responder(itemId, enviado, requestId),
+      (situacao) => {
+        if (situacao !== 'incerta') {
+          memoria.gravarPendente(itemId, null);
+        }
+      },
+    );
     if (ok && memoria.lerRascunho(itemId).trim() === enviado) {
       // Só limpa depois do sucesso, e só se o atendente não editou o texto enquanto esperava. O rascunho guardado é a
       // fonte da verdade: vale também quando o atendente trocou de conversa no meio do envio e este painel já saiu da tela.
       memoria.gravarRascunho(itemId, '');
-      setTexto('');
+      if (montado.current) {
+        setTexto('');
+      }
     }
   }
 
@@ -204,7 +285,19 @@ export function ConversationPanel({
   async function encerrar() {
     const ok = await executar('close', () => api.encerrar(itemId, 'resolved'));
     if (ok) {
+      // Encerrado por ele mesmo: o rascunho (que a confirmação avisou que seria descartado) e o resto da memória da conversa saem.
+      memoria.descartarConversa(itemId);
+      setTexto('');
       setConfirmandoEncerrar(false);
+    }
+  }
+
+  async function copiarTexto() {
+    try {
+      await navigator.clipboard.writeText(texto);
+      setCopiado(true);
+    } catch {
+      setCopiado(false);
     }
   }
 
@@ -246,7 +339,7 @@ export function ConversationPanel({
           )}
           {assumidoPorMim && confirmandoEncerrar && (
             <span className="confirmacao" role="group" aria-label="Confirmar encerramento">
-              <span>Encerrar este atendimento?</span>
+              <span>{temTextoGuardado ? 'Encerrar este atendimento? O texto não enviado será descartado.' : 'Encerrar este atendimento?'}</span>
               <button type="button" className="btn btn-perigo" disabled={ocupado !== null} onClick={() => void encerrar()}>
                 {ocupado === 'close' ? 'Encerrando...' : 'Confirmar encerramento'}
               </button>
@@ -281,7 +374,33 @@ export function ConversationPanel({
       {indisponivel ? (
         <p className="discreto centro">Este atendimento não está mais disponível para você (encerrado, assumido por outro atendente ou fora do seu alcance).</p>
       ) : (
-        <MessageList mensagens={mensagens} nomeDoCliente={nomeDoContato} temMaisAntigas={temMais} />
+        <MessageList
+          mensagens={mensagens}
+          nomeDoCliente={nomeDoContato}
+          temMaisAntigas={cursorAnterior !== null}
+          carregandoAnteriores={carregandoAnteriores}
+          erroAnteriores={erroAnteriores}
+          aoCarregarAnteriores={() => void carregarAnteriores()}
+          vistoNaAbertura={vistoNaAbertura}
+          aoVisto={(seq) => memoria.gravarVisto(itemId, seq)}
+          rolagemInicial={rolagemInicial}
+          aoMudarRolagem={(posicao) => memoria.gravarRolagem(itemId, posicao)}
+        />
+      )}
+
+      {mostrarTextoGuardado && (
+        <section className="texto-guardado" aria-label="Texto não enviado">
+          <p>Você tinha um texto não enviado nesta conversa. Ele continua guardado neste navegador; se ela voltar a ser sua, é só continuar.</p>
+          <textarea readOnly value={texto} rows={3} aria-label="Texto guardado" />
+          <div className="acoes">
+            <button type="button" className="btn" onClick={() => void copiarTexto()}>
+              {copiado ? 'Copiado' : 'Copiar texto'}
+            </button>
+            <button type="button" className="btn" onClick={() => mudarTexto('')}>
+              Descartar texto
+            </button>
+          </div>
+        </section>
       )}
 
       {assumidoPorMim && (

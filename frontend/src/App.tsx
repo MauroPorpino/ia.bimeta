@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createApi, descreverErro, ehFalhaDeConexao, type ApiClient } from './api/client';
-import { aoSair, encerrarSessaoLocal, restaurarSessao } from './api/session';
+import { aoSair, encerrarSessaoLocal, obterTenant, restaurarSessao } from './api/session';
+import { gravarItemAberto, lerItemAberto } from './armazem';
 import type { CurrentUser, SendingAlert } from './api/types';
 import { AlertasDeEnvio } from './components/AlertasDeEnvio';
 import { ConexaoBanner } from './components/ConexaoBanner';
@@ -85,7 +86,26 @@ function Atendimento({ api, saidaManual, intervaloFilaMs, intervaloConversaMs, i
   const [alertasDeEnvio, setAlertasDeEnvio] = useState<SendingAlert[]>([]);
   const { nomes, garantir } = useNomesDosContatos(api);
   // Histórico e rascunhos de todas as conversas abertas nesta sessão: trocar de atendimento e voltar não perde nada.
-  const cache = useCacheDeConversas();
+  const escopo = useMemo(() => (me ? { tenant: obterTenant(), usuarioId: me.id } : undefined), [me]);
+  const cache = useCacheDeConversas(escopo);
+  const abertaRestaurada = useRef(false);
+
+  // Recarregar a página devolve o atendente à conversa em que estava (a lista a reabre se ainda estiver ao alcance dele).
+  useEffect(() => {
+    if (escopo && !abertaRestaurada.current) {
+      abertaRestaurada.current = true;
+      const guardada = lerItemAberto(escopo);
+      if (guardada) {
+        setItemSelecionado(guardada);
+      }
+    }
+  }, [escopo]);
+
+  useEffect(() => {
+    if (escopo && abertaRestaurada.current) {
+      gravarItemAberto(escopo, itemSelecionado);
+    }
+  }, [escopo, itemSelecionado]);
   const semConexao = Object.values(errosDeRede).some((e) => e.semConexao);
   const { estado: estadoDaConexao, pulso } = useEstadoDaConexao(semConexao);
 
@@ -150,6 +170,12 @@ function Atendimento({ api, saidaManual, intervaloFilaMs, intervaloConversaMs, i
       await api.logout();
     } catch {
       // Sem resposta do servidor, a sessão local sai do mesmo jeito (o token vence sozinho no servidor).
+    }
+    // Saída pedida pelo atendente: o que ele deixou guardado neste navegador (rascunhos, "visto até") sai junto, para o
+    // próximo operador da máquina não herdar nada. A sessão que expira sozinha NÃO apaga: os rascunhos voltam no próximo login.
+    cache.limparTudo();
+    if (escopo) {
+      gravarItemAberto(escopo, null);
     }
     encerrarSessaoLocal();
   }
@@ -226,6 +252,7 @@ function Atendimento({ api, saidaManual, intervaloFilaMs, intervaloConversaMs, i
             onErroDeRede={aoErroDeRede}
             onErroDeAcao={aoErroDeAcao}
             versaoDaLista={versaoDaLista + pulso}
+            cache={cache}
             intervaloMs={intervaloFilaMs}
           />
           {itemSelecionado ? (

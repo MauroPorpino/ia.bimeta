@@ -157,6 +157,76 @@ public sealed class OperacaoDoContactCenterTests(PostgresFixture banco)
     }
 
     [Fact]
+    public async Task Historico_longo_pagina_pelo_cursor_sem_repetir_nem_perder_mesmo_com_mensagem_nova_no_meio()
+    {
+        await using var e = await IniciarAsync("cchist");
+        var (_, token) = await e.NovoAtendenteAsync();
+        const string cliente = "5511999990301";
+
+        // 130 mensagens do cliente na mesma conversa (a primeira faz a IA transferir; as outras entram com a conversa na fila) e o aviso da transferência: 131 no histórico.
+        Assert.Equal(HttpStatusCode.OK, await e.EnviarWebhookAsync(e.PayloadDeTexto("wamid.HIST0000", cliente, "Historia", "Quanto custa o hemograma?")));
+        var sessao = await e.EsperarSessaoAsync("Historia");
+        var itemId = await ItemDaSessaoAsync(e, token, sessao);
+        for (var i = 1; i < 130; i++)
+        {
+            Assert.Equal(HttpStatusCode.OK, await e.EnviarWebhookAsync(e.PayloadDeTexto($"wamid.HIST{i:0000}", cliente, "Historia", $"mensagem {i}")));
+        }
+
+        async Task<int> TotalNoHistoricoAsync()
+        {
+            // Conta pelas páginas da própria API do atendente (o limite de uma página é 100).
+            var total = 0;
+            string? proximo = null;
+            do
+            {
+                var pagina = await PaginaAsync(proximo, 100);
+                total += pagina["items"]!.AsArray().Count;
+                proximo = pagina["nextCursor"]?.GetValue<string>();
+            }
+            while (proximo is not null);
+            return total;
+        }
+
+        await EnsaioDeIa.AguardarAsync(async () => await TotalNoHistoricoAsync() == 131, "as 131 mensagens deveriam estar no histórico", segundos: 90);
+
+        async Task<JsonNode> PaginaAsync(string? cursor, int take) =>
+            await e.Ia.Api.LerAsync<JsonNode>(token, $"/contact-center/items/{itemId}/messages?take={take}&order=NewestFirst" + (cursor is null ? string.Empty : $"&cursor={Uri.EscapeDataString(cursor)}"));
+
+        // A primeira página (como a tela a lê): as 100 mais recentes, do mais novo para o mais antigo, com o cursor das mais antigas.
+        var primeira = await PaginaAsync(null, 100);
+        var vistas = primeira["items"]!.AsArray().Select(m => (Id: m!["id"]!.GetValue<Guid>(), Seq: m["messageSeq"]!.GetValue<long>())).ToList();
+        Assert.Equal(100, vistas.Count);
+        var cursor = primeira["nextCursor"]?.GetValue<string>();
+        Assert.NotNull(cursor);
+
+        // Chega uma mensagem NOVA entre as páginas: o cursor das mais antigas não muda de lugar (nada é repetido nem pulado).
+        Assert.Equal(HttpStatusCode.OK, await e.EnviarWebhookAsync(e.PayloadDeTexto("wamid.HIST9999", cliente, "Historia", "mensagem nova no meio da leitura")));
+        await EnsaioDeIa.AguardarAsync(async () => await TotalNoHistoricoAsync() == 132, "a mensagem nova deveria chegar ao histórico");
+
+        // As páginas antigas (50 por vez, como o botão da tela) seguem o cursor até acabar.
+        var paginas = 0;
+        while (cursor is not null)
+        {
+            var pagina = await PaginaAsync(cursor, 50);
+            vistas.AddRange(pagina["items"]!.AsArray().Select(m => (Id: m!["id"]!.GetValue<Guid>(), Seq: m["messageSeq"]!.GetValue<long>())));
+            cursor = pagina["nextCursor"]?.GetValue<string>();
+            paginas++;
+            Assert.InRange(paginas, 1, 5);
+        }
+
+        Assert.Equal(131, vistas.Count); // as 131 de antes da mensagem nova: nenhuma repetida, nenhuma perdida
+        Assert.Equal(131, vistas.Select(v => v.Id).Distinct().Count());
+        // A ordem das páginas é a do histórico (instante e sequência); a tela reordena por sequência. O que importa aqui: todas as sequências aparecem, uma vez cada.
+        Assert.Equal(Enumerable.Range(1, 131).Select(i => (long)i), vistas.Select(v => v.Seq).Order());
+        Assert.Equal(1, paginas); // as 31 que restavam cabem numa página de 50, e a última não traz cursor
+
+        // A leitura nova da primeira página (a releitura periódica da tela) já traz a mensagem nova no topo.
+        var atual = await PaginaAsync(null, 100);
+        var nova = Assert.Single(atual["items"]!.AsArray(), m => m!["text"]!.GetValue<string>() == "mensagem nova no meio da leitura");
+        Assert.Equal(132, nova!["messageSeq"]!.GetValue<long>());
+    }
+
+    [Fact]
     public async Task O_atendente_comum_ve_a_conta_pausada_so_com_o_necessario_e_o_aviso_some_na_retomada()
     {
         await using var e = await IniciarAsync("ccalerta");

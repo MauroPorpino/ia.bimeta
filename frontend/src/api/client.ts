@@ -92,10 +92,17 @@ export interface ListItemsParams {
 export interface MessagesParams {
   take?: number;
   order?: HistoryOrder;
+  /** O `nextCursor` da página anterior (opaco): pede a página seguinte, em NewestFirst a das mensagens mais antigas. */
+  cursor?: string;
 }
 
 // Respostas que provam que a operação NÃO produziu efeito: o próximo pedido pode usar outro requestId.
 const REJEICOES_DEFINITIVAS = new Set([400, 403, 404, 422]);
+
+/** O erro prova que a operação não teve efeito (o pedido pode ser refeito com outro requestId); qualquer outro é resultado incerto. */
+export function ehRejeicaoDefinitiva(erro: unknown): boolean {
+  return erro instanceof ApiError && (REJEICOES_DEFINITIVAS.has(erro.status) || (erro.status === 409 && erro.code === 'RequestIdReused'));
+}
 
 export function createApi(opcoes: ApiOptions = {}) {
   const baseUrl = opcoes.baseUrl ?? '/api';
@@ -177,9 +184,13 @@ export function createApi(opcoes: ApiOptions = {}) {
     return new ApiError(status, titulo, detalhe, typeof problema?.code === 'string' ? problema.code : null, problema === null);
   }
 
-  /** Executa uma ação com efeito, com o requestId guardado por chave (ver `idsPendentes`). */
-  async function acao<T extends { outcome?: string }>(chave: string, executar: (requestId: string) => Promise<T>): Promise<T> {
-    const requestId = idsPendentes.get(chave) ?? novoGuid();
+  /**
+   * Executa uma ação com efeito, com o requestId guardado por chave (ver `idsPendentes`). `sugerido` é o requestId de um
+   * envio anterior que a tela guardou (um recarregamento perdeu a memória): reaproveitá-lo faz o servidor reconhecer o
+   * mesmo pedido em vez de criar um segundo efeito.
+   */
+  async function acao<T extends { outcome?: string }>(chave: string, executar: (requestId: string) => Promise<T>, sugerido?: string): Promise<T> {
+    const requestId = idsPendentes.get(chave) ?? sugerido ?? novoGuid();
     idsPendentes.set(chave, requestId);
     try {
       const resultado = await executar(requestId);
@@ -188,7 +199,7 @@ export function createApi(opcoes: ApiOptions = {}) {
       }
       return resultado;
     } catch (erro) {
-      if (erro instanceof ApiError && (REJEICOES_DEFINITIVAS.has(erro.status) || (erro.status === 409 && erro.code === 'RequestIdReused'))) {
+      if (ehRejeicaoDefinitiva(erro)) {
         idsPendentes.delete(chave);
       }
       throw erro;
@@ -212,7 +223,7 @@ export function createApi(opcoes: ApiOptions = {}) {
     obterItem: (itemId: string) => requisitar<QueueItem>('GET', rotaItem(itemId)),
     obterConversa: (itemId: string) => requisitar<Conversation>('GET', `${rotaItem(itemId)}/conversation`),
     obterMensagens: (itemId: string, p: MessagesParams = {}) =>
-      requisitar<Page<Message>>('GET', `${rotaItem(itemId)}/messages`, { consulta: { take: p.take, order: p.order } }),
+      requisitar<Page<Message>>('GET', `${rotaItem(itemId)}/messages`, { consulta: { take: p.take, order: p.order, cursor: p.cursor } }),
 
     // ---- Canais: aviso de contas com envio pausado (aviso secundário: quem chama não mostra erro dele)
     listarAlertasDeEnvio: () => requisitar<SendingAlert[]>('GET', '/channels/sending-alerts'),
@@ -235,9 +246,11 @@ export function createApi(opcoes: ApiOptions = {}) {
         requisitar<QueueItemOperationResult>('POST', `${rotaItem(itemId)}/return-to-ai`, { corpo: { requestId } satisfies ItemActionRequest }),
       ),
     // Rotas novas do backend (suposição documentada em types.ts). A resposta repetida do MESMO texto reusa o requestId.
-    responder: (itemId: string, texto: string) =>
-      acao<ActionResult>(`reply|${itemId}|${texto}`, (requestId) =>
-        requisitar<ActionResult>('POST', `${rotaItem(itemId)}/reply`, { corpo: { requestId, text: texto } satisfies ReplyRequest }),
+    responder: (itemId: string, texto: string, requestIdSugerido?: string) =>
+      acao<ActionResult>(
+        `reply|${itemId}|${texto}`,
+        (requestId) => requisitar<ActionResult>('POST', `${rotaItem(itemId)}/reply`, { corpo: { requestId, text: texto } satisfies ReplyRequest }),
+        requestIdSugerido,
       ),
     encerrar: (itemId: string, reasonCode = 'resolved') =>
       acao<ActionResult>(`close|${itemId}|${reasonCode}`, (requestId) =>

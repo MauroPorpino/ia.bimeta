@@ -1,0 +1,28 @@
+# ADR 0023 — Experiência operacional do atendente: histórico paginado, rascunhos persistentes e mensagens novas
+
+- **Status:** **Proposto para ratificação.** Implementado em 06/11/2026 sob a autorização do decisor ("finalizar a experiência operacional do atendente no React", em um único pacote), depois da ratificação dos ADRs 0021 e 0022. Nenhuma chamada real à Meta ou à OpenAI.
+- **Data:** 06/11/2026
+- **Decisor:** Mauro Porpino
+- **Referências:** ADR 0022 (memória por conversa, concorrência, conexão), 0018 (ações do atendente, idempotência por `requestId`)
+- **Preserva:** a API (nenhuma rota nova, nenhum contrato novo: o cursor de `GET /contact-center/items/{id}/messages` já existia), a matriz de módulos e a regra de que tenant e usuário vêm do contexto do host.
+
+## Decisão
+
+1. **Histórico completo em páginas pelo cursor da API.** A releitura periódica continua lendo as 100 mensagens mais recentes; "Carregar mensagens anteriores" (botão, e automático ao rolar até o topo) pede 50 por vez pelo `nextCursor` (chave `(occurredAt, seq)`, que não se desloca quando chegam mensagens novas). A tela junta as páginas por id e ordem de `messageSeq`, sem repetir nada; depois de pedir páginas antigas, a releitura **não mexe mais no cursor** nem perde o carregado. Se chegarem mais mensagens do que cabem numa página (buraco entre o que a tela tinha e a janela recente), o histórico recomeça da janela recente, nunca com um buraco no meio. A posição de rolagem é **compensada** quando as antigas entram no começo (o que o atendente lê não se move), e cada conversa lembra onde ele estava (distância do fim, só em memória).
+2. **Rascunhos persistentes com escopo.** O texto digitado de cada conversa é gravado no `localStorage` a cada tecla, com chave `ia-bimeta.v1:{tenant}:{usuário}:r:{conversa}`: sobrevive a recarregar a página e a fechar o navegador, e **outro operador (ou o mesmo em outro tenant) nunca o lê**. Validade de 7 dias (o vencido, de **qualquer** usuário, é apagado ao abrir), no máximo 100 registros por usuário e 20 mil caracteres por texto; sem armazenamento (modo privado, cota cheia) a tela segue só com a memória. O tenant da sessão passa a ser guardado junto do token no `sessionStorage` (só escopo, não é credencial). O token continua **fora** do `localStorage`.
+2.1. **Quando se limpa.** Ao **enviar** a resposta (só se o texto não foi editado enquanto esperava, mesmo que ele tenha trocado de conversa no meio do envio), ao **encerrar** a conversa pelo próprio atendente (a confirmação avisa que o texto não enviado será descartado), ao **descartar** manualmente e na **saída pedida pelo atendente** (apaga tudo dele no navegador). A sessão que **expira sozinha** (401) **não** apaga: os rascunhos voltam no próximo login.
+3. **Envio sem duplicar nem depois de recarregar.** O `requestId` de uma resposta em andamento (e o texto) é gravado com o rascunho. Se o resultado ficou incerto (queda de conexão, 5xx, página recarregada no meio), reenviar o **mesmo texto** reaproveita o `requestId` e o servidor reconhece o pedido; texto editado é outro pedido. A pendência sai quando o envio conclui ou o servidor prova que não teve efeito (400/403/404/422).
+4. **Mensagens novas.** Na conversa aberta: o aviso "N mensagens novas ↓" aparece quando chegam mensagens do cliente com o atendente lendo mais acima (a tela não o puxa), e o marcador "Novas mensagens" fica antes da primeira que ele não tinha visto ao abrir. "Visto até" é a última mensagem vista **com a aba à vista e no fim da conversa** (guardado por conversa, com o mesmo escopo e validade dos rascunhos). Na fila: as conversas **do atendente** (até 15 por ciclo, olhando as 20 mensagens mais recentes de cada uma, sem API nova) ganham o selo "N novas" (mensagens do cliente depois do "visto até"); a aberta não mostra selo. Recarregar a página reabre a conversa em que ele estava (guardada por aba, no `sessionStorage`).
+5. **Erros sem perder o texto.** O campo de resposta e o texto são independentes do estado da conversa: quando o colega encerra ou assume (403/404), ou o atendente deixa de ser o responsável, o campo some mas o texto aparece num quadro "Texto não enviado" (copiar, descartar) e volta ao campo se a conversa voltar a ser dele. Queda de conexão, 403, 409, 5xx e rejeição (400) **nunca** limpam o texto.
+
+## O que fica fora (pendências)
+
+- **Tempo real (WebSocket/SSE), notificação sonora ou do navegador, dashboards, mídia e outros canais:** fora do MVP por decisão do usuário.
+- **Selo de novas para conversas além das 15 primeiras** do atendente e contagem exata acima de 20 ("20+").
+- **Sincronização de rascunho entre duas abas do mesmo usuário em tempo real** (vale o da aba que gravou por último; ao reabrir a conversa lê-se o armazenamento).
+- **Cifrar os rascunhos no armazenamento local:** o escopo, a validade e a limpeza na saída reduzem a exposição, mas quem tem acesso ao perfil do navegador do operador lê o `localStorage`.
+
+## Consequências
+
+- Nenhuma migração, nenhuma rota nova, nenhuma mudança de contrato. Mudança só no frontend (`armazem.ts`, `cache.ts`, `MessageList`, `ConversationPanel`, `QueuePanel`, `App`) e um teste de integração do cursor (`OperacaoDoContactCenterTests`).
+- Testes: histórico longo (250 mensagens, páginas de 50, cursor, sem repetição, releitura sem perder o carregado), compensação de rolagem, aviso e marcador de novas, "visto até", rascunhos (recarregar, outro operador, outro tenant, saída pedida x sessão expirada), pedido pendente (mesmo `requestId` depois de recarregar), erros (conversa encerrada pelo colega, 403, queda de conexão, rejeição) e o cursor por HTTP real com mensagem nova no meio.

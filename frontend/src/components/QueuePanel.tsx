@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { descreverErro, ehFalhaDeConexao, type ApiClient } from '../api/client';
-import type { AgentPresence, AgentStatus, CurrentUser, QueueItem, ServiceQueue } from '../api/types';
+import type { AgentPresence, AgentStatus, CurrentUser, Message, QueueItem, ServiceQueue } from '../api/types';
+import type { CacheDeConversas } from '../cache';
 import { ROTULO_PRESENCA, rotuloSemNome, situacaoDoItem, tempoDecorrido } from '../format';
 import { usePolling } from '../hooks';
 
@@ -19,7 +20,18 @@ interface Props {
   onErroDeAcao: (texto: string | null, semConexao?: boolean) => void;
   /** Muda para forçar uma releitura imediata (depois de uma ação na conversa). */
   versaoDaLista: number;
+  /** Memória das conversas ("visto até"): com ela, as conversas do atendente com mensagem nova do cliente ganham um selo. */
+  cache?: CacheDeConversas;
   intervaloMs?: number;
+}
+
+/** Quantas conversas do atendente são consultadas por ciclo para o selo de mensagens novas, e quantas mensagens cada consulta olha. */
+const CONVERSAS_PARA_SELO = 15;
+const MENSAGENS_PARA_SELO = 20;
+
+/** Mensagens do cliente depois do que o atendente já viu (sem "visto", todas as da página contam). */
+export function contarNaoLidas(mensagens: readonly Message[], visto: number | undefined): number {
+  return mensagens.filter((m) => m.direction === 'Inbound' && m.messageSeq > (visto ?? 0)).length;
 }
 
 const POR_ABA: Record<Aba, { rotulo: string; vazio: string }> = {
@@ -48,6 +60,7 @@ export function QueuePanel({
   onErroDeRede,
   onErroDeAcao,
   versaoDaLista,
+  cache,
   intervaloMs = 3000,
 }: Props) {
   const [aba, setAba] = useState<Aba>('waiting');
@@ -55,6 +68,7 @@ export function QueuePanel({
   const [filas, setFilas] = useState<ServiceQueue[]>([]);
   // As duas listas são lidas juntas a cada ciclo: o contador da outra aba avisa de uma conversa nova mesmo com o atendente em "Meus".
   const [listas, setListas] = useState<Record<Aba, QueueItem[] | null>>({ waiting: null, mine: null });
+  const [naoLidas, setNaoLidas] = useState<Record<string, number>>({});
   const [presenca, setPresenca] = useState<AgentPresence | null>(null);
   const [mudandoPresenca, setMudandoPresenca] = useState(false);
 
@@ -103,6 +117,23 @@ export function QueuePanel({
           setListas({ waiting: aguardando, mine: meus });
           onErroDeRede('fila', null);
           garantirNomes([...aguardando, ...meus].map((i) => i.id));
+        }
+        // O selo de mensagens novas das conversas do atendente (a aberta na tela mostra as dela mesma). Falha aqui não é erro.
+        if (cache) {
+          const alvos = meus.filter((i) => i.id !== itemSelecionado).slice(0, CONVERSAS_PARA_SELO);
+          const contagens = await Promise.all(
+            alvos.map(async (i) => {
+              try {
+                const pagina = await api.obterMensagens(i.id, { take: MENSAGENS_PARA_SELO, order: 'NewestFirst' });
+                return [i.id, contarNaoLidas(pagina.items, cache.lerVisto(i.id))] as const;
+              } catch {
+                return null;
+              }
+            }),
+          );
+          if (ativo()) {
+            setNaoLidas(Object.fromEntries(contagens.filter((c): c is readonly [string, number] => c !== null)));
+          }
         }
       } catch (erro) {
         if (ativo()) {
@@ -223,6 +254,11 @@ export function QueuePanel({
                     {item.priority > 0 && <span className="etiqueta">prioridade {item.priority}</span>}
                     {item.pending && <span className="etiqueta etiqueta-aviso">operação pendente</span>}
                     {item.deliveryFailures > 0 && <span className="etiqueta etiqueta-falha">falha no envio</span>}
+                    {item.id !== itemSelecionado && (naoLidas[item.id] ?? 0) > 0 && (
+                      <span className="etiqueta etiqueta-nova">
+                        {(naoLidas[item.id] ?? 0) >= MENSAGENS_PARA_SELO ? `${MENSAGENS_PARA_SELO}+ novas` : (naoLidas[item.id] ?? 0) === 1 ? '1 nova' : `${naoLidas[item.id]} novas`}
+                      </span>
+                    )}
                   </button>
                 </li>
               );

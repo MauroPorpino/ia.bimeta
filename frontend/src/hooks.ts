@@ -1,13 +1,21 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ApiClient } from './api/client';
 import { ApiError } from './api/client';
+import { ArmazemLocal, type EscopoDeUsuario } from './armazem';
 import { CacheDeConversas } from './cache';
 
-/** Uma memória de conversas e rascunhos por montagem da área logada (some no logout). */
-export function useCacheDeConversas(): CacheDeConversas {
-  const ref = useRef<CacheDeConversas | null>(null);
-  ref.current ??= new CacheDeConversas();
-  return ref.current;
+/**
+ * A memória de conversas, rascunhos e "visto até" da área logada. Com o escopo do usuário (tenant e id), rascunhos e
+ * "visto até" também vão ao armazenamento local, e sobrevivem a recarregar a página e a fechar o navegador; sem escopo
+ * (o usuário ainda não foi identificado), a memória é só desta aba.
+ */
+export function useCacheDeConversas(escopo?: EscopoDeUsuario): CacheDeConversas {
+  const tenant = escopo?.tenant;
+  const usuarioId = escopo?.usuarioId;
+  return useMemo(
+    () => new CacheDeConversas(usuarioId === undefined ? {} : { armazem: new ArmazemLocal({ tenant: tenant ?? '', usuarioId }) }),
+    [tenant, usuarioId],
+  );
 }
 
 export type EstadoDaConexao = 'online' | 'offline' | 'restabelecida';

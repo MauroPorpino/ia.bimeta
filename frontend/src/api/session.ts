@@ -6,9 +6,12 @@ const CHAVE = 'ia-bimeta.sessao';
 interface Guardado {
   token: string;
   expiresAt: string;
+  /** O tenant em que o atendente entrou (só escopo dos rascunhos guardados; não é credencial). */
+  tenant?: string;
 }
 
 let token: string | null = null;
+let tenant = '';
 const ouvintes = new Set<() => void>();
 
 function guardar(valor: Guardado | null): void {
@@ -39,6 +42,7 @@ export function restaurarSessao(): string | null {
       return null;
     }
     token = lido.token;
+    tenant = typeof lido.tenant === 'string' ? lido.tenant : '';
     return token;
   } catch {
     guardar(null);
@@ -46,19 +50,26 @@ export function restaurarSessao(): string | null {
   }
 }
 
-export function definirSessao(novo: string, expiresAt: string): void {
+export function definirSessao(novo: string, expiresAt: string, tenantDeEntrada = ''): void {
   token = novo;
-  guardar({ token: novo, expiresAt });
+  tenant = tenantDeEntrada.trim().toLowerCase();
+  guardar({ token: novo, expiresAt, tenant });
 }
 
 export function obterToken(): string | null {
   return token;
 }
 
+/** O tenant da sessão (vazio em sessão antiga, sem o campo). */
+export function obterTenant(): string {
+  return tenant;
+}
+
 /** Apaga a sessão local e avisa quem ouve (o App volta à tela de entrada). */
 export function encerrarSessaoLocal(): void {
   const tinha = token !== null;
   token = null;
+  tenant = '';
   guardar(null);
   if (tinha) {
     ouvintes.forEach((ouvinte) => ouvinte());
@@ -76,6 +87,7 @@ export function aoSair(ouvinte: () => void): () => void {
 /** Só para testes: zera o estado do módulo sem disparar o evento. */
 export function reiniciarSessaoParaTeste(): void {
   token = null;
+  tenant = '';
   ouvintes.clear();
   try {
     sessionStorage.removeItem(CHAVE);
