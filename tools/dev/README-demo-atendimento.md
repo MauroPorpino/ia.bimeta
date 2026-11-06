@@ -39,6 +39,18 @@ Abre uma janela para cada peça. Depois que o Api subir, cadastre uma chave de I
 3. **O atendente atende.** Em `http://localhost:5173`, entre com tenant `demo-ia`, `admin@demo-ia.local` e `DevLocal-Admin-2026!`. Abra a conversa, **Assumir**, escreva a resposta e envie: ela aparece na janela do WhatsApp simulado. O cliente responde com outro `Send-MensagemWhatsApp.ps1` (mesmo `-Numero`): quem responde agora é o humano, a IA não fala.
 4. **Encerrar.** **Encerrar** na interface (com confirmação): a sessão fecha e o item sai da fila.
 
+## Dois atendentes ao mesmo tempo (operação diária)
+
+Para ver a Central de Atendimento com **dois atendentes** e várias conversas (ADR 0022):
+
+1. `.\tools\dev\Add-AtendenteDeDemonstracao.ps1` cria o segundo atendente (`bruna@demo-ia.local`, papel comum) e o põe na fila.
+2. Abra `http://localhost:5173` em **duas abas** (a sessão fica no `sessionStorage` de cada aba): `admin@demo-ia.local` numa e `bruna@demo-ia.local` na outra. Se a porta 5173 já estava em uso, o Vite sobe em 5174.
+3. Mande 3 ou 4 clientes que a IA transfere (`Send-MensagemWhatsApp.ps1 -Texto 'Quero falar com um atendente' -Nome Mauro -Numero 5511999990201`, depois `-Nome Pedro -Numero ...202`, e assim por diante). A fila de **Aguardando** aparece nas duas abas sem recarregar (o título da página mostra quantas esperam).
+4. Tente assumir a **mesma** conversa nas duas abas: uma assume, a outra vê "outro atendente assumiu antes de você" e a conversa some para ela. Cada um responde às suas: a resposta de cada atendente aparece só na janela do WhatsApp simulado do cliente certo.
+5. Troque de conversa no meio de uma resposta: o histórico aparece na hora e o **rascunho** de cada conversa continua no campo.
+6. Para ver o aviso de conta pausada: como administrador, `POST /channels/accounts/{id}/sending/pause`; as duas abas mostram a faixa em até 15 s, e a resposta seguinte falha ("falha no envio"). `.../sending/resume` retoma.
+7. Para ver a queda de conexão: pare o Api. A faixa de reconexão aparece, a tela não esvazia e o texto digitado fica; ao subir o Api de novo a faixa some e tudo é relido.
+
 ## O que é de verdade e o que é simulado
 
 - **De verdade:** Receiver com verificação de assinatura, Inbox durável, deduplicação, Conversations, Agents, AiGateway (ledger e limites), ContactCenter (fila, atribuição, resposta e encerramento), Sender com a disciplina de efeito externo (intenção antes da chamada, `SendUnknown` sem reenvio), adaptador do WhatsApp, PostgreSQL.
