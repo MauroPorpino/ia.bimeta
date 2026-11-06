@@ -177,12 +177,20 @@ public sealed class OperacaoDoContactCenterTests(PostgresFixture banco)
         // 2) Devolve à IA: o cliente escreve e QUEM RESPONDE É A IA (o modelo é chamado de novo), pelo WhatsApp.
         Assert.Equal(HttpStatusCode.OK, await AcaoAsync(e, token, item, "return-to-ai", new { requestId = Guid.NewGuid() }));
         e.Ia.OpenAi.Roteiros.Definir(EnsaioDeIa.ChaveCanario, (_, _) => Task.FromResult(ServidorOpenAiSimulado.Sucesso(CenarioDeAgentes.Responder("A IA voltou a atender você."), 150, 0, 25, "req_volta")));
+        // Devolver à IA agenda, por desenho (TurnScheduler.OnReturnedToAiAsync), um turno imediato. Se a mensagem do cliente chega com esse turno EM ANDAMENTO, ele é trocado pelo sucessor (T6, ADR 0007) e o modelo é chamado duas
+        // vezes para a mesma mensagem (a primeira resposta é descartada). É o comportamento projetado, e o que causava a contagem intermitente deste teste: aqui o teste espera o turno da devolução terminar, para afirmar a contagem exata.
+        await e.EsperarAsync(
+            async () =>
+            {
+                var daSessao = (await e.Ia.TurnosAsync()).AsArray().Where(t => t!["sessionId"]!.GetValue<Guid>() == sessao).ToList();
+                return daSessao.Count >= 2 && !daSessao.Any(t => t!["state"]!.GetValue<string>() is "Scheduled" or "Ready" or "Running"); // o da transferência e o da devolução, os dois terminados
+            },
+            "o turno da devolução à IA deveria existir e terminar");
         var chamadas = e.Ia.OpenAi.Roteiros.Capturas.Count;
         Assert.Equal(HttpStatusCode.OK, await e.EnviarWebhookAsync(e.PayloadDeTexto("wamid.VOLTA0002", cliente, "Volta", "Obrigado, e o horário de atendimento?")));
         await e.EsperarAsync(async () => e.Graph.Capturas.Count == 2, "a IA deveria responder depois da devolução");
         Assert.Equal((cliente, "A IA voltou a atender você."), (e.Graph.Capturas[1].Para, e.Graph.Capturas[1].Texto));
-        // O modelo foi chamado de novo (a IA voltou a atender). O número exato não é afirmado: o banco de teste é compartilhado e um turno de outro ensaio pode usar o mesmo servidor simulado.
-        Assert.True(e.Ia.OpenAi.Roteiros.Capturas.Count >= chamadas + 1);
+        Assert.Equal(chamadas + 1, e.Ia.OpenAi.Roteiros.Capturas.Count); // exatamente UMA chamada para a mensagem nova (sem turno trocado, sem custo em dobro)
 
         // 3) Depois de ENCERRADO o atendimento (a sessão fecha), o cliente escreve outra vez, no dia seguinte: nova conversa, atendida pela IA, sem ficar sem resposta.
         e.Ia.OpenAi.Roteiros.Definir(EnsaioDeIa.ChaveCanario, Transfere("price"));
