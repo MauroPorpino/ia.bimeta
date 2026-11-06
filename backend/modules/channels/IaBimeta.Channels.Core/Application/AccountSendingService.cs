@@ -35,6 +35,12 @@ public sealed record AccountSendingView(
 }
 
 /// <summary>
+/// O aviso de envio para QUEM ATENDE (ADR 0022): uma conta com o envio pausado ou esperando o provedor. Traz só o necessário para a tela explicar a demora de uma resposta: nome da conta, se está pausada, até quando espera
+/// e os números (instâncias) afetados. Nunca traz o motivo técnico da pausa, a vazão nem credencial.
+/// </summary>
+public sealed record SendingAlertView(Guid AccountId, string AccountName, bool Paused, DateTimeOffset? CooldownUntil, IReadOnlyList<Guid> ChannelInstanceIds);
+
+/// <summary>
 /// A administração do envio de uma conta (SND-2 e SND-6): ver o estado, pausar, retomar e ajustar a vazão. Ler exige leitura de canais na organização da conta; as ações exigem gerir canais (TEN-2: conta de outra
 /// organização ou de outro tenant responde como inexistente). Toda ação é auditada. A RETOMADA é segura: só ocorre se a credencial da conta é legível e o provedor a aceita para cada número ativo (uma leitura, nenhuma
 /// mensagem enviada); trocar a credencial NÃO retoma sozinho.
@@ -50,6 +56,7 @@ public sealed class AccountSendingService
     private readonly ChannelSendingOptions _options;
     private readonly IRequestContextAccessor _context;
     private readonly IAuditWriter _audit;
+    private readonly TimeProvider _clock;
 
     public AccountSendingService(
         IChannelRepository repository,
@@ -58,7 +65,8 @@ public sealed class AccountSendingService
         ISecretProtector protector,
         ChannelSendingOptions options,
         IRequestContextAccessor context,
-        IAuditWriter audit)
+        IAuditWriter audit,
+        TimeProvider clock)
     {
         _repository = repository;
         _state = state;
@@ -67,6 +75,42 @@ public sealed class AccountSendingService
         _options = options;
         _context = context;
         _audit = audit;
+        _clock = clock;
+    }
+
+    /// <summary>
+    /// As contas com envio pausado ou esperando o provedor, para o atendente entender por que uma resposta demora (ADR 0022). A leitura é mais ampla que a administração de propósito: basta pertencer à organização da conta
+    /// (leitura da organização, o mínimo de qualquer papel), porque o atendente comum não tem leitura de canais. Em troca, a resposta é mínima (ver <see cref="SendingAlertView"/>). Só contas das organizações do usuário (TEN-2);
+    /// quem não pertence a organização alguma recebe a lista vazia.
+    /// </summary>
+    public async Task<IReadOnlyList<SendingAlertView>> ListAlertsAsync(CancellationToken cancellationToken = default)
+    {
+        var contexto = _context.GetRequired();
+        var organizacoes = contexto.OrganizationsWithPermission(Permission.OrganizationRead);
+        if (organizacoes is { Count: 0 })
+        {
+            return Array.Empty<SendingAlertView>();
+        }
+
+        var agora = _clock.GetUtcNow();
+        var contas = await _repository.ListAccountsAsync(organizacoes, cancellationToken);
+        var instancias = await _repository.ListInstancesAsync(organizacoes, cancellationToken);
+        var alertas = new List<SendingAlertView>();
+        foreach (var conta in contas)
+        {
+            var estado = await _state.FindAsync(conta.Id, cancellationToken);
+            var pausada = estado?.IsPaused ?? false;
+            var esperando = estado?.CooldownUntil is { } fim && fim > agora;
+            if (!pausada && !esperando)
+            {
+                continue;
+            }
+
+            var numeros = instancias.Where(i => i.AccountId == conta.Id).Select(i => i.Id.Value).ToList();
+            alertas.Add(new SendingAlertView(conta.Id, conta.Name, pausada, esperando ? estado!.CooldownUntil : null, numeros));
+        }
+
+        return alertas;
     }
 
     /// <exception cref="ChannelsResourceNotFoundException">A conta não existe ou não é visível ao usuário.</exception>

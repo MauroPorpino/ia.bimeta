@@ -62,6 +62,10 @@ public static class ChannelsEndpoints
         // O teste de prontidão: confere a configuração SEM enviar mensagem. Com live=true também LÊ o número no provedor (só leitura). O relatório traz o endereço do webhook (segredo operacional).
         contas.MapGet("/{id:guid}/readiness", async (Guid id, bool? live, ChannelReadinessService servico, CancellationToken ct) => Results.Ok(await servico.CheckAsync(id, live ?? false, ct)));
 
+        // O aviso de envio para quem atende (ADR 0022): contas pausadas ou esperando o provedor, só o necessário. Fica fora do grupo de contas para não herdar a ideia de que exige gerir canais.
+        app.MapGroup("/channels/sending-alerts").AddEndpointFilter(TratarErrosDeCanais)
+            .MapGet("/", async (AccountSendingService servico, CancellationToken ct) => Results.Ok(await servico.ListAlertsAsync(ct)));
+
         // O diagnóstico operacional do envio (só leitura, exceto reenfileirar um evento de ENTRADA morto): contas pausadas, mensagens paradas, falhas, envios de resultado incerto e entradas mortas.
         var diagnostico = app.MapGroup("/channels/diagnostics").AddEndpointFilter(TratarErrosDeCanais);
 
