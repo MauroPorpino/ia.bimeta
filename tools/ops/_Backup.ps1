@@ -47,8 +47,12 @@ function Protect-Backup {
     $temporaria = Join-Path $Pasta ('_tmp-' + [guid]::NewGuid().ToString('N').Substring(0, 12))
     New-Item -ItemType Directory -Path $temporaria | Out-Null
     try {
-        $volta = Unprotect-Arquivo -Origem $cifrado -Destino (Join-Path $temporaria 'volta.bin') -ChaveEnv $ChaveEnv
+        $destinoDaVolta = Join-Path $temporaria 'volta.bin'
+        $volta = Unprotect-Arquivo -Origem $cifrado -Destino $destinoDaVolta -ChaveEnv $ChaveEnv
         if ($volta -ne $manifesto.sha256) { throw 'A decifragem de teste nao reproduziu o dump original.' }
+        # A ida e volta tambem le o dump decifrado (pg_restore --list): e a verificacao COMPLETA, sem repetir a decifragem depois.
+        $entradasDaVolta = Get-EntradasDoDump -Arquivo $destinoDaVolta
+        if ($entradasDaVolta -ne [int]$manifesto.entradasDoDump) { throw ('O dump decifrado tem ' + $entradasDaVolta + ' entradas; o manifesto registra ' + $manifesto.entradasDoDump + '.') }
     }
     catch {
         Remove-Item -Force -Path $cifrado -ErrorAction SilentlyContinue
@@ -61,6 +65,7 @@ function Protect-Backup {
     $manifesto.sha256 = $resultado.Sha256DoCifrado
     $manifesto.tamanhoEmBytes = $resultado.TamanhoCifrado
     Add-Member -InputObject $manifesto -NotePropertyName dump -NotePropertyValue $dump -Force
+    Add-Member -InputObject $manifesto -NotePropertyName VerificacaoCompleta -NotePropertyValue $true -Force
     Add-Member -InputObject $manifesto -NotePropertyName cifrado -NotePropertyValue ([pscustomobject]@{ algoritmo = 'AES-256-CBC+HMAC-SHA256'; kdf = 'PBKDF2-SHA256'; iteracoes = 600000; formato = 'IABK1' }) -Force
     Write-ArquivoUtf8 -Caminho $caminhoDoManifesto -Texto (($manifesto | ConvertTo-Json -Depth 6) + "`n")
 

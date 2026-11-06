@@ -153,8 +153,7 @@ try {
     if ($ChaveEnv) {
         $etapa = 'cifra'
         $manifesto = Protect-Backup -Pasta $pasta -ChaveEnv $ChaveEnv
-        $manifesto = Test-IntegridadeDoBackup -Pasta $pasta -ChaveEnv $ChaveEnv
-        Write-Log ('Backup cifrado e verificado por completo (autenticacao, decifragem e leitura do dump); o dump em texto claro foi removido.')
+        Write-Log ('Backup cifrado e verificado por completo (autenticacao, decifragem e leitura do dump, numa unica ida e volta); o dump em texto claro foi removido.')
     }
 
     $estado.pastaDoUltimoBackup = (Split-Path -Leaf $pasta)
