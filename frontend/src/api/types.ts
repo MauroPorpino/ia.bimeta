@@ -36,7 +36,7 @@ export interface CurrentUser {
 
 // ---------------------------------------------------------------- Erros (ProblemDetails)
 
-/** Corpo de erro da API (RFC 9457). `code` é a extensão de 409/422 (QueueItemConflict ou ContactCenterRule). */
+/** Corpo de erro da API (RFC 9457). `code` é a extensão de 409/422 (409: AlreadyAssigned, OperationInProgress, ItemClosed...; 422: ContactCenterRule). */
 export interface ProblemDetails {
   type?: string;
   title?: string;

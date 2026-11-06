@@ -26,7 +26,7 @@ export class ApiError extends Error {
   readonly status: number;
   readonly title: string;
   readonly detail: string | null;
-  /** Extensão `code` do ProblemDetails (QueueItemConflict em 409, ContactCenterRule em 422). */
+  /** Extensão `code` do ProblemDetails (AlreadyAssigned, OperationInProgress, ItemClosed... em 409; ContactCenterRule em 422). */
   readonly code: string | null;
   /** A resposta de erro veio SEM o corpo de problema da API (vazia ou que não é JSON): quem respondeu foi um proxy, não a API. */
   readonly semCorpo: boolean;

@@ -40,6 +40,22 @@ const TAMANHO_DA_PAGINA_ANTIGA = 50;
 
 type Acao = 'claim' | 'release' | 'return-to-ai' | 'reply' | 'close';
 
+/** O texto de um conflito (409), conforme o código que a API informa. O sistema às vezes está só terminando uma operação: isso NÃO é "outro atendente assumiu". */
+function notaDoConflito(acao: Acao, codigo: string | null): string {
+  switch (codigo) {
+    case 'OperationInProgress':
+      return 'A conversa ainda está sendo atualizada pelo sistema. Aguarde um instante e tente de novo.';
+    case 'ItemClosed':
+      return 'Este atendimento já foi encerrado. A conversa foi atualizada.';
+    case 'AlreadyAssigned':
+      return acao === 'claim'
+        ? 'Outro atendente assumiu este atendimento antes de você. A conversa foi atualizada.'
+        : 'Outro atendente é o responsável por este atendimento. A conversa foi atualizada.';
+    default:
+      return 'O atendimento mudou enquanto você agia. A conversa foi atualizada: confira antes de repetir a ação.';
+  }
+}
+
 /** Como a ação terminou: provou que não teve efeito (`rejeitada`), concluiu, ou o resultado é incerto (rede, 5xx, ainda não confirmada). */
 type Situacao = 'concluida' | 'rejeitada' | 'incerta';
 
@@ -208,20 +224,18 @@ export function ConversationPanel({
       return true;
     } catch (erro) {
       aoTerminar?.(ehRejeicaoDefinitiva(erro) ? 'rejeitada' : 'incerta');
-      const conflitoAoAssumir = acao === 'claim' && erro instanceof ApiError && erro.status === 409;
-      // Perder a corrida ao assumir não é falha: a nota abaixo explica, sem faixa de erro vermelha.
-      if (conflitoAoAssumir) {
+      const conflito = erro instanceof ApiError && erro.status === 409;
+      // Um conflito que a nota abaixo explica não é falha: sem faixa de erro vermelha. Só quem de fato perdeu a corrida ao assumir ouve
+      // "outro atendente assumiu"; os outros conflitos (a conversa ainda entrando na fila, operação em andamento, encerrada) têm texto próprio.
+      const explicadoPelaNota = conflito && (erro.code === 'AlreadyAssigned' || erro.code === 'OperationInProgress' || erro.code === 'ItemClosed');
+      if (explicadoPelaNota) {
         onErroDeAcao(null);
       } else {
         onErroDeAcao(descreverErro(erro), ehFalhaDeConexao(erro));
       }
-      if (erro instanceof ApiError && erro.status === 409) {
-        // Conflito: outro atendente (ou o sistema) agiu primeiro. Mostra o que aconteceu e relê o estado real.
-        setNota(
-          conflitoAoAssumir
-            ? 'Outro atendente assumiu este atendimento antes de você. A conversa foi atualizada.'
-            : 'O atendimento mudou enquanto você agia. A conversa foi atualizada: confira antes de repetir a ação.',
-        );
+      if (conflito) {
+        // Conflito: outra operação (de outro atendente ou do sistema) agiu primeiro. Mostra o que aconteceu e relê o estado real.
+        setNota(notaDoConflito(acao, erro.code));
         setVersao((v) => v + 1);
         onAlterado();
       } else if (erro instanceof ApiError && erro.status === 403) {
@@ -238,6 +252,8 @@ export function ConversationPanel({
 
   const assumidoPorMim = item?.status === 'Assigned' && item.assignedUserId === me.id;
   const aguardando = item?.status === 'Waiting';
+  // A entrada na fila é operação do SISTEMA (a transferência da IA): nada para o atendente repetir, e assumir agora seria recusado.
+  const entrandoNaFila = item?.pending?.kind === 'Enter';
   const nome = nomeDoContato ?? rotuloSemNome(itemId);
   const alertaDeEnvio = alertaDoNumero(alertasDeEnvio, mensagens[mensagens.length - 1]?.channelInstanceId);
   const temTextoGuardado = texto.trim() !== '';
@@ -320,7 +336,13 @@ export function ConversationPanel({
         </div>
         <div className="acoes">
           {aguardando && (
-            <button type="button" className="btn btn-primario" disabled={ocupado !== null} onClick={() => void executar('claim', () => api.assumir(itemId))}>
+            <button
+              type="button"
+              className="btn btn-primario"
+              disabled={ocupado !== null || entrandoNaFila}
+              title={entrandoNaFila ? 'A conversa ainda está entrando na fila.' : undefined}
+              onClick={() => void executar('claim', () => api.assumir(itemId))}
+            >
               {ocupado === 'claim' ? 'Assumindo...' : 'Assumir'}
             </button>
           )}
@@ -355,7 +377,9 @@ export function ConversationPanel({
       {item?.status === 'Closed' && <p className="aviso">Este atendimento foi encerrado.</p>}
       {item?.pending && (
         <p className="aviso" role="status">
-          Há uma operação aguardando confirmação do servidor. Repita a ação para concluir.
+          {entrandoNaFila
+            ? 'A conversa está entrando na fila. Em instantes você poderá assumi-la.'
+            : 'Há uma operação aguardando confirmação do servidor. Repita a ação para concluir.'}
         </p>
       )}
       {nota && (

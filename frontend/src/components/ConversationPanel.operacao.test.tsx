@@ -133,7 +133,7 @@ describe('ConversationPanel: concorrência entre atendentes', () => {
       [ROTA_MENSAGENS]: pagina(),
       [ROTA_ASSUMIR]: () => {
         atual = COM_OUTRO; // o colega assumiu um instante antes
-        return problema(409, 'Conflito', 'O atendimento já está atribuído.', 'QueueItemConflict');
+        return problema(409, 'Conflito', 'O atendimento já está atribuído.', 'AlreadyAssigned');
       },
     });
     vi.stubGlobal('fetch', f);
@@ -199,7 +199,7 @@ describe('ConversationPanel: concorrência entre atendentes', () => {
       [ROTA_MENSAGENS]: () => (perdeu ? problema(403, 'Acesso negado') : pagina()),
       [ROTA_ASSUMIR]: () => {
         perdeu = true;
-        return problema(409, 'Conflito', 'Outro atendente já é o responsável por esta conversa.', 'QueueItemConflict');
+        return problema(409, 'Conflito', 'Outro atendente já é o responsável por esta conversa.', 'AlreadyAssigned');
       },
     });
     vi.stubGlobal('fetch', f);
@@ -212,6 +212,55 @@ describe('ConversationPanel: concorrência entre atendentes', () => {
     expect(await screen.findByText(/não está mais disponível para você/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Assumir' })).toBeNull();
     expect(aoErroDeAcao).not.toHaveBeenCalledWith(expect.any(String));
+  });
+
+  it('assumir enquanto a conversa ainda entra na fila (OperationInProgress): NÃO diz que outro atendente assumiu; explica e manda tentar de novo', async () => {
+    const f = criarFetch({
+      [ROTA_ITEM]: json(AGUARDANDO),
+      [ROTA_MENSAGENS]: pagina(),
+      [ROTA_ASSUMIR]: problema(409, 'Conflito', 'Há outra operação em andamento nesta conversa.', 'OperationInProgress'),
+    });
+    vi.stubGlobal('fetch', f);
+    const usuario = userEvent.setup();
+    const { aoErroDeAcao } = renderizar();
+
+    await usuario.click(await screen.findByRole('button', { name: 'Assumir' }));
+
+    expect(await screen.findByText(/ainda está sendo atualizada pelo sistema/)).toBeTruthy();
+    expect(screen.queryByText(/Outro atendente assumiu/)).toBeNull();
+    expect(aoErroDeAcao).not.toHaveBeenCalledWith(expect.any(String), expect.anything());
+    expect(screen.getByRole('button', { name: 'Assumir' })).toBeTruthy(); // continua podendo tentar
+  });
+
+  it('conflito de outro tipo ao assumir (código desconhecido): texto genérico de que o atendimento mudou, e mostra o erro da API', async () => {
+    vi.stubGlobal('fetch', criarFetch({ [ROTA_ITEM]: json(AGUARDANDO), [ROTA_MENSAGENS]: pagina(), [ROTA_ASSUMIR]: problema(409, 'Conflito', 'Algo mudou.', 'OutraCoisa') }));
+    const usuario = userEvent.setup();
+    const { aoErroDeAcao } = renderizar();
+
+    await usuario.click(await screen.findByRole('button', { name: 'Assumir' }));
+
+    expect(await screen.findByText(/O atendimento mudou enquanto você agia/)).toBeTruthy();
+    expect(screen.queryByText(/Outro atendente assumiu/)).toBeNull();
+    await waitFor(() => expect(aoErroDeAcao).toHaveBeenCalledWith('Conflito: Algo mudou.', false));
+  });
+
+  it('a conversa ainda entrando na fila (operação pendente de entrada): "Assumir" fica desabilitado e o aviso diz o que está acontecendo', async () => {
+    const entrando = item({ status: 'Waiting', pending: { kind: 'Enter', operationId: 'op-1', queueId: 'q', userId: null, attempts: 0, lastError: null, startedAt: new Date().toISOString() } });
+    vi.stubGlobal('fetch', criarFetch({ [ROTA_ITEM]: json(entrando), [ROTA_MENSAGENS]: pagina() }));
+    renderizar();
+
+    expect(await screen.findByText('A conversa está entrando na fila. Em instantes você poderá assumi-la.')).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Assumir' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByText(/Repita a ação/)).toBeNull();
+  });
+
+  it('operação pendente de outro tipo (a do próprio atendente): continua pedindo para repetir a ação', async () => {
+    const pendente = item({ status: 'Waiting', pending: { kind: 'Assign', operationId: 'op-2', queueId: 'q', userId: USUARIO.id, attempts: 1, lastError: null, startedAt: new Date().toISOString() } });
+    vi.stubGlobal('fetch', criarFetch({ [ROTA_ITEM]: json(pendente), [ROTA_MENSAGENS]: pagina() }));
+    renderizar();
+
+    expect(await screen.findByText(/Repita a ação para concluir/)).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Assumir' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('responder depois de perder a conversa (403): o texto continua no campo e a tela relê quem está com ela', async () => {
