@@ -26,6 +26,9 @@ param(
     [string]$VariavelDeConexao,
     [ValidateSet('Instancia', 'Servidor')][string]$Modo = 'Instancia',
     [switch]$Manter,
+
+    # O NOME da variavel de ambiente com a frase de cifra: o ensaio cifra o backup, verifica, decifra e restaura (a frase nunca e impressa).
+    [string]$ChaveEnv,
     [string]$PastaDeBackups = 'C:\Projetos\ferramentas\backups\ia.bimeta',
     [string]$PostgresBin = 'C:\Projetos\ferramentas\postgresql-17.11\bin'
 )
@@ -33,7 +36,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $script:PgBin = $PostgresBin
-. (Join-Path $PSScriptRoot '_Comum.ps1')
+. (Join-Path $PSScriptRoot '_Backup.ps1')
 
 $conexao = Get-ConexaoDeOrigem -Origem $Origem -VariavelDeConexao $VariavelDeConexao
 $marca = Get-Date -Format 'yyyyMMddHHmmss'
@@ -41,6 +44,7 @@ $bancoDeEnsaio = 'iabimeta_ensaio_' + $marca
 $instancia = $null
 $falhou = $false
 $pasta = $null
+$dump = $null
 $resultado = $null
 $segundosDoBackup = 0
 $cronometro = [Diagnostics.Stopwatch]::StartNew()
@@ -52,8 +56,14 @@ try {
     $pasta = & (Join-Path $PSScriptRoot 'Backup-Banco.ps1') @argumentos | Select-Object -Last 1
     $segundosDoBackup = [Math]::Round($cronometro.Elapsed.TotalSeconds, 1)
 
+    if ($ChaveEnv) {
+        Write-Host ('1b/4 Cifrando o backup (frase na variavel ' + $ChaveEnv + ') e conferindo a ida e volta ...')
+        Protect-Backup -Pasta $pasta -ChaveEnv $ChaveEnv | Out-Null
+    }
+
     Write-Host '2/4 Integridade do backup ...'
-    $manifesto = Test-IntegridadeDoBackup -Pasta $pasta
+    $manifesto = Test-IntegridadeDoBackup -Pasta $pasta -ChaveEnv $ChaveEnv
+    $dump = Get-DumpParaRestaurar -Pasta $pasta -Manifesto $manifesto -ChaveEnv $ChaveEnv
 
     if ($Modo -eq 'Instancia') {
         Write-Host '3/4 Subindo a instancia descartavel e restaurando ...'
@@ -64,7 +74,7 @@ try {
         Write-Host ('3/4 Restaurando no banco temporario ' + $bancoDeEnsaio + ' do servidor de origem ...')
         $destino = $conexao
     }
-    $resultado = Restore-EmBancoNovo -Conexao $destino -Pasta $pasta -Manifesto $manifesto -BancoDeDestino $bancoDeEnsaio
+    $resultado = Restore-EmBancoNovo -Conexao $destino -ArquivoDoDump $dump.Arquivo -Manifesto $manifesto -BancoDeDestino $bancoDeEnsaio
 
     Write-Host '4/4 Conferencias ...'
     if ($resultado.Diferencas.Count -gt 0) {
@@ -79,6 +89,7 @@ catch {
     Write-Host ('FALHA: ' + $_.Exception.Message)
 }
 finally {
+    Remove-DumpTemporario -Dump $dump
     if ($Manter) {
         if ($null -ne $instancia) { Write-Host ('Instancia mantida (porta ' + $instancia.Conexao.Porta + ', pasta ' + $instancia.Pasta + '): pare com pg_ctl stop -D "' + $instancia.Dados + '" e apague a pasta, manualmente.') }
         elseif ((Test-Path variable:script:BancoCriadoNestaExecucao) -and $script:BancoCriadoNestaExecucao -eq $bancoDeEnsaio) { Write-Host ("Banco temporario '" + $bancoDeEnsaio + "' mantido para inspecao: remova-o depois, manualmente.") }

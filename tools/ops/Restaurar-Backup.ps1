@@ -23,6 +23,9 @@ param(
     [Parameter(Mandatory)][string]$BancoDeDestino,
     [Parameter(Mandatory)][ValidateSet('Desenvolvimento', 'Teste', 'Ambiente')][string]$Origem,
     [string]$VariavelDeConexao,
+
+    # O NOME da variavel de ambiente com a frase de cifra (obrigatorio para restaurar um backup cifrado; a frase nunca e impressa).
+    [string]$ChaveEnv,
     [string]$PostgresBin = 'C:\Projetos\ferramentas\postgresql-17.11\bin'
 )
 
@@ -31,16 +34,19 @@ $ErrorActionPreference = 'Stop'
 $script:PgBin = $PostgresBin
 . (Join-Path $PSScriptRoot '_Comum.ps1')
 
+$dump = $null
 try {
-    $manifesto = Test-IntegridadeDoBackup -Pasta $Pasta
-    Write-Host ('Backup integro (' + $manifesto.arquivo + ', sha256 conferido).')
+    $manifesto = Test-IntegridadeDoBackup -Pasta $Pasta -ChaveEnv $ChaveEnv
+    Write-Host ('Backup integro (' + $manifesto.arquivo + ', sha256 conferido' + $(if ($manifesto.VerificacaoCompleta) { '' } else { '; cifrado' }) + ').')
     $conexao = Get-ConexaoDeOrigem -Origem $Origem -VariavelDeConexao $VariavelDeConexao
-    $resultado = Restore-EmBancoNovo -Conexao $conexao -Pasta $Pasta -Manifesto $manifesto -BancoDeDestino $BancoDeDestino
+    $dump = Get-DumpParaRestaurar -Pasta $Pasta -Manifesto $manifesto -ChaveEnv $ChaveEnv
+    $resultado = Restore-EmBancoNovo -Conexao $conexao -ArquivoDoDump $dump.Arquivo -Manifesto $manifesto -BancoDeDestino $BancoDeDestino
 }
 catch {
     Write-Host ('FALHA: ' + $_.Exception.Message)
     exit 1
 }
+finally { Remove-DumpTemporario -Dump $dump }
 
 Write-Host ("Restaurado em '" + $resultado.Banco + "' em " + $resultado.SegundosDoRestore + ' s (' + $resultado.Tabelas + ' tabelas).')
 if ($resultado.Diferencas.Count -gt 0) {

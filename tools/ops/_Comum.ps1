@@ -3,6 +3,8 @@
 
 Set-StrictMode -Version Latest
 
+. (Join-Path $PSScriptRoot '_Cifra.ps1')
+
 if (-not (Test-Path variable:script:PgBin) -or [string]::IsNullOrEmpty($script:PgBin)) {
     $script:PgBin = 'C:\Projetos\ferramentas\postgresql-17.11\bin'
 }
@@ -34,8 +36,10 @@ function ConvertFrom-ConexaoNpgsql {
     if ([string]::IsNullOrEmpty($servidor) -or [string]::IsNullOrEmpty($banco) -or [string]::IsNullOrEmpty($usuario)) {
         throw 'A string de conexao nao tem host, database ou usuario.'
     }
-    # O PostgreSQL do projeto e o da porta 5433; o da 5432 (se existir na maquina) nao e este.
-    if ($porta -ne '5433') { throw ('Porta inesperada (' + $porta + '): o PostgreSQL do projeto e o da porta 5433.') }
+    # O PostgreSQL do projeto e o da porta 5433; o da 5432 (se existir na maquina) nao e este. Unica excecao: as instancias descartaveis do ensaio e dos
+    # testes destes scripts, que sobem so em 127.0.0.1 numa porta efemera (49152 ou mais), nunca em 5432.
+    $descartavel = ($servidor -eq '127.0.0.1') -and ($porta -match '^\d+$') -and ([int]$porta -ge 49152)
+    if ($porta -ne '5433' -and -not $descartavel) { throw ('Porta inesperada (' + $porta + '): o PostgreSQL do projeto e o da porta 5433.') }
     return [pscustomobject]@{ Servidor = $servidor; Porta = $porta; Banco = $banco; Usuario = $usuario; Senha = $senha }
 }
 
@@ -170,19 +174,75 @@ function Remove-InstanciaDescartavel {
 
 # Confere o backup pela pasta: manifesto, existencia e tamanho do arquivo, SHA-256 e leitura do dump pelo pg_restore --list.
 # Devolve o manifesto; lanca excecao com o motivo se qualquer conferencia falhar. Somente leitura.
+function Test-ManifestoCifrado {
+    param([Parameter(Mandatory)]$Manifesto)
+    return ($Manifesto.PSObject.Properties.Name -contains 'cifrado') -and [bool]$Manifesto.cifrado
+}
+
+# Decifra o backup para uma pasta temporaria DENTRO da pasta do backup (_tmp-*), confere o SHA-256 do dump original e devolve o caminho do dump e
+# a pasta temporaria (quem chama a apaga com Remove-DumpTemporario). Frase errada, arquivo alterado ou SHA-256 diferente do manifesto: falha.
+function Get-DumpParaRestaurar {
+    param([Parameter(Mandatory)][string]$Pasta, [Parameter(Mandatory)]$Manifesto, [string]$ChaveEnv)
+    $armazenado = Join-Path $Pasta $Manifesto.arquivo
+    if (-not (Test-ManifestoCifrado -Manifesto $Manifesto)) {
+        return [pscustomobject]@{ Arquivo = $armazenado; PastaTemporaria = $null }
+    }
+    if ([string]::IsNullOrEmpty($ChaveEnv)) { throw 'Este backup e CIFRADO: informe -ChaveEnv com o nome da variavel de ambiente que guarda a frase de cifra.' }
+    $temporaria = Join-Path $Pasta ('_tmp-' + [guid]::NewGuid().ToString('N').Substring(0, 12))
+    New-Item -ItemType Directory -Path $temporaria | Out-Null
+    $destino = Join-Path $temporaria $Manifesto.dump.arquivo
+    try {
+        $sha = Unprotect-Arquivo -Origem $armazenado -Destino $destino -ChaveEnv $ChaveEnv
+        if ($sha -ne $Manifesto.dump.sha256) { throw 'O SHA-256 do dump decifrado difere do manifesto.' }
+    }
+    catch {
+        Remove-DumpTemporario -Dump ([pscustomobject]@{ Arquivo = $destino; PastaTemporaria = $temporaria })
+        throw
+    }
+    return [pscustomobject]@{ Arquivo = $destino; PastaTemporaria = $temporaria }
+}
+
+# Apaga a pasta temporaria criada por Get-DumpParaRestaurar (so uma pasta "_tmp-*" que a propria funcao criou).
+function Remove-DumpTemporario {
+    param($Dump)
+    if ($null -eq $Dump -or [string]::IsNullOrEmpty($Dump.PastaTemporaria)) { return }
+    if ((Split-Path -Leaf $Dump.PastaTemporaria).StartsWith('_tmp-') -and (Test-Path $Dump.PastaTemporaria)) {
+        Remove-Item -Recurse -Force -Path $Dump.PastaTemporaria -ErrorAction SilentlyContinue
+    }
+}
+
+# Confere o backup pela pasta: manifesto, existencia e tamanho do arquivo, SHA-256 e leitura do dump pelo pg_restore --list. Backup CIFRADO: com -ChaveEnv
+# a verificacao e COMPLETA (autentica o MAC, decifra para uma pasta temporaria, confere o SHA-256 do dump original e le o dump); sem ela, so o arquivo
+# cifrado (tamanho e SHA-256), e o manifesto devolvido traz VerificacaoCompleta = $false. Somente leitura (a pasta temporaria e apagada).
 function Test-IntegridadeDoBackup {
-    param([Parameter(Mandatory)][string]$Pasta)
+    param([Parameter(Mandatory)][string]$Pasta, [string]$ChaveEnv)
     $arquivoDoManifesto = Join-Path $Pasta 'manifesto.json'
     if (-not (Test-Path $arquivoDoManifesto)) { throw ('manifesto.json nao encontrado em ' + $Pasta) }
     $manifesto = Get-Content -Raw -Path $arquivoDoManifesto | ConvertFrom-Json
     if ($manifesto.versaoDoManifesto -ne 1) { throw ('Versao de manifesto desconhecida: ' + $manifesto.versaoDoManifesto) }
     $arquivo = Join-Path $Pasta $manifesto.arquivo
-    if (-not (Test-Path $arquivo)) { throw ('Arquivo do dump nao encontrado: ' + $arquivo) }
-    if ((Get-Item $arquivo).Length -ne [long]$manifesto.tamanhoEmBytes) { throw 'O tamanho do dump difere do manifesto (arquivo truncado ou trocado).' }
+    if (-not (Test-Path $arquivo)) { throw ('Arquivo do backup nao encontrado: ' + $arquivo) }
+    if ((Get-Item $arquivo).Length -ne [long]$manifesto.tamanhoEmBytes) { throw 'O tamanho do arquivo difere do manifesto (arquivo truncado ou trocado).' }
     $hash = (Get-FileHash -Algorithm SHA256 -Path $arquivo).Hash
-    if ($hash -ne $manifesto.sha256) { throw 'O SHA-256 do dump difere do manifesto (arquivo corrompido ou alterado).' }
-    $entradas = Get-EntradasDoDump -Arquivo $arquivo
-    if ($entradas -ne [int]$manifesto.entradasDoDump) { throw ('O dump tem ' + $entradas + ' entradas; o manifesto registra ' + $manifesto.entradasDoDump + '.') }
+    if ($hash -ne $manifesto.sha256) { throw 'O SHA-256 do arquivo difere do manifesto (arquivo corrompido ou alterado).' }
+
+    $completa = $true
+    if (Test-ManifestoCifrado -Manifesto $manifesto) {
+        if ([string]::IsNullOrEmpty($ChaveEnv)) { $completa = $false }
+        else {
+            $dump = Get-DumpParaRestaurar -Pasta $Pasta -Manifesto $manifesto -ChaveEnv $ChaveEnv
+            try {
+                $entradas = Get-EntradasDoDump -Arquivo $dump.Arquivo
+                if ($entradas -ne [int]$manifesto.entradasDoDump) { throw ('O dump tem ' + $entradas + ' entradas; o manifesto registra ' + $manifesto.entradasDoDump + '.') }
+            }
+            finally { Remove-DumpTemporario -Dump $dump }
+        }
+    }
+    else {
+        $entradas = Get-EntradasDoDump -Arquivo $arquivo
+        if ($entradas -ne [int]$manifesto.entradasDoDump) { throw ('O dump tem ' + $entradas + ' entradas; o manifesto registra ' + $manifesto.entradasDoDump + '.') }
+    }
+    Add-Member -InputObject $manifesto -NotePropertyName VerificacaoCompleta -NotePropertyValue $completa -Force
     return $manifesto
 }
 
@@ -205,7 +265,8 @@ function Compare-Contagens {
 # Restaura o dump num banco NOVO. Recusa se o destino ja existir: nunca restaura sobre banco existente e nunca apaga nada.
 # Devolve um objeto com o resultado das conferencias; lanca excecao se o restore falhar (o banco novo fica para inspecao).
 function Restore-EmBancoNovo {
-    param([Parameter(Mandatory)]$Conexao, [Parameter(Mandatory)][string]$Pasta, [Parameter(Mandatory)]$Manifesto, [Parameter(Mandatory)][string]$BancoDeDestino)
+    param([Parameter(Mandatory)]$Conexao, [Parameter(Mandatory)][string]$ArquivoDoDump, [Parameter(Mandatory)]$Manifesto, [Parameter(Mandatory)][string]$BancoDeDestino)
+    if (-not (Test-Path $ArquivoDoDump)) { throw 'O arquivo do dump a restaurar nao existe.' }
     if (-not (Test-NomeDeBanco -Nome $BancoDeDestino)) { throw 'O nome do banco de destino aceita so minusculas, numeros e sublinhado (3 a 63, comecando por letra).' }
     $existe = @(Invoke-Psql -Conexao $Conexao -Banco 'postgres' -Sql ("SELECT count(*) FROM pg_database WHERE datname = '" + $BancoDeDestino + "';"))
     if ([int]$existe[0] -ne 0) { throw ("O banco '" + $BancoDeDestino + "' JA EXISTE. Esta ferramenta nunca restaura sobre banco existente: escolha outro nome (veja docs\operations\BACKUP-E-RESTAURACAO.md).") }
@@ -214,7 +275,7 @@ function Restore-EmBancoNovo {
 
     # Registra que ESTA execucao criou o banco: quem limpa o ensaio so remove um banco que o proprio script criou.
     $script:BancoCriadoNestaExecucao = $BancoDeDestino
-    $arquivo = Join-Path $Pasta $Manifesto.arquivo
+    $arquivo = $ArquivoDoDump
     $relogio = [Diagnostics.Stopwatch]::StartNew()
     $env:PGPASSWORD = $Conexao.Senha
     try {
