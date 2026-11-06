@@ -329,5 +329,21 @@ internal sealed class OutboundMessageStore : IOutboundMessageStore
         }
     }
 
-    public Task SaveAsync(CancellationToken cancellationToken) => _db.SaveChangesAsync(cancellationToken);
+    /// <summary>
+    /// Grava o despacho com comparação e troca: o estado e a contagem de tentativas lidos são parte da condição do <c>UPDATE</c>, então quem perdeu o lease (ou perdeu a corrida para o tratamento de morto) e grava um desfecho
+    /// depois de outro processo já ter gravado o dele NÃO sobrescreve nada: a gravação é descartada e sobe <see cref="OutboundStateConflictException"/>.
+    /// </summary>
+    public async Task SaveAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // Nada do que este processo achava que era o estado vale mais: o rastreamento é descartado e a próxima leitura traz o que o outro gravou.
+            _db.ChangeTracker.Clear();
+            throw new OutboundStateConflictException();
+        }
+    }
 }

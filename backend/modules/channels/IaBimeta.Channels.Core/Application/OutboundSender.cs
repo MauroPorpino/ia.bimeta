@@ -88,6 +88,21 @@ public sealed class OutboundMessageRequestedHandler : EventHandlerBase<OutboundM
 
     protected override async Task<HandlerResult> HandleAsync(EventEnvelope envelope, OutboundMessageRequestedV1 payload, CancellationToken cancellationToken)
     {
+        try
+        {
+            return await SendAsync(envelope, payload, cancellationToken);
+        }
+        catch (OutboundStateConflictException)
+        {
+            // Outro processo gravou o estado do despacho depois de este o ler (por exemplo, este handler perdeu o lease e o novo dono ou o tratamento de morto já decidiu): a gravação foi DESCARTADA e o que está gravado
+            // vale. Nada é reenviado e nada é sobrescrito; a próxima entrega (se ainda houver uma para este lease) relê o estado.
+            ChannelsMetrics.OutboundStateConflict.Add(1);
+            return HandlerResult.Retry(null, "outbound-state-conflict");
+        }
+    }
+
+    private async Task<HandlerResult> SendAsync(EventEnvelope envelope, OutboundMessageRequestedV1 payload, CancellationToken cancellationToken)
+    {
         var agora = _clock.GetUtcNow();
         OutboundMessage mensagem;
 
@@ -287,6 +302,20 @@ public sealed class OutboundMessageRequestedHandler : EventHandlerBase<OutboundM
     /// já tem desfecho só é informado, se ainda não foi. Idempotente: repetir não muda nada.
     /// </summary>
     protected override async Task<HandlerResult> HandleDeadAsync(EventEnvelope envelope, OutboundMessageRequestedV1 payload, string deadReason, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await ResolveDeadAsync(envelope, payload, cancellationToken);
+        }
+        catch (OutboundStateConflictException)
+        {
+            // Um handler com o lease vencido (ou outra varredura) gravou o desfecho primeiro: o que está gravado vale, e a próxima varredura relê e só informa o Conversations, se faltar.
+            ChannelsMetrics.OutboundStateConflict.Add(1);
+            return HandlerResult.Retry(null, "outbound-state-conflict");
+        }
+    }
+
+    private async Task<HandlerResult> ResolveDeadAsync(EventEnvelope envelope, OutboundMessageRequestedV1 payload, CancellationToken cancellationToken)
     {
         var agora = _clock.GetUtcNow();
         var existente = await _store.FindByOperationAsync(payload.OperationId, cancellationToken);

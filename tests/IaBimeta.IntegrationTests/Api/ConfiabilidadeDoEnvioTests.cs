@@ -160,6 +160,46 @@ public sealed class ConfiabilidadeDoEnvioTests(PostgresFixture banco)
         Assert.Empty(await EventosAsync(e, "conversations.outbound-message-failed")); // incerto não é falha definitiva
     }
 
+    [Fact]
+    public async Task Worker_antigo_com_o_lease_vencido_que_recebe_aceito_tarde_nao_sobrescreve_o_SendUnknown_gravado_pelo_novo_e_a_Meta_nunca_e_chamada_de_novo()
+    {
+        // Lease curto: o Worker A fica com a chamada presa, o lease vence, e o Worker B (outro processo, ao mesmo tempo) assume o evento.
+        await using var e = await IniciarAsync("confzumbi", new Dictionary<string, string?>
+        {
+            ["Messaging:LeaseDuration"] = "00:00:03",
+            ["Channels:Providers:WhatsApp:RequestTimeout"] = "00:02:00",
+        });
+        e.Ia.OpenAi.Roteiros.Definir(EnsaioDeIa.ChaveCanario, Responde("Resposta do worker que vai ficar com o lease vencido."));
+        var libera = new TaskCompletionSource();
+        e.Graph.Antes = async (_, cancelamento) => await Task.WhenAny(libera.Task, Task.Delay(Timeout.Infinite, cancelamento));
+
+        Assert.Equal(HttpStatusCode.OK, await e.EnviarWebhookAsync(e.PayloadDeTexto("wamid.CONF0401", Cliente, "Zumbi", "Oi")));
+        var sessao = await e.EsperarSessaoAsync("Zumbi");
+        await e.EsperarAsync(async () => e.Graph.Capturas.Count == 1, "a chamada deveria chegar à Meta e ficar presa no Worker A");
+        var opaco = e.Graph.Capturas[0].DadoOpaco;
+
+        // O Worker B sobe com o A ainda vivo: depois do lease vencido ele acha o despacho em andamento e decide "incerto" (a Meta PODE ter recebido), sem chamar a Meta.
+        await e.Ia.SubirOutroWorkerAsync();
+        await e.EsperarEntregaAsync(sessao, "SendUnknown", segundos: 40);
+        Assert.Single(e.Graph.Capturas);
+
+        // A Meta, enfim, responde "aceito" ao Worker A (o lease dele já venceu): a gravação tardia é DESCARTADA, o estado do B vale e nada é reenviado.
+        e.Graph.Antes = null;
+        libera.SetResult();
+        await Task.Delay(TimeSpan.FromSeconds(4));
+
+        var despacho = await e.Ia.ComoSistemaAsync(sp => sp.GetRequiredService<ChannelsDbContext>().OutboundMessages.AsNoTracking().SingleAsync());
+        Assert.Equal((IaBimeta.Channels.Domain.OutboundState.SendUnknown, "interrupted", null, true), (despacho.State, despacho.ErrorCode, despacho.ProviderMessageId, despacho.Notified));
+        Assert.Equal("SendUnknown", await e.EstadoDeEntregaAsync(sessao, "Ai"));
+        Assert.Single(e.Graph.Capturas);
+        Assert.Empty(await EventosAsync(e, "conversations.outbound-message-failed"));
+
+        // O que resolve o incerto é a EVIDÊNCIA do provedor (o status do webhook, ligado pelo dado opaco da própria mensagem), não uma gravação tardia: o estado avança para entregue.
+        Assert.Equal(HttpStatusCode.OK, await e.EnviarWebhookAsync(e.PayloadDeStatus("wamid.SAIDA-ZUMBI", "delivered", opaco, Cliente)));
+        await e.EsperarEntregaAsync(sessao, "Delivered");
+        Assert.Single(e.Graph.Capturas);
+    }
+
     // A espera longa por vazão
 
     [Fact]

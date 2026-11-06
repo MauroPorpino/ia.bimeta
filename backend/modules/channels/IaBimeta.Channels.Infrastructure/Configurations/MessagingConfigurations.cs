@@ -89,9 +89,9 @@ internal sealed class OutboundMessageConfiguration : IEntityTypeConfiguration<Ou
         builder.Property(m => m.Id).HasColumnName("id").ValueGeneratedNever();
         builder.Property(m => m.OperationId).HasColumnName("operation_id");
         builder.Property(m => m.ChannelInstanceId).HasColumnName("channel_instance_id").HasConversion(new ChannelInstanceIdConverter());
-        builder.Property(m => m.State).HasColumnName("state").HasConversion<short>();
+        builder.Property(m => m.State).HasColumnName("state").HasConversion<short>().IsConcurrencyToken();
         builder.Property(m => m.ProviderMessageId).HasColumnName("provider_message_id").HasMaxLength(200);
-        builder.Property(m => m.Attempts).HasColumnName("attempts");
+        builder.Property(m => m.Attempts).HasColumnName("attempts").IsConcurrencyToken();
         builder.Property(m => m.ErrorCode).HasColumnName("error_code").HasMaxLength(100);
         builder.Property(m => m.Notified).HasColumnName("notified");
         builder.Property(m => m.CreatedAt).HasColumnName("created_at");

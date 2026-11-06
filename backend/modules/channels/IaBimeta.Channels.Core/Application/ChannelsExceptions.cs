@@ -41,3 +41,15 @@ public sealed class ChannelSecretsNotConfiguredException : Exception
     {
     }
 }
+
+/// <summary>
+/// Outro processo gravou o estado do despacho de uma mensagem de saída depois de este o ler: quem gravaria agora (um handler cujo lease venceu e continua rodando, ou o tratamento de morto de outro relay) NÃO sobrescreve
+/// o que já está gravado. O estado final de quem gravou primeiro vale (nunca se troca <c>SendUnknown</c> por <c>Sent</c> ou por <c>Failed</c> por conta de uma resposta tardia), e quem perdeu relê na próxima entrega.
+/// </summary>
+public sealed class OutboundStateConflictException : Exception
+{
+    public OutboundStateConflictException()
+        : base("O estado do despacho foi gravado por outro processo; esta gravação foi descartada.")
+    {
+    }
+}

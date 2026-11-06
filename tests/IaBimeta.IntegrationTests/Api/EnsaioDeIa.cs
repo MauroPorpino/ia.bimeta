@@ -127,6 +127,7 @@ internal sealed class EnsaioDeIa : IAsyncDisposable
     private readonly PostgresFixture _banco;
     private readonly Dictionary<string, string?> _configuracaoDoApi;
     private readonly Func<IHost> _construirWorker;
+    private readonly List<IHost> _workersExtras = new();
 
     private EnsaioDeIa(PostgresFixture banco, string slug, ServidorOpenAiLoopback openAi, ApiServer api, IHost worker, CapturaDeLogs logs, Dictionary<string, string?> configuracaoDoApi, Func<IHost> construirWorker)
     {
@@ -275,6 +276,17 @@ internal sealed class EnsaioDeIa : IAsyncDisposable
         await Worker.StartAsync();
     }
 
+    /// <summary>
+    /// Sobe OUTRO Worker com a mesma configuração, sem parar o atual (dois processos de Worker ao mesmo tempo, como numa implantação com mais de uma instância). É descartado com o ensaio.
+    /// </summary>
+    public async Task<IHost> SubirOutroWorkerAsync()
+    {
+        var outro = _construirWorker();
+        await outro.StartAsync();
+        _workersExtras.Add(outro);
+        return outro;
+    }
+
     /// <summary>Um segundo Api com a MESMA configuração (o desenvolvedor que reinicia o Api): a preparação roda de novo e não pode duplicar nada.</summary>
     public Task<ApiServer> SegundoApiAsync() => ApiServer.StartAsync("Development", new Dictionary<string, string?>(_configuracaoDoApi));
 
@@ -362,6 +374,13 @@ internal sealed class EnsaioDeIa : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        foreach (var extra in _workersExtras)
+        {
+            using var limite = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await extra.StopAsync(limite.Token);
+            extra.Dispose();
+        }
+
         await Worker.StopAsync();
         Worker.Dispose();
         await Api.DisposeAsync();

@@ -1,6 +1,6 @@
 # ADR 0020 — Confiabilidade do envio: mortos do relay, espera sem falha (Defer), sinal de falha na fila e diagnóstico operacional
 
-- **Status:** **Proposto para ratificação.** Implementado em 05/11/2026 sob a autorização do decisor para tornar o envio confiável antes de conectar o WhatsApp real, com autonomia em decisões técnicas rotineiras. Nenhuma chamada real à Meta ou à OpenAI.
+- **Status:** **Aceito para o MVP (ratificado pelo decisor em 06/11/2026).** Implementado em 05/11/2026 sob a autorização do decisor para tornar o envio confiável antes de conectar o WhatsApp real, com autonomia em decisões técnicas rotineiras. Nenhuma chamada real à Meta ou à OpenAI.
 - **Data:** 05/11/2026
 - **Decisor:** Mauro Porpino
 - **Referências:** ADR 0011 (E, EFX-3), 0018 e 0019; `docs/architecture/BOUNDARIES.md` §12.5 (retentativa, mortos), §12.7 (efeitos externos) e SND-4, SND-7; `docs/architecture/CONVERSATION-LIFECYCLE.md` §11
@@ -24,7 +24,7 @@ O relay marcava um evento como **morto** (tentativas esgotadas, lease vencido se
 - **Reenvio de falhas** após a retomada de uma conta (a 8ª operação do ADR 0009 segue fora do MVP): o atendente responde de novo.
 - **Alerta ativo** (e-mail, Slack) e painel: o diagnóstico é uma consulta e um script.
 - **Eventos mortos de outros consumidores** (Agents, ContactCenter) só ganham tratamento quando o handler implementar `HandleDeadAsync`; o diagnóstico lista apenas entradas mortas do Channels.
-- **Zumbi com lease vencido:** um handler que continua rodando depois de o lease vencer (pausa longa do processo) pode gravar um desfecho depois de a varredura de morto já ter decidido; ambos são seguros contra duplicidade (nenhum reenvia), mas o estado final é o do último a gravar.
+- ~~**Zumbi com lease vencido** (um handler que continua rodando depois de o lease vencer pode gravar um desfecho depois de outro Worker)~~ - **resolvido no ADR 0021** (comparação e troca no despacho: o estado de quem gravou primeiro vale).
 - **Entradas mortas reenfileiradas** dependem da deduplicação por identificador do provedor para não duplicar a mensagem do cliente.
 
 ## Consequências
