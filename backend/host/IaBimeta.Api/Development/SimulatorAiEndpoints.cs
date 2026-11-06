@@ -51,8 +51,11 @@ internal static class SimulatorAiEndpoints
             CancellationToken ct) =>
         {
             var config = opcoes.Ai;
-            var organizacao = (await organizacoes.ListAsync(ct)).FirstOrDefault(o => o.Name == config.OrganizationName);
-            var fila = organizacao is null ? null : (await filas.ListAsync(ct)).FirstOrDefault(f => f.OrganizationId == organizacao.Id && f.Name == config.QueueName);
+            // O tenant de demonstração (nomes da configuração) ou, num tenant provisionado pelo comando provision, a primeira organização e a primeira fila dele.
+            var todasAsOrganizacoes = await organizacoes.ListAsync(ct);
+            var organizacao = todasAsOrganizacoes.FirstOrDefault(o => o.Name == config.OrganizationName) ?? todasAsOrganizacoes.FirstOrDefault();
+            var todasAsFilas = organizacao is null ? new List<ServiceQueueView>() : (await filas.ListAsync(ct)).Where(f => f.OrganizationId == organizacao.Id).ToList();
+            var fila = todasAsFilas.FirstOrDefault(f => f.Name == config.QueueName) ?? todasAsFilas.FirstOrDefault();
             var agente = await definicoes.GetPublishedAsync(ct);
 
             return Results.Ok(new
@@ -75,20 +78,24 @@ internal static class SimulatorAiEndpoints
         });
 
         // O canal de demonstração do WhatsApp: o caminho do webhook (o identificador opaco), o número e as credenciais SINTÉTICAS de desenvolvimento, para o script que simula a Meta assinar e enviar o webhook.
-        grupo.MapGet("/whatsapp/status", async (DevelopmentTenancyOptions opcoes, ChannelAccountService contas, ChannelWebhookAdminService webhooks, CancellationToken ct) =>
+        grupo.MapGet("/whatsapp/status", async (DevelopmentTenancyOptions opcoes, ChannelAccountService contas, ChannelInstanceService instancias, ChannelWebhookAdminService webhooks, CancellationToken ct) =>
         {
-            var conta = (await contas.ListAsync(ct)).FirstOrDefault(c => c.ProviderAccountId == opcoes.Ai.DemoWabaId);
+            // O canal de demonstração do desenvolvimento, ou o canal SIMULADO que o comando provision cadastrou para o tenant (waba-sim-<slug>, credenciais sintéticas). Canal real nunca entra aqui.
+            var todas = await contas.ListAsync(ct);
+            var conta = todas.FirstOrDefault(c => c.ProviderAccountId == opcoes.Ai.DemoWabaId)
+                ?? todas.FirstOrDefault(c => c.ProviderAccountId.StartsWith(IaBimeta.Api.Provisioning.TenantProvisioner.SimulatedWabaPrefix, StringComparison.Ordinal));
             if (conta is null)
             {
                 return Results.NotFound();
             }
 
+            var numero = (await instancias.ListAsync(ct)).FirstOrDefault(i => i.AccountId == conta.Id);
             var webhook = await webhooks.EnsureAsync(conta.Id, ct);
             return Results.Ok(new
             {
                 webhookPath = webhook.Path,
-                wabaId = opcoes.Ai.DemoWabaId,
-                phoneNumberId = opcoes.Ai.DemoPhoneNumberId,
+                wabaId = conta.ProviderAccountId,
+                phoneNumberId = numero?.PhoneNumberId ?? opcoes.Ai.DemoPhoneNumberId,
                 appSecret = DevelopmentAiSetup.DemoAppSecret,
                 verifyToken = DevelopmentAiSetup.DemoVerifyToken,
                 attendant = DevelopmentAiSetup.DemoAttendantEmail,

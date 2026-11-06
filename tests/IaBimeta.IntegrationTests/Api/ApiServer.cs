@@ -23,6 +23,9 @@ internal sealed class ApiServer : IAsyncDisposable
 
     public HttpClient Client { get; }
 
+    /// <summary>A composição REAL do Api (a mesma do comando provision): para rodar o provisionamento de uma empresa contra o host que o ensaio subiu.</summary>
+    public IServiceProvider Services => _app.Services;
+
     /// <param name="ambiente">Development, Production, Staging...</param>
     /// <param name="configuracao">Sobrescreve a configuração (por exemplo, a string de conexão e a seção Tenancy:Development).</param>
     /// <param name="relogio">Relógio controlado pelo teste (por exemplo, para fazer uma sessão expirar). Sem ele, vale o relógio do sistema.</param>

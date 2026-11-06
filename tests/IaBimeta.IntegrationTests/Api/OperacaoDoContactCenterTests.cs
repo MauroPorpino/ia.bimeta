@@ -40,7 +40,10 @@ public sealed class OperacaoDoContactCenterTests(PostgresFixture banco)
             async () =>
             {
                 var itens = await e.Ia.Api.LerAsync<JsonNode>(token, "/contact-center/items?status=Waiting&take=50");
-                itemId = itens.AsArray().FirstOrDefault(i => i!["sessionId"]!.GetValue<Guid>() == sessao)?["id"]?.GetValue<string>();
+
+                // Só vale a conversa que JÁ terminou de entrar na fila (sem operação pendente): assumir durante a entrada é recusado com OperationInProgress, que a interface explica ao atendente.
+                var item = itens.AsArray().FirstOrDefault(i => i!["sessionId"]!.GetValue<Guid>() == sessao);
+                itemId = item?["pending"] is null ? item?["id"]?.GetValue<string>() : null;
                 return itemId is not null;
             },
             "a conversa deveria estar esperando na fila");
@@ -154,6 +157,53 @@ public sealed class OperacaoDoContactCenterTests(PostgresFixture banco)
         // Nada além do combinado saiu para os clientes, e o modelo foi chamado só nas três primeiras mensagens (depois, quem responde é o humano).
         Assert.Equal(6, e.Graph.Capturas.Count);
         Assert.Equal(3, e.Ia.OpenAi.Roteiros.Capturas.Count);
+    }
+
+    [Fact]
+    public async Task O_cliente_volta_depois_de_devolvido_a_IA_e_depois_de_encerrado_e_e_atendido_de_novo_sem_ficar_sem_resposta()
+    {
+        await using var e = await IniciarAsync("ccvolta");
+        var (_, token) = await e.NovoAtendenteAsync();
+        const string cliente = "5511999990601";
+
+        // 1) A IA transfere e o atendente assume.
+        Assert.Equal(HttpStatusCode.OK, await e.EnviarWebhookAsync(e.PayloadDeTexto("wamid.VOLTA0001", cliente, "Volta", "Quanto custa o hemograma?")));
+        var sessao = await e.EsperarSessaoAsync("Volta");
+        var item = await ItemDaSessaoAsync(e, token, sessao);
+        await e.EsperarAsync(async () => e.Graph.Capturas.Count == 1, "o aviso de transferência deveria sair");
+        var (statusDoClaim, corpoDoClaim) = await e.ChamarAsync(token, HttpMethod.Post, $"/contact-center/items/{item}/claim", new JsonObject { ["requestId"] = Guid.NewGuid().ToString() });
+        Assert.True(statusDoClaim == HttpStatusCode.OK, $"claim: {statusDoClaim} {corpoDoClaim}");
+
+        // 2) Devolve à IA: o cliente escreve e QUEM RESPONDE É A IA (o modelo é chamado de novo), pelo WhatsApp.
+        Assert.Equal(HttpStatusCode.OK, await AcaoAsync(e, token, item, "return-to-ai", new { requestId = Guid.NewGuid() }));
+        e.Ia.OpenAi.Roteiros.Definir(EnsaioDeIa.ChaveCanario, (_, _) => Task.FromResult(ServidorOpenAiSimulado.Sucesso(CenarioDeAgentes.Responder("A IA voltou a atender você."), 150, 0, 25, "req_volta")));
+        var chamadas = e.Ia.OpenAi.Roteiros.Capturas.Count;
+        Assert.Equal(HttpStatusCode.OK, await e.EnviarWebhookAsync(e.PayloadDeTexto("wamid.VOLTA0002", cliente, "Volta", "Obrigado, e o horário de atendimento?")));
+        await e.EsperarAsync(async () => e.Graph.Capturas.Count == 2, "a IA deveria responder depois da devolução");
+        Assert.Equal((cliente, "A IA voltou a atender você."), (e.Graph.Capturas[1].Para, e.Graph.Capturas[1].Texto));
+        // O modelo foi chamado de novo (a IA voltou a atender). O número exato não é afirmado: o banco de teste é compartilhado e um turno de outro ensaio pode usar o mesmo servidor simulado.
+        Assert.True(e.Ia.OpenAi.Roteiros.Capturas.Count >= chamadas + 1);
+
+        // 3) Depois de ENCERRADO o atendimento (a sessão fecha), o cliente escreve outra vez, no dia seguinte: nova conversa, atendida pela IA, sem ficar sem resposta.
+        e.Ia.OpenAi.Roteiros.Definir(EnsaioDeIa.ChaveCanario, Transfere("price"));
+        Assert.Equal(HttpStatusCode.OK, await e.EnviarWebhookAsync(e.PayloadDeTexto("wamid.VOLTA0003", cliente, "Volta", "Quero saber o preço de outro exame")));
+        await e.EsperarAsync(async () => e.Graph.Capturas.Count == 3, "o novo pedido deveria ser transferido de novo");
+        string? segundoItem = null;
+        await e.EsperarAsync(
+            async () =>
+            {
+                segundoItem = (await e.Ia.Api.LerAsync<JsonNode>(token, "/contact-center/items?status=Waiting&take=20")).AsArray().FirstOrDefault()?["id"]?.GetValue<string>();
+                return segundoItem is not null;
+            },
+            "a conversa deveria voltar à fila");
+        Assert.Equal(HttpStatusCode.OK, await AcaoAsync(e, token, segundoItem!, "claim", new { requestId = Guid.NewGuid() }));
+        Assert.Equal(HttpStatusCode.OK, await AcaoAsync(e, token, segundoItem!, "close", new { requestId = Guid.NewGuid(), reasonCode = "resolved" }));
+        await e.EsperarAsync(async () => await StatusDoItemAsync(e, token, segundoItem!) == "Closed", "o atendimento deveria encerrar");
+
+        e.Ia.OpenAi.Roteiros.Definir(EnsaioDeIa.ChaveCanario, (_, _) => Task.FromResult(ServidorOpenAiSimulado.Sucesso(CenarioDeAgentes.Responder("Bem-vinda de volta! Como posso ajudar?"), 150, 0, 25, "req_volta2")));
+        Assert.Equal(HttpStatusCode.OK, await e.EnviarWebhookAsync(e.PayloadDeTexto("wamid.VOLTA0004", cliente, "Volta", "Oi, voltei")));
+        await e.EsperarAsync(async () => e.Graph.Capturas.Count == 4, "depois do encerramento o cliente deveria ser atendido de novo");
+        Assert.Equal((cliente, "Bem-vinda de volta! Como posso ajudar?"), (e.Graph.Capturas[3].Para, e.Graph.Capturas[3].Texto));
     }
 
     [Fact]
