@@ -60,6 +60,19 @@ describe('QueuePanel', () => {
     expect(Object.fromEntries(consulta ?? [])).toEqual({ status: 'Waiting', take: '50' });
   });
 
+  it('mostra o selo "falha no envio" no atendimento que teve mensagem não enviada, e só nele', async () => {
+    const comFalha = item({ id: '10000000-0000-4000-8000-0000000000f1', status: 'Waiting', deliveryFailures: 2, lastDeliveryFailureAt: new Date().toISOString() });
+    vi.stubGlobal(
+      'fetch',
+      rotasBase({ 'GET /contact-center/items': json([AGUARDANDO, comFalha]) }),
+    );
+    renderizar({ nomes: { [AGUARDANDO.id]: 'Mauro', [comFalha.id]: 'Pedro' } });
+
+    const pedro = await screen.findByRole('button', { name: /Pedro/ });
+    expect(pedro.textContent).toContain('falha no envio');
+    expect((await screen.findByRole('button', { name: /Mauro/ })).textContent).not.toContain('falha no envio');
+  });
+
   it('sem nome do contato, identifica o atendimento pelo fim do GUID', async () => {
     vi.stubGlobal('fetch', rotasBase());
     renderizar({ nomes: {} });

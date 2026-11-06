@@ -148,6 +148,11 @@ export function ConversationPanel({ api, itemId, me, nomeDoContato, onErroDeRede
         <div className="conversa-titulo">
           <h2>{nome}</h2>
           {item && <p className="discreto">{situacaoDoItem(item, me.id)}</p>}
+          {item && item.deliveryFailures > 0 && (
+            <p className="aviso-falha" role="alert">
+              {item.deliveryFailures === 1 ? 'Uma mensagem não foi enviada ao cliente.' : `${item.deliveryFailures} mensagens não foram enviadas ao cliente.`} Responda de novo.
+            </p>
+          )}
         </div>
         <div className="acoes">
           {aguardando && (

@@ -94,6 +94,29 @@ describe('ConversationPanel: histórico', () => {
     expect(log.getAttribute('aria-live')).toBe('polite');
   });
 
+  it('avisa o atendente quando mensagens não foram enviadas ao cliente e orienta a responder de novo', async () => {
+    const umaFalha = item({ status: 'Assigned', assignedUserId: USUARIO.id, assignedAt: new Date().toISOString(), deliveryFailures: 1, lastDeliveryFailureAt: new Date().toISOString() });
+    vi.stubGlobal('fetch', cenario(umaFalha));
+    const { unmount } = renderizar();
+
+    const aviso = await screen.findByRole('alert');
+    expect(aviso.textContent).toContain('Uma mensagem não foi enviada ao cliente.');
+    expect(aviso.textContent).toContain('Responda de novo');
+    unmount();
+
+    vi.stubGlobal('fetch', cenario({ ...umaFalha, deliveryFailures: 3 }));
+    renderizar();
+    expect((await screen.findByRole('alert')).textContent).toContain('3 mensagens não foram enviadas ao cliente.');
+  });
+
+  it('sem falha de envio não mostra aviso algum', async () => {
+    vi.stubGlobal('fetch', cenario(COMIGO));
+    renderizar();
+
+    await screen.findByRole('heading', { name: 'Mauro' });
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
   it('SendUnknown aparece como "envio de resultado incerto": nem falha, nem entregue', async () => {
     vi.stubGlobal(
       'fetch',

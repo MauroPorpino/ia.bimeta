@@ -80,6 +80,9 @@ export interface QueueItem {
   updatedAt: string;
   priority: number;
   routingRuleId: string | null;
+  /** Mensagens de saída com falha definitiva de envio desde a última resposta do atendente (sinal da fila; 0 = nenhuma). */
+  deliveryFailures: number;
+  lastDeliveryFailureAt: string | null;
 }
 
 export type OperationOutcome = 'Completed' | 'AlreadyApplied' | 'Pending' | 'SessionEnded';

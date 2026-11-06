@@ -527,3 +527,18 @@ label {
     font-size: 0.95rem;
   }
 }
+
+.etiqueta-falha {
+  background: var(--erro-fundo);
+  color: var(--erro-texto);
+  border-color: transparent;
+}
+
+.aviso-falha {
+  margin: 0.15rem 0 0;
+  padding: 0.15rem 0.5rem;
+  border-radius: 6px;
+  background: var(--erro-fundo);
+  color: var(--erro-texto);
+  font-size: 0.85em;
+}

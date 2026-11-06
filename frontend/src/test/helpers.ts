@@ -40,6 +40,8 @@ export function item(sobrescrever: Partial<QueueItem> = {}): QueueItem {
     updatedAt: new Date().toISOString(),
     priority: 0,
     routingRuleId: null,
+    deliveryFailures: 0,
+    lastDeliveryFailureAt: null,
     ...sobrescrever,
   };
 }

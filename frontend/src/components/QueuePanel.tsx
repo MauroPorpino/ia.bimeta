@@ -208,6 +208,7 @@ export function QueuePanel({
                     </span>
                     {item.priority > 0 && <span className="etiqueta">prioridade {item.priority}</span>}
                     {item.pending && <span className="etiqueta etiqueta-aviso">operação pendente</span>}
+                    {item.deliveryFailures > 0 && <span className="etiqueta etiqueta-falha">falha no envio</span>}
                   </button>
                 </li>
               );
