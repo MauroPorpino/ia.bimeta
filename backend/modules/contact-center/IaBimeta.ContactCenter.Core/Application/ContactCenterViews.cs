@@ -112,13 +112,15 @@ public sealed record QueueItemView(
     PendingOperationView? Pending,
     DateTimeOffset UpdatedAt,
     int Priority = 0,
-    Guid? RoutingRuleId = null)
+    Guid? RoutingRuleId = null,
+    int DeliveryFailures = 0,
+    DateTimeOffset? LastDeliveryFailureAt = null)
 {
     internal static QueueItemView From(QueueItem item) => new(
         item.Id, item.SessionId, item.OrganizationId, item.BusinessUnitId, item.DepartmentId, item.QueueId, item.Status, item.AssignedUserId,
         item.Version, item.EnteredAt, item.AssignedAt, item.ClosedAt, item.CloseReason,
         item.Pending is { } p ? new PendingOperationView(p.Kind, p.OperationId, p.QueueId, p.UserId, item.PendingAttempts, item.PendingLastError, p.StartedAt) : null,
-        item.UpdatedAt, item.Priority, item.RoutingRuleId);
+        item.UpdatedAt, item.Priority, item.RoutingRuleId, item.DeliveryFailures, item.LastDeliveryFailureAt);
 }
 
 public sealed record QueueItemHistoryView(

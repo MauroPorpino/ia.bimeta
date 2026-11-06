@@ -765,6 +765,12 @@ public sealed class QueueItemService
                 new RegisterHumanReplyCommand(sessao.Id, requestId, autor, precondicao, atual.StateVersion, 0, new ReplyContent(text)), cancellationToken);
         }
 
+        // A nova resposta é a RECUPERAÇÃO de uma falha de envio (SND-7): o atendente já agiu, então o sinal sai da fila. Sinal de monitoramento: não muda o item nem avança a versão.
+        if (resultado.Outcome is RegisterHumanReplyOutcome.Applied or RegisterHumanReplyOutcome.AlreadyApplied && item.DeliveryFailures > 0)
+        {
+            await _items.ClearDeliveryFailuresAsync(item.Id, cancellationToken);
+        }
+
         return resultado;
     }
 

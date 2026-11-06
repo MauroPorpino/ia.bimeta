@@ -183,6 +183,7 @@ internal static class SimulatorAiEndpoints
                 session = sessao,
                 messages = historico?.Items.Select(m => new
                 {
+                    m.Id,
                     m.MessageSeq,
                     m.Direction,
                     m.Author,

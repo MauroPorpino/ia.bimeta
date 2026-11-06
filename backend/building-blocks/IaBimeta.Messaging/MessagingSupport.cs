@@ -32,13 +32,23 @@ public sealed class MessagingOptions
     /// <summary>Quanto tempo os processados ficam guardados antes da purga.</summary>
     public TimeSpan ProcessedRetention { get; set; } = TimeSpan.FromDays(7);
 
+    /// <summary>
+    /// De quanto em quanto tempo o relay procura eventos MORTOS ainda sem o tratamento dos handlers (<see cref="IaBimeta.SharedKernel.IEventHandler.HandlesDeadLetters"/>). Um evento que acabou de morrer neste
+    /// relay é tratado na hora; este intervalo é a rede de segurança para o que ficou para trás (processo caído entre a morte e o tratamento, outro relay, falha transitória do tratamento).
+    /// </summary>
+    public TimeSpan DeadLetterSweepInterval { get; set; } = TimeSpan.FromSeconds(15);
+
+    /// <summary>Quantos mortos o relay trata por varredura.</summary>
+    public int DeadLetterBatchSize { get; set; } = 50;
+
     /// <exception cref="InvalidOperationException">Algum valor é inválido: falha na partida, nunca no meio do processamento.</exception>
     public void Validate()
     {
         if (MaxAttempts < 1 || BatchSize < 1 || BatchSize > 1000 || LeaseDuration <= TimeSpan.Zero || BaseBackoff <= TimeSpan.Zero
-            || MaxBackoff < BaseBackoff || PollInterval <= TimeSpan.Zero || ProcessedRetention <= TimeSpan.Zero)
+            || MaxBackoff < BaseBackoff || PollInterval <= TimeSpan.Zero || ProcessedRetention <= TimeSpan.Zero
+            || DeadLetterSweepInterval <= TimeSpan.Zero || DeadLetterBatchSize is < 1 or > 1000)
         {
-            throw new InvalidOperationException("A configuração do Messaging é inválida (tentativas, lote, lease, espera, intervalo ou retenção).");
+            throw new InvalidOperationException("A configuração do Messaging é inválida (tentativas, lote, lease, espera, intervalo, retenção ou varredura de mortos).");
         }
     }
 }
@@ -141,6 +151,12 @@ public static class MessagingMetrics
     public static readonly Counter<long> Dead = Meter.CreateCounter<long>("outbox.dead", description: "Eventos que foram para os mortos.");
 
     public static readonly Counter<long> LeaseLost = Meter.CreateCounter<long>("outbox.lease_lost", description: "Conclusões recusadas por lease perdido.");
+
+    public static readonly Counter<long> Deferred = Meter.CreateCounter<long>("outbox.deferred", description: "Eventos adiados por espera sem falha (não gastam tentativa).");
+
+    public static readonly Counter<long> DeadHandled = Meter.CreateCounter<long>("outbox.dead_handled", description: "Eventos mortos cujo tratamento (handlers de morto) foi concluído.");
+
+    public static readonly Counter<long> DeadHandlingFailed = Meter.CreateCounter<long>("outbox.dead_handling_failed", description: "Tratamentos de morto que falharam e serão repetidos na próxima varredura.");
 
     public static readonly Histogram<double> ProcessingSeconds = Meter.CreateHistogram<double>("outbox.processing_seconds", "s", "Tempo de entrega de um evento aos handlers.");
 }

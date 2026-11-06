@@ -106,6 +106,31 @@ internal sealed class SessionClosedHandler : EventHandlerBase<SessionClosedV1>
 }
 
 /// <summary>
+/// Uma mensagem de saída teve falha definitiva de envio (<c>OutboundMessageFailedV1</c>, SND-7): o item ativo da conversa sinaliza o atendimento. Só sinal de monitoramento (não é entrada para a IA, ARQ-24, e não muda
+/// o estado do item).
+/// </summary>
+internal sealed class OutboundMessageFailedHandler : EventHandlerBase<OutboundMessageFailedV1>
+{
+    private readonly InboxGate<ContactCenterDbContext> _inbox;
+    private readonly ConversationProjectionService _projection;
+    private readonly IDeferredAudit _audit;
+
+    public OutboundMessageFailedHandler(InboxGate<ContactCenterDbContext> inbox, ConversationProjectionService projection, IDeferredAudit audit)
+    {
+        _inbox = inbox;
+        _projection = projection;
+        _audit = audit;
+    }
+
+    public override string EventType => ConversationEventTypes.OutboundMessageFailed;
+
+    public override int EventVersion => 1;
+
+    protected override Task<HandlerResult> HandleAsync(EventEnvelope envelope, OutboundMessageFailedV1 payload, CancellationToken cancellationToken) =>
+        ProjectionHandling.RunAsync(_inbox, _audit, envelope, token => _projection.ApplyOutboundMessageFailedAsync(payload, envelope.EventId, token), cancellationToken);
+}
+
+/// <summary>
 /// A sessão foi encaminhada para outra unidade ou setor (<c>SessionTransferredV1</c>): o item que ficou para trás limita o histórico que expõe
 /// ao que a conversa tinha naquele instante.
 /// </summary>

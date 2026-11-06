@@ -126,11 +126,13 @@ internal sealed class EnsaioDeIa : IAsyncDisposable
 
     private readonly PostgresFixture _banco;
     private readonly Dictionary<string, string?> _configuracaoDoApi;
+    private readonly Func<IHost> _construirWorker;
 
-    private EnsaioDeIa(PostgresFixture banco, string slug, ServidorOpenAiLoopback openAi, ApiServer api, IHost worker, CapturaDeLogs logs, Dictionary<string, string?> configuracaoDoApi)
+    private EnsaioDeIa(PostgresFixture banco, string slug, ServidorOpenAiLoopback openAi, ApiServer api, IHost worker, CapturaDeLogs logs, Dictionary<string, string?> configuracaoDoApi, Func<IHost> construirWorker)
     {
         _banco = banco;
         _configuracaoDoApi = configuracaoDoApi;
+        _construirWorker = construirWorker;
         Slug = slug;
         OpenAi = openAi;
         Api = api;
@@ -144,7 +146,7 @@ internal sealed class EnsaioDeIa : IAsyncDisposable
 
     public ApiServer Api { get; }
 
-    public IHost Worker { get; }
+    public IHost Worker { get; private set; }
 
     public CapturaDeLogs Logs { get; }
 
@@ -228,16 +230,18 @@ internal sealed class EnsaioDeIa : IAsyncDisposable
             configuracaoDoWorker[chave] = valor;
         }
 
-        var worker = WorkerHost.Build(
+        IHost ConstruirWorker() => WorkerHost.Build(
             new[] { "--environment=Development" },
             builder =>
             {
                 builder.Configuration.AddInMemoryCollection(configuracaoDoWorker);
                 builder.Logging.AddProvider(logs);
             });
+
+        var worker = ConstruirWorker();
         await worker.StartAsync();
 
-        return new EnsaioDeIa(banco, slug, openAi, api, worker, logs, configuracaoDoApi);
+        return new EnsaioDeIa(banco, slug, openAi, api, worker, logs, configuracaoDoApi, ConstruirWorker);
     }
 
     /// <summary>
@@ -252,6 +256,23 @@ internal sealed class EnsaioDeIa : IAsyncDisposable
             "version = version + 1, updated_at = now() WHERE state IN (1, 2, 3)");
         await escopo.ServiceProvider.GetRequiredService<ConversationsDbContext>().Database.ExecuteSqlRawAsync(
             "UPDATE conversations.outbox_message SET state = 3, processed_at = now(), lease_token = NULL, lease_owner = NULL, lease_expires_at = NULL WHERE state IN (1, 2)");
+
+        // Os eventos MORTOS de outros testes, sem tratamento, seriam tratados pelo Worker do ensaio (que varre os mortos de TODOS os tenants): ficam marcados como tratados, para o ensaio ver só o que ele gera.
+        await escopo.ServiceProvider.GetRequiredService<ConversationsDbContext>().Database.ExecuteSqlRawAsync(
+            "UPDATE conversations.outbox_message SET processed_at = now() WHERE state = 4 AND processed_at IS NULL");
+    }
+
+    /// <summary>
+    /// Reinicia o Worker (o processo que cai e sobe de novo): para o atual (o que está em andamento é cancelado, sem concluir) e sobe outro com a MESMA configuração. O que ficou no banco (leases, despachos em
+    /// andamento) é tudo o que o novo Worker tem para decidir.
+    /// </summary>
+    public async Task ReiniciarWorkerAsync()
+    {
+        using var limite = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        await Worker.StopAsync(limite.Token);
+        Worker.Dispose();
+        Worker = _construirWorker();
+        await Worker.StartAsync();
     }
 
     /// <summary>Um segundo Api com a MESMA configuração (o desenvolvedor que reinicia o Api): a preparação roda de novo e não pode duplicar nada.</summary>

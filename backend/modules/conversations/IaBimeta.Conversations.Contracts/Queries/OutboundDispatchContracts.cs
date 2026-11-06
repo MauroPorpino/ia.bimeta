@@ -26,3 +26,24 @@ public sealed record OutboundDispatchView(
     MessageAuthor Author,
     string? Text,
     DeliveryState? DeliveryState);
+
+/// <summary>
+/// A leitura de DIAGNÓSTICO das mensagens de saída que ainda não tiveram desfecho: pedidas ao provedor (<c>Requested</c>, <c>Queued</c> ou <c>Sending</c>) e paradas há mais que o tempo dado. É o sinal de que
+/// uma entrega pode estar presa (no relay, no Sender ou numa conta limitada), independente do mecanismo que a leva. Respeita as permissões do usuário: só as organizações em que ele lê conversas
+/// (<c>ConversationRead</c>); sem leitura em nenhuma, a operação é negada. O tenant é o do contexto confiável.
+/// </summary>
+public interface IOutboundDeliveryQueries
+{
+    /// <summary>As mais antigas primeiro, até <paramref name="take"/> (1 a 200).</summary>
+    /// <exception cref="AccessDeniedException">O usuário não lê conversas em organização alguma.</exception>
+    Task<IReadOnlyList<UndeliveredOutboundView>> ListUndeliveredAsync(DateTimeOffset createdBefore, int take, CancellationToken cancellationToken = default);
+}
+
+/// <param name="CreatedAt">Quando a mensagem de saída foi aceita e liberada para envio.</param>
+public sealed record UndeliveredOutboundView(
+    Guid MessageId,
+    Guid SessionId,
+    Guid OrganizationId,
+    ChannelInstanceId ChannelInstanceId,
+    DeliveryState DeliveryState,
+    DateTimeOffset CreatedAt);

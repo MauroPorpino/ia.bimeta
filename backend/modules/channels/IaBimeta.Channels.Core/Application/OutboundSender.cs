@@ -101,9 +101,10 @@ public sealed class OutboundMessageRequestedHandler : EventHandlerBase<OutboundM
                 return HandlerResult.Retry(null, "concurrent-dispatch");
             }
         }
-        else if (existente.State == OutboundState.Dispatching)
+        else if (existente.MayHaveReachedProvider)
         {
-            // Uma tentativa anterior começou e não terminou (o processo caiu entre a intenção e o desfecho): o provedor PODE ter recebido. Nunca reenviar (EFX-3).
+            // Uma tentativa anterior COMEÇOU e não terminou (o processo caiu entre o início da chamada e o desfecho): o provedor PODE ter recebido. Nunca reenviar (EFX-3). A intenção sozinha (zero tentativas,
+            // por exemplo depois de uma espera por vazão) NÃO cai aqui: nenhuma chamada foi feita e a entrega segue abaixo.
             existente.MarkSendUnknown("interrupted", agora);
             await _store.SaveAsync(cancellationToken);
             ChannelsMetrics.OutboundUnknown.Add(1);
@@ -171,8 +172,15 @@ public sealed class OutboundMessageRequestedHandler : EventHandlerBase<OutboundM
 
             if (ficha.Wait > tempoLimite - _clock.GetUtcNow())
             {
+                // Espera longa: NÃO é falha, então o relay adia a entrega SEM gastar tentativa (Defer). Quem adia garante o próprio limite: a validade operacional da mensagem (SND-4). Uma resposta que esperou
+                // além dela deixou de fazer sentido e falha de forma visível (expired), em vez de ficar parada para sempre.
+                if (_clock.GetUtcNow() - envelope.OccurredAt + ficha.Wait > _sending.MaxQueueAge)
+                {
+                    return await FailAsync(mensagem, "expired", cancellationToken);
+                }
+
                 ChannelsMetrics.OutboundThrottled.Add(1);
-                return HandlerResult.Retry(ficha.Wait, "rate-limited-local");
+                return HandlerResult.Defer(ficha.Wait, "rate-limited-local");
             }
 
             await Task.Delay(ficha.Wait, _clock, cancellationToken);
@@ -202,20 +210,23 @@ public sealed class OutboundMessageRequestedHandler : EventHandlerBase<OutboundM
                 await _store.SaveAsync(cancellationToken);
 
                 // SND-2: o limite de taxa da CONTA vale para a conta toda (os envios das outras conversas também esperam, sem gastar tentativa do provedor); o do par remetente-destinatário, só para esta mensagem.
+                // A recusa transitória do provedor prova que nada saiu e é limitada a MaxSendAttempts chamadas: a espera é Defer (não gasta tentativa do relay, que é para falhas de verdade).
                 var espera = _sending.CooldownFor(resultado.RetryAfter);
                 if (resultado.RateLimitScope == ProviderRateLimitScope.Account)
                 {
                     await _sendState.ApplyCooldownAsync(instancia.AccountId, espera, cancellationToken);
                     ChannelsMetrics.OutboundRateLimited.Add(1);
-                    return HandlerResult.Retry(espera, "provider-rate-limited");
+                    return HandlerResult.Defer(espera, "provider-rate-limited");
                 }
 
                 if (resultado.RateLimitScope == ProviderRateLimitScope.Recipient)
                 {
+                    // O par remetente-destinatário: a Meta manda repetir depois de 4^X segundos (X = 0, 1, 2...), e só este destinatário espera.
                     ChannelsMetrics.OutboundRateLimited.Add(1);
+                    return HandlerResult.Defer(resultado.RetryAfter ?? PairBackoff(mensagem.Attempts), "provider-pair-rate-limited");
                 }
 
-                return HandlerResult.Retry(resultado.RetryAfter, "provider-transient");
+                return HandlerResult.Defer(resultado.RetryAfter ?? TimeSpan.FromSeconds(Math.Min(60, 5 * Math.Max(1, mensagem.Attempts))), "provider-transient");
             }
 
             case ProviderSendOutcome.RejectedTransient:
@@ -262,6 +273,59 @@ public sealed class OutboundMessageRequestedHandler : EventHandlerBase<OutboundM
         }
 
         await _store.SaveAsync(cancellationToken);
+        return await NotifyAsync(mensagem, cancellationToken);
+    }
+
+    private static TimeSpan PairBackoff(int attempts) => TimeSpan.FromSeconds(Math.Min(60, Math.Pow(4, Math.Max(0, attempts - 1))));
+
+    public override bool HandlesDeadLetters => true;
+
+    /// <summary>
+    /// O evento de envio MORREU no relay (tentativas esgotadas, lease vencido sem conclusão ou falha permanente): a mensagem NÃO pode ficar parada sem ninguém saber. O estado final é gravado e informado ao
+    /// Conversations (que publica <c>OutboundMessageFailedV1</c> e mostra a falha ao atendente), SEM nova chamada ao provedor: sem intenção gravada, nada foi enviado (<c>Failed</c>); com a recusa transitória
+    /// anterior, nada saiu (<c>Failed</c>); com um despacho em andamento (<see cref="OutboundState.Dispatching"/>), o provedor PODE ter recebido (<c>SendUnknown</c>, nunca <c>Failed</c> nem reenvio, EFX-3); o que
+    /// já tem desfecho só é informado, se ainda não foi. Idempotente: repetir não muda nada.
+    /// </summary>
+    protected override async Task<HandlerResult> HandleDeadAsync(EventEnvelope envelope, OutboundMessageRequestedV1 payload, string deadReason, CancellationToken cancellationToken)
+    {
+        var agora = _clock.GetUtcNow();
+        var existente = await _store.FindByOperationAsync(payload.OperationId, cancellationToken);
+
+        OutboundMessage mensagem;
+        if (existente is null)
+        {
+            // A intenção é gravada ANTES de qualquer chamada ao provedor: sem ela, nunca houve chamada.
+            mensagem = OutboundMessage.Intend(payload.MessageId, envelope.TenantId, payload.OperationId, payload.ChannelInstanceId, agora);
+            if (!await _store.TryAddAsync(mensagem, cancellationToken))
+            {
+                return HandlerResult.Retry(null, "concurrent-dead"); // outro processo gravou ao mesmo tempo: a próxima varredura relê
+            }
+
+            mensagem.MarkFailed("relay-dead", agora);
+            ChannelsMetrics.OutboundFailed.Add(1);
+            await _store.SaveAsync(cancellationToken);
+        }
+        else if (existente.MayHaveReachedProvider)
+        {
+            // A chamada pode ter saído: nunca reenviar e nunca afirmar que falhou.
+            existente.MarkSendUnknown("interrupted", agora);
+            ChannelsMetrics.OutboundUnknown.Add(1);
+            await _store.SaveAsync(cancellationToken);
+            mensagem = existente;
+        }
+        else if (existente.IsResolved)
+        {
+            mensagem = existente; // já tem desfecho: só falta informar, se não foi
+        }
+        else
+        {
+            // Só a intenção (nenhuma chamada feita) ou uma recusa transitória anterior: o provedor não recebeu nada.
+            existente.MarkFailed("relay-dead", agora);
+            ChannelsMetrics.OutboundFailed.Add(1);
+            await _store.SaveAsync(cancellationToken);
+            mensagem = existente;
+        }
+
         return await NotifyAsync(mensagem, cancellationToken);
     }
 

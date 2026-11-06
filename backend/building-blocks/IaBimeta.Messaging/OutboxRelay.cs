@@ -17,14 +17,16 @@ public interface IMessagingScopeInitializer
 }
 
 /// <summary>O que um ciclo do relay fez. Sem identificação de tenant nem de conteúdo.</summary>
-public readonly record struct RelayRunResult(int Processed, int Retried, int Dead, int LeaseLost)
+/// <param name="Deferred">Quantos eventos foram adiados por espera sem falha (não gastam tentativa).</param>
+/// <param name="DeadHandled">Quantos eventos mortos tiveram o tratamento dos handlers concluído.</param>
+public readonly record struct RelayRunResult(int Processed, int Retried, int Dead, int LeaseLost, int Deferred = 0, int DeadHandled = 0)
 {
     public static RelayRunResult Empty => default;
 
-    public int Total => Processed + Retried + Dead + LeaseLost;
+    public int Total => Processed + Retried + Dead + LeaseLost + Deferred + DeadHandled;
 
     public static RelayRunResult operator +(RelayRunResult a, RelayRunResult b) =>
-        new(a.Processed + b.Processed, a.Retried + b.Retried, a.Dead + b.Dead, a.LeaseLost + b.LeaseLost);
+        new(a.Processed + b.Processed, a.Retried + b.Retried, a.Dead + b.Dead, a.LeaseLost + b.LeaseLost, a.Deferred + b.Deferred, a.DeadHandled + b.DeadHandled);
 }
 
 /// <summary>O relay de um outbox, sem o tipo do DbContext (o que o laço do Worker precisa).</summary>
@@ -58,6 +60,9 @@ public sealed class OutboxRelay<TContext> : IOutboxRelay
 {
     // Teto de ciclos por execução: um módulo com muito acúmulo não monopoliza o worker (ORD-3); o laço do host volta logo depois.
     private const int MaxCyclesPerRun = 100;
+
+    // A menor espera de um adiamento: um adiamento sem prazo (ou de zero) voltaria a ser elegível no mesmo ciclo e giraria sem parar.
+    private static readonly TimeSpan MinimumDefer = TimeSpan.FromMilliseconds(100);
 
     private readonly IServiceScopeFactory _scopes;
     private readonly IMessagingScopeInitializer _initializer;
@@ -102,7 +107,124 @@ public sealed class OutboxRelay<TContext> : IOutboxRelay
             }
         }
 
+        // Um evento morto NÃO pode sumir em silêncio: os handlers que querem saber (HandlesDeadLetters) tratam o que morreu. Na hora, se algo morreu neste ciclo; senão, na cadência da varredura (a rede de segurança
+        // para o que ficou para trás: processo que caiu entre a morte e o tratamento, outro relay, falha transitória do tratamento).
+        if (total.Dead > 0 || DeadSweepIsDue())
+        {
+            total += await SweepDeadLettersAsync(cancellationToken);
+        }
+
         return total;
+    }
+
+    private long _nextDeadSweepTicks;
+
+    private bool DeadSweepIsDue()
+    {
+        var agora = _clock.GetUtcNow().UtcTicks;
+        var proxima = Interlocked.Read(ref _nextDeadSweepTicks);
+        return agora >= proxima;
+    }
+
+    /// <summary>
+    /// Trata os eventos mortos que ainda não tiveram o tratamento dos handlers (<c>state = Dead</c> e <c>processed_at</c> nulo). Para cada um, abre um escopo com o tenant do evento e chama
+    /// <see cref="IEventHandler.HandleDeadAsync"/> dos handlers do tipo e da versão. Só marca como tratado quando todos concluem: o que falha (ou retorna <c>Retry</c>) é repetido na varredura seguinte, também
+    /// depois de um reinício do processo. Evento sem handler de morto é marcado como tratado (ninguém tem efeito a registrar). O tratamento é idempotente, então duas varreduras simultâneas (dois relays)
+    /// são inofensivas.
+    /// </summary>
+    /// <returns>Quantos eventos mortos tiveram o tratamento concluído.</returns>
+    public async Task<RelayRunResult> SweepDeadLettersAsync(CancellationToken cancellationToken = default)
+    {
+        Interlocked.Exchange(ref _nextDeadSweepTicks, (_clock.GetUtcNow() + _options.DeadLetterSweepInterval).UtcTicks);
+
+        IReadOnlyList<OutboxMessage> mortos;
+        await using (var escopo = _scopes.CreateAsyncScope())
+        {
+            var db = escopo.ServiceProvider.GetRequiredService<TContext>();
+            mortos = await db.Set<OutboxMessage>().AsNoTracking()
+                .Where(o => o.State == OutboxState.Dead && o.ProcessedAt == null)
+                .OrderBy(o => o.IngestSeq)
+                .Take(_options.DeadLetterBatchSize)
+                .ToListAsync(cancellationToken);
+        }
+
+        var tratados = 0;
+        foreach (var morto in mortos)
+        {
+            if (await HandleDeadLetterAsync(morto, cancellationToken))
+            {
+                tratados++;
+            }
+        }
+
+        return new RelayRunResult(0, 0, 0, 0, 0, tratados);
+    }
+
+    private async Task<bool> HandleDeadLetterAsync(OutboxMessage morto, CancellationToken cancellationToken)
+    {
+        var motivo = morto.DeadReason ?? "dead";
+        var concluido = true;
+        try
+        {
+            await using var escopo = _scopes.CreateAsyncScope();
+            _initializer.Initialize(escopo, new TenantId(morto.TenantId), "messaging-relay");
+
+            var handlers = escopo.ServiceProvider.GetServices<IEventHandler>()
+                .Where(h => h.HandlesDeadLetters && h.EventType == morto.EventType && h.EventVersion == morto.EventVersion)
+                .ToList();
+
+            foreach (var handler in handlers)
+            {
+                object payload;
+                try
+                {
+                    payload = MessagingJson.Deserialize(morto.Payload, handler.PayloadType);
+                }
+                catch (JsonException)
+                {
+                    _logger.LogError("O evento morto {EventType} ({EventId}) do tenant {TenantId} tem payload ilegível: o tratamento do morto foi desistido.", morto.EventType, morto.Id, morto.TenantId);
+                    continue;
+                }
+
+                var envelope = new EventEnvelope(
+                    morto.Id, morto.EventType, morto.EventVersion, new TenantId(morto.TenantId),
+                    morto.CorrelationId, morto.CausationId, morto.OrderingKey, morto.OccurredAt, payload);
+
+                var resultado = await handler.HandleDeadAsync(envelope, motivo, cancellationToken);
+                if (resultado.Outcome is HandlerOutcome.Retry or HandlerOutcome.Defer)
+                {
+                    concluido = false;
+                }
+                else if (resultado.Outcome == HandlerOutcome.Dead)
+                {
+                    _logger.LogError("O tratamento do evento morto {EventType} ({EventId}) do tenant {TenantId} foi desistido: {Reason}.", morto.EventType, morto.Id, morto.TenantId, resultado.Reason);
+                }
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Só o tipo da falha (a mensagem pode ter conteúdo): o evento continua por tratar e a próxima varredura repete.
+            _logger.LogWarning("O tratamento do evento morto {EventType} ({EventId}) do tenant {TenantId} falhou e será repetido: {ErrorType}.", morto.EventType, morto.Id, morto.TenantId, ex.GetType().Name);
+            concluido = false;
+        }
+
+        if (!concluido)
+        {
+            MessagingMetrics.DeadHandlingFailed.Add(1);
+            return false;
+        }
+
+        await using (var escopo = _scopes.CreateAsyncScope())
+        {
+            var db = escopo.ServiceProvider.GetRequiredService<TContext>();
+            var agora = _clock.GetUtcNow();
+            await db.Set<OutboxMessage>()
+                .Where(o => o.TenantId == morto.TenantId && o.Id == morto.Id && o.State == OutboxState.Dead && o.ProcessedAt == null)
+                .ExecuteUpdateAsync(s => s.SetProperty(o => o.ProcessedAt, (DateTimeOffset?)agora), cancellationToken);
+        }
+
+        MessagingMetrics.DeadHandled.Add(1);
+        return true;
     }
 
     /// <summary>Reenfileira um evento morto (ação de administrador): volta a Pendente, sem tentativas. A auditoria é de quem chama.</summary>
@@ -118,7 +240,8 @@ public sealed class OutboxRelay<TContext> : IOutboxRelay
                 s => s.SetProperty(o => o.State, OutboxState.Pending)
                     .SetProperty(o => o.Attempts, 0)
                     .SetProperty(o => o.NextAttemptAt, agora)
-                    .SetProperty(o => o.DeadReason, (string?)null),
+                    .SetProperty(o => o.DeadReason, (string?)null)
+                    .SetProperty(o => o.ProcessedAt, (DateTimeOffset?)null),
                 cancellationToken);
         return afetadas == 1;
     }
@@ -245,6 +368,7 @@ public sealed class OutboxRelay<TContext> : IOutboxRelay
 
         HandlerResult? morto = null;
         HandlerResult? repetir = null;
+        HandlerResult? adiar = null;
         foreach (var handler in handlers)
         {
             object payload;
@@ -271,11 +395,14 @@ public sealed class OutboxRelay<TContext> : IOutboxRelay
                 case HandlerOutcome.Retry:
                     repetir = repetir is null || (resultado.RetryAfter ?? TimeSpan.Zero) > (repetir.Value.RetryAfter ?? TimeSpan.Zero) ? resultado : repetir;
                     break;
+                case HandlerOutcome.Defer:
+                    adiar = adiar is null || (resultado.RetryAfter ?? TimeSpan.Zero) > (adiar.Value.RetryAfter ?? TimeSpan.Zero) ? resultado : adiar;
+                    break;
             }
         }
 
-        // A falha permanente vale mais que a transitória, e esta mais que o sucesso: os handlers que já concluíram são idempotentes.
-        return morto ?? repetir ?? HandlerResult.Success;
+        // A falha permanente vale mais que a transitória, esta mais que a espera sem falha, e esta mais que o sucesso: os handlers que já concluíram são idempotentes.
+        return morto ?? repetir ?? adiar ?? HandlerResult.Success;
     }
 
     private async Task<RelayRunResult> CompleteAsync(OutboxMessage mensagem, HandlerResult resultado, CancellationToken cancellationToken)
@@ -301,6 +428,21 @@ public sealed class OutboxRelay<TContext> : IOutboxRelay
                         .SetProperty(o => o.LastError, (string?)null),
                     cancellationToken);
                 contagem = new RelayRunResult(1, 0, 0, 0);
+                break;
+
+            case HandlerOutcome.Defer:
+                // Espera SEM falha: o evento volta depois do prazo e a tentativa que o lease contou é DEVOLVIDA (quem adia garante o próprio limite de espera).
+                var adiado = resultado.RetryAfter is { } prazo && prazo > MinimumDefer ? prazo : MinimumDefer;
+                afetadas = await alvo.ExecuteUpdateAsync(
+                    s => s.SetProperty(o => o.State, OutboxState.Pending)
+                        .SetProperty(o => o.Attempts, o => o.Attempts > 0 ? o.Attempts - 1 : 0)
+                        .SetProperty(o => o.NextAttemptAt, agora + adiado)
+                        .SetProperty(o => o.LeaseToken, (Guid?)null)
+                        .SetProperty(o => o.LeaseOwner, (string?)null)
+                        .SetProperty(o => o.LeaseExpiresAt, (DateTimeOffset?)null)
+                        .SetProperty(o => o.LastError, motivo ?? "deferred"),
+                    cancellationToken);
+                contagem = new RelayRunResult(0, 0, 0, 0, 1);
                 break;
 
             case HandlerOutcome.Retry when mensagem.Attempts < _options.MaxAttempts:
@@ -354,6 +496,10 @@ public sealed class OutboxRelay<TContext> : IOutboxRelay
         else if (contagem.Retried > 0)
         {
             MessagingMetrics.Retried.Add(1);
+        }
+        else if (contagem.Deferred > 0)
+        {
+            MessagingMetrics.Deferred.Add(1);
         }
         else
         {

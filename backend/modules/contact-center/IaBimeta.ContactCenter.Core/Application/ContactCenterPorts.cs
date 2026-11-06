@@ -71,6 +71,15 @@ public interface IQueueItemRepository
     Task<QueueItem?> FindActiveBySessionAsync(Guid sessionId, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Registra uma falha definitiva de envio no item ativo da sessão (sinal de monitoramento, SND-7): soma ao contador e guarda o instante, por <c>UPDATE</c> direto, SEM avançar a versão do item. Falso: a sessão
+    /// não tem item ativo (nada a sinalizar).
+    /// </summary>
+    Task<bool> RecordDeliveryFailureAsync(Guid sessionId, DateTimeOffset now, CancellationToken cancellationToken);
+
+    /// <summary>Limpa o sinal de falha de envio do item (o atendente respondeu de novo). Sem avançar a versão.</summary>
+    Task ClearDeliveryFailuresAsync(Guid itemId, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Relê o item do banco (descartando o que o objeto guardava) e devolve o objeto atualizado. Quem conclui uma operação relê antes de
     /// cada escrita no Conversations: o objeto que veio de antes pode estar defasado (outra tentativa concluiu ou desfez a operação).
     /// </summary>

@@ -44,6 +44,8 @@ public static class ConversationsInfrastructureExtensions
         services.AddScoped<IOutboundDispatchReader, OutboundDispatchReader>();
         services.AddScoped<OutboundDispatchQueryService>();
         services.AddScoped<IOutboundDispatchQueries>(provider => provider.GetRequiredService<OutboundDispatchQueryService>());
+        services.AddScoped<OutboundDeliveryQueryService>();
+        services.AddScoped<IOutboundDeliveryQueries>(provider => provider.GetRequiredService<OutboundDeliveryQueryService>());
         services.AddScoped<ConversationQueryService>();
         services.AddScoped<IConversationQueries>(provider => provider.GetRequiredService<ConversationQueryService>());
 

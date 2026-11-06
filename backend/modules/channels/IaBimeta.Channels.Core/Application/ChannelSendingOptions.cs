@@ -19,6 +19,12 @@ public sealed class ChannelSendingOptions
     /// </summary>
     public TimeSpan MaxLocalWait { get; set; } = TimeSpan.FromSeconds(20);
 
+    /// <summary>
+    /// A validade operacional de uma mensagem de saída na fila (SND-4; NÃO é a janela de 24 horas do WhatsApp): uma mensagem que esperou mais que isto por vazão (ou por conta limitada) deixou de fazer sentido
+    /// e falha de forma visível (<c>expired</c>) em vez de ficar parada. Só vale para a ESPERA; não afeta o que já foi enviado.
+    /// </summary>
+    public TimeSpan MaxQueueAge { get; set; } = TimeSpan.FromMinutes(15);
+
     /// <summary>A espera imposta à conta depois de um limite de taxa do provedor que não disse quanto esperar.</summary>
     public TimeSpan DefaultRateLimitCooldown { get; set; } = TimeSpan.FromSeconds(5);
 
@@ -32,7 +38,8 @@ public sealed class ChannelSendingOptions
             || BurstSeconds is <= 0d or > 60d
             || MaxLocalWait <= TimeSpan.Zero || MaxLocalWait > TimeSpan.FromSeconds(60)
             || DefaultRateLimitCooldown <= TimeSpan.Zero
-            || MaxRateLimitCooldown < DefaultRateLimitCooldown)
+            || MaxRateLimitCooldown < DefaultRateLimitCooldown
+            || MaxQueueAge < TimeSpan.FromSeconds(30) || MaxQueueAge > TimeSpan.FromHours(24))
         {
             throw new InvalidOperationException("A configuração do envio do Channels é inválida (vazão, rajada, espera local ou espera de limite de taxa).");
         }

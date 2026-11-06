@@ -22,6 +22,9 @@ internal sealed class QueueItemConfiguration : IEntityTypeConfiguration<QueueIte
             table.HasCheckConstraint("ck_queue_items_placement", "(placement_epoch IS NULL OR placement_epoch >= 1) AND (pending_basis_placement_epoch IS NULL OR pending_basis_placement_epoch >= 1)");
             table.HasCheckConstraint("ck_queue_items_projection", "(resync_state_version IS NULL OR resync_state_version >= 0) AND (history_limit_seq IS NULL OR history_limit_seq >= 0)");
 
+            // O sinal de falha de envio (SND-7): um contador nunca negativo.
+            table.HasCheckConstraint("ck_queue_items_delivery_failures", "delivery_failures >= 0");
+
             // Proveniência das fronteiras de histórico: o modelo é 0 (legado, sem prova de origem: o padrão) ou 1 (todas as fronteiras positivas certificadas). A origem do
             // limite só existe junto de um limite e de um item no modelo certificado, e é uma geração de colocação válida. Nenhum registro existente é promovido.
             table.HasCheckConstraint(
@@ -70,6 +73,8 @@ internal sealed class QueueItemConfiguration : IEntityTypeConfiguration<QueueIte
         builder.Property(i => i.PlacementEpoch).HasColumnName("placement_epoch");
         builder.Property(i => i.CloseReason).HasColumnName("close_reason").HasMaxLength(QueueItem.ReasonMaxLength);
         builder.Property(i => i.UpdatedAt).HasColumnName("updated_at");
+        builder.Property(i => i.DeliveryFailures).HasColumnName("delivery_failures").HasDefaultValue(0);
+        builder.Property(i => i.LastDeliveryFailureAt).HasColumnName("last_delivery_failure_at");
         builder.Property(i => i.Priority).HasColumnName("priority").HasDefaultValue(0);
         builder.Property(i => i.RoutingRuleId).HasColumnName("routing_rule_id");
         builder.Property(i => i.ObservedStateVersion).HasColumnName("observed_state_version").HasDefaultValue(0L);

@@ -48,6 +48,7 @@ public static class ContactCenterInfrastructureExtensions
         services.AddEventHandler<HandlingModeChangedHandler>();
         services.AddEventHandler<SessionClosedHandler>();
         services.AddEventHandler<SessionTransferredHandler>();
+        services.AddEventHandler<OutboundMessageFailedHandler>();
         services.AddScoped<IPendingWorkSource, PendingWorkSource>();
         services.AddScoped<IDeferredAudit, DeferredAudit>();
 

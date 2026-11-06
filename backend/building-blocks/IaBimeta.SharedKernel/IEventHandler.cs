@@ -10,6 +10,12 @@ public enum HandlerOutcome
 
     /// <summary>Falha permanente (validação, política): o evento vai para os mortos com o motivo, e a fila segue.</summary>
     Dead = 3,
+
+    /// <summary>
+    /// Nada falhou: o evento só precisa ESPERAR (limite de vazão, janela do provedor). Volta a ser entregue depois do prazo SEM gastar uma tentativa do relay (a tentativa é devolvida). Quem devolve
+    /// <c>Defer</c> garante um limite próprio de espera (por exemplo, a validade operacional da mensagem), porque o relay não conta as esperas.
+    /// </summary>
+    Defer = 4,
 }
 
 /// <summary>
@@ -24,6 +30,9 @@ public readonly record struct HandlerResult(HandlerOutcome Outcome, TimeSpan? Re
     public static HandlerResult Retry(TimeSpan? after = null, string? reason = null) => new(HandlerOutcome.Retry, after, reason);
 
     public static HandlerResult Dead(string reason) => new(HandlerOutcome.Dead, null, reason);
+
+    /// <summary>Espera sem falha: volta depois de <paramref name="after"/> sem gastar tentativa do relay (ver <see cref="HandlerOutcome.Defer"/>).</summary>
+    public static HandlerResult Defer(TimeSpan after, string? reason = null) => new(HandlerOutcome.Defer, after, reason);
 }
 
 /// <summary>
@@ -48,6 +57,20 @@ public interface IEventHandler
     /// handler deve devolver <see cref="HandlerResult.Dead"/> para o que é permanente.
     /// </summary>
     Task<HandlerResult> HandleAsync(EventEnvelope envelope, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// O handler quer ser avisado quando um evento dele vai para os MORTOS (tentativas esgotadas, lease vencido sem conclusão, falha permanente). Um evento morto não pode sumir em silêncio: quem tem um efeito
+    /// a registrar (por exemplo, a falha de envio de uma mensagem) implementa <see cref="HandleDeadAsync"/>. Padrão: não.
+    /// </summary>
+    bool HandlesDeadLetters => false;
+
+    /// <summary>
+    /// Chamado pelo relay para um evento que foi para os mortos, DEPOIS de ele ser marcado assim, e repetido até concluir (pelo menos uma vez, também entre processos e reinícios): precisa ser
+    /// idempotente. Nunca deve repetir um efeito externo cuja ocorrência é incerta. <c>Success</c> encerra o tratamento; <c>Retry</c> (ou exceção) o repete no próximo ciclo; <c>Dead</c> o desiste (registrado).
+    /// O tenant do contexto é o do evento, como em <see cref="HandleAsync"/>.
+    /// </summary>
+    /// <param name="deadReason">O motivo curto da morte (por exemplo, <c>max-attempts:provider-transient</c>), sem conteúdo de mensagem.</param>
+    Task<HandlerResult> HandleDeadAsync(EventEnvelope envelope, string deadReason, CancellationToken cancellationToken) => Task.FromResult(HandlerResult.Success);
 }
 
 /// <summary>Atalho para o handler de um contrato: o payload já chega no tipo certo.</summary>
@@ -69,4 +92,19 @@ public abstract class EventHandlerBase<TPayload> : IEventHandler
     }
 
     protected abstract Task<HandlerResult> HandleAsync(EventEnvelope envelope, TPayload payload, CancellationToken cancellationToken);
+
+    /// <summary>Verdadeiro nos handlers que sobrescrevem <see cref="HandleDeadAsync(EventEnvelope, TPayload, string, CancellationToken)"/> (ver <see cref="IEventHandler.HandlesDeadLetters"/>).</summary>
+    public virtual bool HandlesDeadLetters => false;
+
+    public Task<HandlerResult> HandleDeadAsync(EventEnvelope envelope, string deadReason, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(envelope);
+        return envelope.Payload is TPayload payload
+            ? HandleDeadAsync(envelope, payload, deadReason, cancellationToken)
+            : Task.FromResult(HandlerResult.Dead("payload-type-mismatch"));
+    }
+
+    /// <summary>O tratamento do morto, com o payload já no tipo certo. Padrão: nada a fazer.</summary>
+    protected virtual Task<HandlerResult> HandleDeadAsync(EventEnvelope envelope, TPayload payload, string deadReason, CancellationToken cancellationToken) =>
+        Task.FromResult(HandlerResult.Success);
 }

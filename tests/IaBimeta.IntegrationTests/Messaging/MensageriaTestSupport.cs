@@ -75,11 +75,20 @@ internal sealed class ManipuladorDeTeste : EventHandlerBase<EventoDeTeste>
 
     public override int EventVersion => 1;
 
+    public override bool HandlesDeadLetters => true;
+
     protected override async Task<HandlerResult> HandleAsync(EventEnvelope envelope, EventoDeTeste payload, CancellationToken cancellationToken)
     {
         var atual = _contexto.Current;
         RoteiroDeTeste.Registrar(envelope.EventId, atual?.TenantId.Value ?? Guid.Empty, atual?.IsSystem ?? false, envelope.OrderingKey);
         return RoteiroDeTeste.TentarProxima(envelope.EventId, out var resposta) ? await resposta!(envelope) : HandlerResult.Success;
+    }
+
+    protected override async Task<HandlerResult> HandleDeadAsync(EventEnvelope envelope, EventoDeTeste payload, string deadReason, CancellationToken cancellationToken)
+    {
+        var atual = _contexto.Current;
+        RoteiroDeMortosDeTeste.Registrar(envelope.EventId, atual?.TenantId.Value ?? Guid.Empty, atual?.IsSystem ?? false, deadReason);
+        return RoteiroDeMortosDeTeste.TentarProxima(envelope.EventId, out var resposta) ? await resposta!(deadReason) : HandlerResult.Success;
     }
 }
 
@@ -151,4 +160,35 @@ internal static class MensageriaTestSupport
     public static Task<int> RegistrosDoInboxAsync(this CenarioDeConversas c, Guid eventId) => c.ComoAsync(
         c.ContextoDeSistema,
         sp => sp.GetRequiredService<IaBimeta.ContactCenter.Infrastructure.ContactCenterDbContext>().Set<InboxMessage>().AsNoTracking().CountAsync(m => m.EventId == eventId));
+}
+
+/// <summary>O que o tratamento de MORTO do handler de teste fez: qual evento, em qual tenant, como sistema ou não, e com qual motivo de morte.</summary>
+internal sealed record ChamadaDeMorto(Guid EventId, Guid TenantId, bool EraSistema, string Motivo, long Sequencia);
+
+/// <summary>Os roteiros do tratamento de morto do handler de teste, por <c>EventId</c> (sem roteiro, o tratamento conclui com sucesso).</summary>
+internal static class RoteiroDeMortosDeTeste
+{
+    private static readonly ConcurrentDictionary<Guid, ConcurrentQueue<Func<string, Task<HandlerResult>>>> Roteiros = new();
+    private static readonly ConcurrentQueue<ChamadaDeMorto> Registro = new();
+    private static long _sequencia;
+
+    public static void Definir(Guid eventId, params Func<string, Task<HandlerResult>>[] respostas) =>
+        Roteiros[eventId] = new ConcurrentQueue<Func<string, Task<HandlerResult>>>(respostas);
+
+    public static Func<string, Task<HandlerResult>> Sucesso { get; } = _ => Task.FromResult(HandlerResult.Success);
+
+    public static Func<string, Task<HandlerResult>> Repetir { get; } = _ => Task.FromResult(HandlerResult.Retry(null, "transitorio"));
+
+    public static Func<string, Task<HandlerResult>> Excecao(Exception falha) => _ => throw falha;
+
+    public static bool TentarProxima(Guid eventId, out Func<string, Task<HandlerResult>>? resposta)
+    {
+        resposta = null;
+        return Roteiros.TryGetValue(eventId, out var fila) && fila.TryDequeue(out resposta);
+    }
+
+    public static void Registrar(Guid eventId, Guid tenantId, bool eraSistema, string motivo) =>
+        Registro.Enqueue(new ChamadaDeMorto(eventId, tenantId, eraSistema, motivo, Interlocked.Increment(ref _sequencia)));
+
+    public static IReadOnlyList<ChamadaDeMorto> De(Guid eventId) => Registro.Where(c => c.EventId == eventId).OrderBy(c => c.Sequencia).ToList();
 }

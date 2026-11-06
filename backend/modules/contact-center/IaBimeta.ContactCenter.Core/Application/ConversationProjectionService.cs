@@ -156,6 +156,21 @@ public sealed class ConversationProjectionService
         return ProjectionOutcome.Applied;
     }
 
+    /// <summary>
+    /// Uma mensagem de saída da sessão teve FALHA DEFINITIVA de envio (<c>OutboundMessageFailedV1</c>, SND-7): o item ativo da conversa passa a sinalizar o atendimento (contador e instante), para o atendente ver na
+    /// fila e responder de novo. Sinal de monitoramento: não muda o estado do item nem avança a versão, então nunca disputa com uma operação em andamento. Sessão sem item ativo: nada a sinalizar. A entrega repetida
+    /// do mesmo evento é contida pelo inbox do módulo (uma vez por <c>EventId</c>).
+    /// </summary>
+    /// <exception cref="AccessDeniedException">O contexto não é de sistema.</exception>
+    public async Task<ProjectionOutcome> ApplyOutboundMessageFailedAsync(OutboundMessageFailedV1 evento, Guid eventId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(evento);
+        RequireSystem();
+        return await _items.RecordDeliveryFailureAsync(evento.SessionId, _clock.GetUtcNow(), cancellationToken)
+            ? ProjectionOutcome.Applied
+            : ProjectionOutcome.Ignored;
+    }
+
     /// <summary>A sessão foi encerrada: o item ativo dela é encerrado, com o rastro. Repetir é inofensivo.</summary>
     public async Task<ProjectionOutcome> ApplySessionClosedAsync(SessionClosedV1 evento, Guid eventId, CancellationToken cancellationToken = default)
     {

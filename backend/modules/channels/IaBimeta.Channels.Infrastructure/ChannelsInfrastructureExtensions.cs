@@ -62,6 +62,8 @@ public static class ChannelsInfrastructureExtensions
         services.AddScoped<IInboundEventWriter, InboundEventWriter>();
         services.AddScoped<IOutboundMessageStore, OutboundMessageStore>();
         services.AddScoped<IAccountSendStateStore, AccountSendStateStore>();
+        services.AddScoped<IChannelDiagnosticsStore, ChannelDiagnosticsStore>();
+        services.AddScoped<OutboundDiagnosticsService>();
         services.AddScoped<ChannelWebhookService>();
         services.AddScoped<ChannelWebhookAdminService>();
         services.AddScoped<AccountSendingService>();

@@ -62,6 +62,18 @@ public static class ChannelsEndpoints
         // O teste de prontidão: confere a configuração SEM enviar mensagem. Com live=true também LÊ o número no provedor (só leitura). O relatório traz o endereço do webhook (segredo operacional).
         contas.MapGet("/{id:guid}/readiness", async (Guid id, bool? live, ChannelReadinessService servico, CancellationToken ct) => Results.Ok(await servico.CheckAsync(id, live ?? false, ct)));
 
+        // O diagnóstico operacional do envio (só leitura, exceto reenfileirar um evento de ENTRADA morto): contas pausadas, mensagens paradas, falhas, envios de resultado incerto e entradas mortas.
+        var diagnostico = app.MapGroup("/channels/diagnostics").AddEndpointFilter(TratarErrosDeCanais);
+
+        diagnostico.MapGet("/outbound", async (int? hours, int? staleMinutes, int? take, OutboundDiagnosticsService servico, CancellationToken ct) =>
+            Results.Ok(await servico.GetAsync(hours ?? 24, TimeSpan.FromMinutes(staleMinutes ?? 5), take ?? 50, ct)));
+
+        diagnostico.MapPost("/dead-events/{eventId:guid}/requeue", async (Guid eventId, OutboundDiagnosticsService servico, CancellationToken ct) =>
+        {
+            await servico.RequeueDeadEventAsync(eventId, ct);
+            return Results.NoContent();
+        });
+
         var instancias = app.MapGroup("/channels/instances").AddEndpointFilter(TratarErrosDeCanais);
 
         instancias.MapPost("/", async (RegisterChannelInstanceRequest pedido, ChannelInstanceService servico, CancellationToken ct) =>

@@ -28,6 +28,18 @@ internal sealed class QueueItemRepository : IQueueItemRepository
     public Task<QueueItem?> FindActiveBySessionAsync(Guid sessionId, CancellationToken cancellationToken) =>
         _db.Items.FirstOrDefaultAsync(i => i.SessionId == sessionId && i.Status != QueueItemStatus.Closed, cancellationToken);
 
+    public async Task<bool> RecordDeliveryFailureAsync(Guid sessionId, DateTimeOffset now, CancellationToken cancellationToken) =>
+        await _db.Items
+            .Where(i => i.SessionId == sessionId && i.Status != QueueItemStatus.Closed)
+            .ExecuteUpdateAsync(
+                s => s.SetProperty(i => i.DeliveryFailures, i => i.DeliveryFailures + 1).SetProperty(i => i.LastDeliveryFailureAt, (DateTimeOffset?)now),
+                cancellationToken) > 0;
+
+    public Task ClearDeliveryFailuresAsync(Guid itemId, CancellationToken cancellationToken) =>
+        _db.Items
+            .Where(i => i.Id == itemId && i.DeliveryFailures > 0)
+            .ExecuteUpdateAsync(s => s.SetProperty(i => i.DeliveryFailures, 0).SetProperty(i => i.LastDeliveryFailureAt, (DateTimeOffset?)null), cancellationToken);
+
     public async Task<QueueItem> ReloadItemAsync(QueueItem item, CancellationToken cancellationToken)
     {
         var entrada = _db.Entry(item);

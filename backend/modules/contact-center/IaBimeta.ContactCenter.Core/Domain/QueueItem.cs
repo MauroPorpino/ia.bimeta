@@ -220,6 +220,16 @@ public sealed class QueueItem : ITenantOwned
     public DateTimeOffset UpdatedAt { get; private set; }
 
     /// <summary>
+    /// Quantas mensagens de saída desta conversa tiveram FALHA DEFINITIVA de envio desde a última resposta do atendente (SND-7: o ContactCenter sinaliza o atendimento, e a recuperação é uma nova resposta do
+    /// atendente). É um SINAL de monitoramento: gravado por <c>UPDATE</c> direto pelo consumidor de <c>OutboundMessageFailedV1</c> e limpo quando o atendente responde de novo; NÃO faz parte da máquina de estados do
+    /// item e por isso NÃO avança a <see cref="Version"/> (nunca disputa a versão com uma operação em andamento).
+    /// </summary>
+    public int DeliveryFailures { get; private set; }
+
+    /// <summary>Quando ocorreu a falha de envio mais recente (ver <see cref="DeliveryFailures"/>); nulo se não há.</summary>
+    public DateTimeOffset? LastDeliveryFailureAt { get; private set; }
+
+    /// <summary>
     /// O token de cerca (<c>fencing token</c>) do executor que assumiu a operação pendente por último. É dado na própria linha do item, por um
     /// <c>UPDATE</c> que só vale se a operação ainda é a pendente (a emissão e a revalidação da intenção são UM passo, sob a trava da
     /// linha) e que avança a <see cref="Version"/>: quem assumiu antes tem a versão velha e não grava mais no item. O mesmo token vai para

@@ -74,6 +74,32 @@ public interface IAccountSendStateStore
     Task<AccountSendState?> FindAsync(Guid accountId, CancellationToken cancellationToken);
 }
 
+/// <summary>Um evento de entrada morto no Inbox do Channels (visão administrativa: só chaves e motivo, nunca conteúdo de mensagem).</summary>
+public sealed record DeadEventRow(Guid EventId, string EventType, string OrderingKey, DateTimeOffset OccurredAt, int Attempts, string? DeadReason, DateTimeOffset? HandledAt);
+
+/// <summary>As leituras do diagnóstico de envio (só do tenant do contexto; sem rastreamento) e a única escrita dele: reenfileirar um evento de entrada morto.</summary>
+public interface IChannelDiagnosticsStore
+{
+    /// <summary>Quantos despachos do período há em cada estado, só dos números dados.</summary>
+    Task<IReadOnlyDictionary<OutboundState, int>> CountOutboundSinceAsync(IReadOnlyCollection<ChannelInstanceId> instances, DateTimeOffset since, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Os despachos do período que pedem atenção, os mais recentes primeiro: falha definitiva, resultado incerto, despacho parado (<c>Dispatching</c> ou <c>Retry</c> sem andamento desde <paramref name="idleBefore"/>)
+    /// e desfecho gravado mas ainda não informado ao Conversations (parado desde <paramref name="idleBefore"/>).
+    /// </summary>
+    Task<IReadOnlyList<OutboundMessage>> ListOutboundNeedingAttentionAsync(
+        IReadOnlyCollection<ChannelInstanceId> instances, DateTimeOffset since, DateTimeOffset idleBefore, int take, CancellationToken cancellationToken);
+
+    /// <summary>Os despachos das mensagens dadas (as do Conversations), de qualquer estado.</summary>
+    Task<IReadOnlyList<OutboundMessage>> FindOutboundByIdsAsync(IReadOnlyCollection<Guid> messageIds, CancellationToken cancellationToken);
+
+    /// <summary>Os eventos de entrada mortos do tenant, os mais recentes primeiro.</summary>
+    Task<IReadOnlyList<DeadEventRow>> ListDeadEventsAsync(int take, CancellationToken cancellationToken);
+
+    /// <summary>Reenfileira um evento morto do tenant (volta a Pendente, sem tentativas). Falso: não existe ou não está morto.</summary>
+    Task<bool> RequeueDeadEventAsync(Guid eventId, CancellationToken cancellationToken);
+}
+
 /// <summary>Os adaptadores de provedor registrados, por provedor.</summary>
 public sealed class ChannelProviderAdapters
 {

@@ -18,6 +18,29 @@ internal sealed class OutboundDispatchReader : IOutboundDispatchReader
         _db = db;
     }
 
+    public async Task<IReadOnlyList<UndeliveredOutboundView>> ListUndeliveredAsync(
+        IReadOnlyCollection<Guid>? organizationIds, DateTimeOffset createdBefore, int take, CancellationToken cancellationToken)
+    {
+        var pendentes = new[] { DeliveryState.Requested, DeliveryState.Queued, DeliveryState.Sending };
+        var consulta =
+            from mensagem in _db.Messages.AsNoTracking()
+            where mensagem.Direction == MessageDirection.Outbound
+                && mensagem.DeliveryState != null && pendentes.Contains(mensagem.DeliveryState.Value)
+                && mensagem.CreatedAt < createdBefore
+            join sessao in _db.Sessions.AsNoTracking() on mensagem.SessionId equals sessao.Id
+            select new { mensagem, sessao.OrganizationId };
+
+        if (organizationIds is not null)
+        {
+            consulta = consulta.Where(l => organizationIds.Contains(l.OrganizationId));
+        }
+
+        var linhas = await consulta.OrderBy(l => l.mensagem.CreatedAt).ThenBy(l => l.mensagem.Id).Take(take).ToListAsync(cancellationToken);
+        return linhas
+            .Select(l => new UndeliveredOutboundView(l.mensagem.Id, l.mensagem.SessionId, l.OrganizationId, l.mensagem.ChannelInstanceId, l.mensagem.DeliveryState!.Value, l.mensagem.CreatedAt))
+            .ToList();
+    }
+
     public async Task<OutboundDispatchView?> FindAsync(Guid messageId, CancellationToken cancellationToken)
     {
         var linha = await (

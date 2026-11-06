@@ -216,6 +216,89 @@ internal sealed class AccountSendStateStore : IAccountSendStateStore
     }
 }
 
+/// <summary>
+/// As leituras do diagnóstico de envio, sempre do tenant do contexto (o filtro global cobre os despachos; o outbox não tem filtro, então o tenant entra na consulta). Sem rastreamento. A única escrita é reenfileirar
+/// um evento de entrada morto do próprio tenant.
+/// </summary>
+internal sealed class ChannelDiagnosticsStore : IChannelDiagnosticsStore
+{
+    private readonly ChannelsDbContext _db;
+    private readonly IRequestContextAccessor _context;
+    private readonly TimeProvider _clock;
+
+    public ChannelDiagnosticsStore(ChannelsDbContext db, IRequestContextAccessor context, TimeProvider clock)
+    {
+        _db = db;
+        _context = context;
+        _clock = clock;
+    }
+
+    public async Task<IReadOnlyDictionary<OutboundState, int>> CountOutboundSinceAsync(
+        IReadOnlyCollection<ChannelInstanceId> instances, DateTimeOffset since, CancellationToken cancellationToken)
+    {
+        var ids = instances.ToList();
+        var linhas = await _db.OutboundMessages.AsNoTracking()
+            .Where(m => ids.Contains(m.ChannelInstanceId) && m.CreatedAt >= since)
+            .GroupBy(m => m.State)
+            .Select(g => new { Estado = g.Key, Total = g.Count() })
+            .ToListAsync(cancellationToken);
+        return linhas.ToDictionary(l => l.Estado, l => l.Total);
+    }
+
+    public async Task<IReadOnlyList<OutboundMessage>> ListOutboundNeedingAttentionAsync(
+        IReadOnlyCollection<ChannelInstanceId> instances, DateTimeOffset since, DateTimeOffset idleBefore, int take, CancellationToken cancellationToken)
+    {
+        var ids = instances.ToList();
+        return await _db.OutboundMessages.AsNoTracking()
+            .Where(m => ids.Contains(m.ChannelInstanceId) && m.CreatedAt >= since
+                && (m.State == OutboundState.Failed
+                    || m.State == OutboundState.SendUnknown
+                    || ((m.State == OutboundState.Dispatching || m.State == OutboundState.Retry) && m.UpdatedAt < idleBefore)
+                    || (m.State == OutboundState.Sent && !m.Notified && m.UpdatedAt < idleBefore)))
+            .OrderByDescending(m => m.UpdatedAt)
+            .Take(take)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<OutboundMessage>> FindOutboundByIdsAsync(IReadOnlyCollection<Guid> messageIds, CancellationToken cancellationToken)
+    {
+        if (messageIds.Count == 0)
+        {
+            return Array.Empty<OutboundMessage>();
+        }
+
+        var ids = messageIds.ToList();
+        return await _db.OutboundMessages.AsNoTracking().Where(m => ids.Contains(m.Id)).ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<DeadEventRow>> ListDeadEventsAsync(int take, CancellationToken cancellationToken)
+    {
+        var tenant = _context.GetRequired().TenantId.Value;
+        return await _db.Set<OutboxMessage>().AsNoTracking()
+            .Where(o => o.TenantId == tenant && o.State == OutboxState.Dead)
+            .OrderByDescending(o => o.IngestSeq)
+            .Take(take)
+            .Select(o => new DeadEventRow(o.Id, o.EventType, o.OrderingKey, o.OccurredAt, o.Attempts, o.DeadReason, o.ProcessedAt))
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<bool> RequeueDeadEventAsync(Guid eventId, CancellationToken cancellationToken)
+    {
+        var tenant = _context.GetRequired().TenantId.Value;
+        var agora = _clock.GetUtcNow();
+        var afetadas = await _db.Set<OutboxMessage>()
+            .Where(o => o.TenantId == tenant && o.Id == eventId && o.State == OutboxState.Dead)
+            .ExecuteUpdateAsync(
+                s => s.SetProperty(o => o.State, OutboxState.Pending)
+                    .SetProperty(o => o.Attempts, 0)
+                    .SetProperty(o => o.NextAttemptAt, agora)
+                    .SetProperty(o => o.DeadReason, (string?)null)
+                    .SetProperty(o => o.ProcessedAt, (DateTimeOffset?)null),
+                cancellationToken);
+        return afetadas == 1;
+    }
+}
+
 internal sealed class OutboundMessageStore : IOutboundMessageStore
 {
     private readonly ChannelsDbContext _db;

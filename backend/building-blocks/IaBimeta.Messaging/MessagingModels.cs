@@ -69,6 +69,10 @@ public sealed class OutboxMessage
 
     public DateTimeOffset CreatedAt { get; set; }
 
+    /// <summary>
+    /// Em <see cref="OutboxState.Processed"/>: quando foi processado (a retenção conta daqui). Em <see cref="OutboxState.Dead"/>: quando o tratamento dos mortos pelos handlers terminou; NULO = ainda por
+    /// tratar (o relay o repete até concluir, inclusive depois de um reinício). Reenfileirar um morto limpa o campo.
+    /// </summary>
     public DateTimeOffset? ProcessedAt { get; set; }
 }
 

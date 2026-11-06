@@ -333,3 +333,75 @@ public sealed class AccountSendStateTests
         Assert.Equal(valido, endereco is not null);
     }
 }
+
+/// <summary>
+/// A distinção que protege o <c>SendUnknown</c> (EFX-3): só um despacho cuja CHAMADA ao provedor começou (<c>Dispatching</c> com tentativas) pode ter chegado à Meta. A intenção sozinha (zero tentativas) nunca
+/// chamou o provedor: pode esperar (vazão), seguir ou falhar com certeza, e nunca vira "resultado incerto".
+/// </summary>
+public sealed class OutboundMessageProviderReachTests
+{
+    private static OutboundMessage Intencao() =>
+        OutboundMessage.Intend(Guid.NewGuid(), Fabrica.NovoTenant(), Guid.NewGuid(), IaBimeta.SharedKernel.ChannelInstanceId.New(), new DateTimeOffset(2026, 11, 5, 12, 0, 0, TimeSpan.Zero));
+
+    private static readonly DateTimeOffset Agora = new(2026, 11, 5, 12, 0, 0, TimeSpan.Zero);
+
+    [Fact]
+    public void So_a_intencao_nao_chamou_o_provedor_e_nao_e_incerta()
+    {
+        var despacho = Intencao();
+
+        Assert.Equal((OutboundState.Dispatching, 0), (despacho.State, despacho.Attempts));
+        Assert.False(despacho.MayHaveReachedProvider);
+        Assert.False(despacho.IsResolved);
+    }
+
+    [Fact]
+    public void Depois_de_comecar_a_tentativa_a_chamada_pode_ter_chegado_ao_provedor()
+    {
+        var despacho = Intencao();
+
+        despacho.BeginAttempt(Agora);
+
+        Assert.True(despacho.MayHaveReachedProvider);
+    }
+
+    [Fact]
+    public void A_recusa_transitoria_com_prova_de_que_nada_saiu_nao_e_incerta_ate_a_proxima_tentativa_comecar()
+    {
+        var despacho = Intencao();
+        despacho.BeginAttempt(Agora);
+
+        despacho.MarkRetry("130429", Agora);
+        Assert.False(despacho.MayHaveReachedProvider);
+
+        despacho.BeginAttempt(Agora.AddSeconds(5));
+        Assert.True(despacho.MayHaveReachedProvider);
+        Assert.Equal(2, despacho.Attempts);
+    }
+
+    [Theory]
+    [InlineData("sent")]
+    [InlineData("failed")]
+    [InlineData("unknown")]
+    public void Desfecho_gravado_nunca_e_tratado_como_chamada_em_curso(string desfecho)
+    {
+        var despacho = Intencao();
+        despacho.BeginAttempt(Agora);
+
+        switch (desfecho)
+        {
+            case "sent":
+                despacho.MarkSent("wamid.X", Agora);
+                break;
+            case "failed":
+                despacho.MarkFailed("relay-dead", Agora);
+                break;
+            default:
+                despacho.MarkSendUnknown("interrupted", Agora);
+                break;
+        }
+
+        Assert.False(despacho.MayHaveReachedProvider);
+        Assert.True(despacho.IsResolved);
+    }
+}

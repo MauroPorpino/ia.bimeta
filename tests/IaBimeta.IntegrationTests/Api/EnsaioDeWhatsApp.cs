@@ -69,6 +69,12 @@ internal sealed class ServidorGraphLoopback : IAsyncDisposable
     /// <summary>Quando definido, responde ao envio com o <c>Retry-After</c> (em segundos) além do status e do corpo; vale no lugar de <see cref="Roteiro"/>.</summary>
     public Func<CapturaGraph, (int Status, string Corpo, int? RetryAfter)>? RoteiroComEspera { get; set; }
 
+    /// <summary>
+    /// Roda ANTES de responder a cada envio (já capturado): serve para segurar a chamada (uma resposta que nunca vem, para provar o que acontece quando o processo cai no meio da chamada). O cancelamento é o da
+    /// conexão: quem derruba o chamador solta a chamada presa.
+    /// </summary>
+    public Func<CapturaGraph, CancellationToken, Task>? Antes { get; set; }
+
     /// <summary>O que responder à leitura do número (a sonda). Por padrão, o número existe e o token é aceito.</summary>
     public Func<CapturaGraph, (int Status, string Corpo)> RoteiroDeLeitura { get; set; }
 
@@ -111,6 +117,11 @@ internal sealed class ServidorGraphLoopback : IAsyncDisposable
         var captura = new CapturaGraph(
             autorizacao.StartsWith("Bearer ", StringComparison.Ordinal) ? autorizacao[7..] : string.Empty, http.Request.Path.Value ?? string.Empty, corpo, "POST", DateTimeOffset.UtcNow);
         _capturas.Enqueue(captura);
+
+        if (Antes is { } antes)
+        {
+            await antes(captura, http.RequestAborted);
+        }
 
         int status;
         string resposta;

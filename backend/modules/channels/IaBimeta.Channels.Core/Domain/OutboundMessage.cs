@@ -69,6 +69,13 @@ public sealed class OutboundMessage : ITenantOwned
 
     public bool IsResolved => State is OutboundState.Sent or OutboundState.Failed or OutboundState.SendUnknown;
 
+    /// <summary>
+    /// A chamada ao provedor PODE estar em curso ou ter saído sem desfecho gravado: o despacho está em <see cref="OutboundState.Dispatching"/> e a tentativa já começou (<see cref="Attempts"/> acima de zero, gravado
+    /// ANTES da chamada). A intenção sozinha (<see cref="Intend"/>, zero tentativas) NÃO é isso: nenhuma chamada foi feita, e a entrega pode seguir (uma espera por vazão, por exemplo) ou falhar com certeza.
+    /// Só neste caso o desfecho é <see cref="OutboundState.SendUnknown"/>, nunca reenvio nem falha afirmada (EFX-3).
+    /// </summary>
+    public bool MayHaveReachedProvider => State == OutboundState.Dispatching && Attempts > 0;
+
     /// <summary>Grava a intenção de enviar (estado <see cref="OutboundState.Dispatching"/>), ANTES da chamada ao provedor.</summary>
     public static OutboundMessage Intend(Guid messageId, TenantId tenantId, Guid operationId, ChannelInstanceId channelInstanceId, DateTimeOffset now) =>
         new(messageId, tenantId, operationId, channelInstanceId, OutboundState.Dispatching, 0, now);
