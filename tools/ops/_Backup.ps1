@@ -199,3 +199,33 @@ function Test-RestauracaoEmInstancia {
         if ($null -ne $instancia) { try { Remove-InstanciaDescartavel -Instancia $instancia -PastaDeBackups $PastaDeBackups } catch { } }
     }
 }
+
+# Alerta generico (arquivo + webhook opcional), com deduplicacao: o webhook so e chamado quando o conteudo MUDA ou depois de ReenviarAposHoras, para um
+# monitor que roda a cada poucos minutos nao inundar o canal. A URL vem so da variavel de ambiente e nunca aparece em saida, log ou estado.
+function Send-AlertaGenerico {
+    param(
+        [Parameter(Mandatory)][string]$Pasta, [Parameter(Mandatory)][string]$NomeDoArquivo, [Parameter(Mandatory)][string]$Texto,
+        [string]$WebhookEnv, [string]$ArquivoDeEstado, [double]$ReenviarAposHoras = 6
+    )
+    New-Item -ItemType Directory -Force -Path $Pasta | Out-Null
+    Write-ArquivoUtf8 -Caminho (Join-Path $Pasta $NomeDoArquivo) -Texto ($Texto + "`n")
+    if (-not $WebhookEnv) { return 'webhook nao configurado' }
+    $url = [Environment]::GetEnvironmentVariable($WebhookEnv)
+    if ([string]::IsNullOrEmpty($url)) { return ('a variavel ' + $WebhookEnv + ' nao esta definida') }
+
+    $hash = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($Texto))).Replace('-', '')
+    if ($ArquivoDeEstado) {
+        $anterior = Read-EstadoDoBackup -Arquivo $ArquivoDeEstado
+        if ($null -ne $anterior -and $anterior.hash -eq $hash -and $anterior.enviadoEmUtc) {
+            $idade = ((Get-Date).ToUniversalTime() - ([datetime]::Parse($anterior.enviadoEmUtc, [Globalization.CultureInfo]::InvariantCulture).ToUniversalTime())).TotalHours
+            if ($idade -lt $ReenviarAposHoras) { return 'ja alertado ha menos de ' + $ReenviarAposHoras + ' h (nao repito)' }
+        }
+    }
+    try {
+        $corpo = [Text.Encoding]::UTF8.GetBytes(('{"text":' + (ConvertTo-Json -InputObject $Texto) + '}'))
+        Invoke-RestMethod -Method Post -Uri $url -ContentType 'application/json; charset=utf-8' -Body $corpo -TimeoutSec 15 | Out-Null
+        if ($ArquivoDeEstado) { Write-EstadoDoBackup -Arquivo $ArquivoDeEstado -Estado ([ordered]@{ hash = $hash; enviadoEmUtc = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') }) }
+        return 'webhook enviado'
+    }
+    catch { return ('webhook FALHOU (' + $_.Exception.GetType().Name + ')') }
+}

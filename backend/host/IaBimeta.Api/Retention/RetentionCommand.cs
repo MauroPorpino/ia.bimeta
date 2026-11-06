@@ -1,3 +1,4 @@
+using IaBimeta.Api.Operations;
 using IaBimeta.Messaging;
 using IaBimeta.SharedKernel;
 using Npgsql;
@@ -46,7 +47,7 @@ internal static class RetentionCommand
         }
 
         // A mesma composição do Api, sem abrir porta nem iniciar serviço algum, com só avisos e erros no console.
-        await using var app = ApiHost.Build(Array.Empty<string>(), builder => builder.Logging.SetMinimumLevel(LogLevel.Warning));
+        await using var app = ApiHost.Build(Array.Empty<string>(), builder => OperationsLogging.Quiet(builder.Logging));
         return await ExecuteAsync(app.Services, purge, output);
     }
 

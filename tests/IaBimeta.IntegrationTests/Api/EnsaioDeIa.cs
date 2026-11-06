@@ -127,13 +127,16 @@ internal sealed class EnsaioDeIa : IAsyncDisposable
     private readonly PostgresFixture _banco;
     private readonly Dictionary<string, string?> _configuracaoDoApi;
     private readonly Func<IHost> _construirWorker;
+    private readonly Dictionary<string, string?> _configuracaoDoWorker;
+    private readonly List<ProcessoDoWorker> _processos = new();
     private readonly List<IHost> _workersExtras = new();
 
-    private EnsaioDeIa(PostgresFixture banco, string slug, ServidorOpenAiLoopback openAi, ApiServer api, IHost worker, CapturaDeLogs logs, Dictionary<string, string?> configuracaoDoApi, Func<IHost> construirWorker)
+    private EnsaioDeIa(PostgresFixture banco, string slug, ServidorOpenAiLoopback openAi, ApiServer api, IHost worker, CapturaDeLogs logs, Dictionary<string, string?> configuracaoDoApi, Func<IHost> construirWorker, Dictionary<string, string?> configuracaoDoWorker)
     {
         _banco = banco;
         _configuracaoDoApi = configuracaoDoApi;
         _construirWorker = construirWorker;
+        _configuracaoDoWorker = configuracaoDoWorker;
         Slug = slug;
         OpenAi = openAi;
         Api = api;
@@ -242,7 +245,7 @@ internal sealed class EnsaioDeIa : IAsyncDisposable
         var worker = ConstruirWorker();
         await worker.StartAsync();
 
-        return new EnsaioDeIa(banco, slug, openAi, api, worker, logs, configuracaoDoApi, ConstruirWorker);
+        return new EnsaioDeIa(banco, slug, openAi, api, worker, logs, configuracaoDoApi, ConstruirWorker, configuracaoDoWorker);
     }
 
     /// <summary>
@@ -285,6 +288,17 @@ internal sealed class EnsaioDeIa : IAsyncDisposable
         await Worker.StopAsync(limite.Token);
         Worker.Dispose();
         _workerParado = true;
+    }
+
+    /// <summary>
+    /// Sobe o Worker como um PROCESSO de verdade (<c>dotnet IaBimeta.Worker.dll</c>, o mesmo binário da implantação), com a MESMA configuração. Existe para morrer à força: <see cref="ProcessoDoWorker.Matar"/>
+    /// é um kill do sistema operacional (sem parada graciosa, sem cancelamento), o que mais se parece com a queda de um servidor. Pare o Worker em processo (<see cref="PararWorkerAsync"/>) antes.
+    /// </summary>
+    public ProcessoDoWorker SubirWorkerComoProcesso()
+    {
+        var processo = ProcessoDoWorker.Iniciar(_configuracaoDoWorker);
+        _processos.Add(processo);
+        return processo;
     }
 
     /// <summary>Sobe de novo o Worker parado por <see cref="PararWorkerAsync"/>, com a MESMA configuração.</summary>
@@ -393,6 +407,11 @@ internal sealed class EnsaioDeIa : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        foreach (var processo in _processos)
+        {
+            processo.Matar();
+        }
+
         foreach (var extra in _workersExtras)
         {
             using var limite = new CancellationTokenSource(TimeSpan.FromSeconds(10));

@@ -1,4 +1,5 @@
 using IaBimeta.Agents.Infrastructure;
+using IaBimeta.Api.Operations;
 using IaBimeta.AiGateway.Infrastructure;
 using IaBimeta.Audit.Infrastructure;
 using IaBimeta.Channels.Infrastructure;
@@ -75,7 +76,7 @@ internal static class ProvisionCommand
 
         // A mesma composição do Api, sem argumentos de linha de comando (não são configuração) e sem iniciar o host: nenhuma porta, nenhum serviço hospedado.
         // Só avisos e erros no console: o relatório é a saída do comando (e nenhum log traz segredo).
-        await using var app = ApiHost.Build(Array.Empty<string>(), builder => builder.Logging.SetMinimumLevel(LogLevel.Warning));
+        await using var app = ApiHost.Build(Array.Empty<string>(), builder => OperationsLogging.Quiet(builder.Logging));
         if (migrations)
         {
             await ApplyMigrationsAsync(app.Services, output);

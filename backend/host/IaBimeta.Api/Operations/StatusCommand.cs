@@ -57,7 +57,7 @@ internal static class StatusCommand
         }
 
         // A mesma composição do Api, sem abrir porta nem iniciar serviço algum, com só avisos e erros no console.
-        await using var app = ApiHost.Build(Array.Empty<string>(), builder => builder.Logging.SetMinimumLevel(LogLevel.Warning));
+        await using var app = ApiHost.Build(Array.Empty<string>(), builder => OperationsLogging.Quiet(builder.Logging));
         apiUrl ??= app.Configuration["Health:ApiUrl"];
         return await ExecuteAsync(app.Services, new StatusOptions(tenant, apiUrl, verificarApi, verificarWorker), output);
     }

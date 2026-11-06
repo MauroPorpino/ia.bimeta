@@ -1,3 +1,4 @@
+using IaBimeta.Api.Operations;
 using IaBimeta.Identity.Application;
 using IaBimeta.Identity.Domain;
 using IaBimeta.SharedKernel;
@@ -48,7 +49,7 @@ internal static class ResetPasswordCommand
         }
 
         // A mesma composição do Api, sem abrir porta nem iniciar serviço algum, com só avisos e erros no console (nenhum log traz o token).
-        await using var app = ApiHost.Build(Array.Empty<string>(), builder => builder.Logging.SetMinimumLevel(LogLevel.Warning));
+        await using var app = ApiHost.Build(Array.Empty<string>(), builder => OperationsLogging.Quiet(builder.Logging));
         return await IssueAsync(app.Services, tenant, email, output);
     }
 

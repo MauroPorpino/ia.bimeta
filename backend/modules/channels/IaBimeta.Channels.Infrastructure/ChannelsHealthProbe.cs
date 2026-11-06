@@ -47,7 +47,7 @@ internal sealed class ChannelsHealthProbe : IHealthProbe
         }
 
         // Contas pausadas: o motivo é um código curto (sem dado de cliente).
-        var pausadas = await contas.Select(s => new { s.TenantId, s.AccountId, s.PauseReason, s.PausedAt }).Take(50).ToListAsync(cancellationToken);
+        var pausadas = await contas.OrderBy(s => s.PausedAt).ThenBy(s => s.AccountId).Select(s => new { s.TenantId, s.AccountId, s.PauseReason, s.PausedAt }).Take(50).ToListAsync(cancellationToken);
         foreach (var conta in pausadas)
         {
             var desde = conta.PausedAt is { } quando ? $" desde {quando:yyyy-MM-dd HH:mm} UTC (há {HealthText.Age(context.Now - quando)})" : string.Empty;

@@ -160,4 +160,112 @@ public sealed class RecuperacaoDoAmbienteTests(PostgresFixture banco)
         var (_, depois) = await StatusAsync(e);
         Assert.DoesNotContain("[CRITICO]", depois);
     }
+
+    private async Task<EnsaioDeWhatsApp> IniciarParaQuedaAsync(string prefixo, Action<Dictionary<string, string?>> ajustar)
+    {
+        var configuracao = Configuracao();
+        ajustar(configuracao);
+        var e = await EnsaioDeWhatsApp.IniciarAsync(banco, prefixo, configuracao);
+        await e.Ia.CadastrarChaveAsync();
+        e.Ia.OpenAi.Roteiros.Definir(EnsaioDeIa.ChaveCanario, Responde());
+        await e.Ia.PararWorkerAsync(); // o Worker em processo sai: quem trabalha é o PROCESSO que o teste sobe e mata
+        return e;
+    }
+
+    [Fact]
+    public async Task Processo_do_Worker_morto_a_forca_no_meio_da_chamada_ao_modelo_e_substituido_por_outro_com_uma_resposta_e_um_envio()
+    {
+        await using var e = await IniciarParaQuedaAsync("reckill", c =>
+        {
+            c["Agents:Options:ModelCallTimeout"] = "00:00:05";
+            c["Agents:Options:TurnMaxDuration"] = "00:00:08"; // o lease do turno que o processo morto deixa vence logo
+        });
+        var primeiro = e.Ia.SubirWorkerComoProcesso();
+        try
+        {
+            e.Ia.OpenAi.Roteiros.Definir(EnsaioDeIa.ChaveCanario, async (_, cancelamento) =>
+            {
+                await Task.Delay(Timeout.Infinite, cancelamento);
+                return ServidorOpenAiSimulado.Sucesso(CenarioDeAgentes.Responder("nunca chega"));
+            });
+            Assert.Equal(HttpStatusCode.OK, await e.EnviarWebhookAsync(e.PayloadDeTexto("wamid.REC-KILL", "5511999990777", "Kill", "Oi")));
+            await e.EsperarAsync(async () => e.Ia.OpenAi.Roteiros.Capturas.Count == 1, "o processo do Worker deveria estar no meio da chamada ao modelo: " + primeiro.Saida);
+
+            // A queda: kill do sistema operacional, sem parada graciosa, com a chamada em andamento.
+            primeiro.Matar();
+            Assert.True(primeiro.Saiu);
+            Assert.Empty(e.Graph.Capturas);
+
+            // O status enxerga o que a queda deixou: o turno de IA com o lease vencido e o Worker sem atividade.
+            await Task.Delay(TimeSpan.FromSeconds(10));
+            var (codigoDaQueda, aposAQueda) = await StatusAsync(e);
+            Assert.Equal(2, codigoDaQueda);
+            Assert.Contains("[CRITICO]", SecaoDoWorker(aposAQueda));
+            Assert.Contains("turno(s) de IA com o lease vencido", aposAQueda);
+        }
+        finally
+        {
+            primeiro.Matar();
+        }
+
+        // Outro processo assume: o turno é retomado, a resposta sai UMA vez.
+        e.Ia.OpenAi.Roteiros.Definir(EnsaioDeIa.ChaveCanario, Responde());
+        var segundo = e.Ia.SubirWorkerComoProcesso();
+        await e.EsperarAsync(async () => e.Graph.Capturas.Count == 1, "o novo processo deveria retomar o turno e responder: " + segundo.Saida);
+        await e.EsperarAsync(async () => (await SaidasPorEstadoAsync(e)).GetValueOrDefault((short)2) == 1, "a saída deveria ficar Enviada");
+        await Task.Delay(TimeSpan.FromSeconds(3));
+
+        var sessao = Assert.Single(await SessoesAsync(e)).Sessao;
+        var mensagens = await e.Ia.MensagensAsync(sessao);
+        Assert.Single(mensagens, m => m["author"]!.GetValue<string>() == "Customer");
+        Assert.Single(mensagens, m => m["author"]!.GetValue<string>() == "Ai");
+        Assert.Single(e.Graph.Capturas);
+        Assert.Equal(TextoDaIa, e.Graph.Capturas[0].Texto);
+        Assert.Equal(new Dictionary<short, int> { [2] = 1 }, await SaidasPorEstadoAsync(e));
+
+        var (codigoFinal, final) = await StatusAsync(e);
+        Assert.Matches(@"\[OK\]\s+ativo", SecaoDoWorker(final));
+        Assert.DoesNotContain("[CRITICO]", final);
+        Assert.Equal(0, codigoFinal);
+    }
+
+    [Fact]
+    public async Task Processo_do_Worker_morto_a_forca_no_meio_do_envio_deixa_resultado_ambiguo_que_o_status_aponta_e_nunca_e_reenviado()
+    {
+        await using var e = await IniciarParaQuedaAsync("reckenv", c => c["Messaging:LeaseDuration"] = "00:00:03");
+        var primeiro = e.Ia.SubirWorkerComoProcesso();
+        Guid sessao;
+        try
+        {
+            // A Meta recebe a chamada e nunca responde: o processo cai com o envio em andamento.
+            e.Graph.Antes = (_, cancelamento) => Task.Delay(Timeout.Infinite, cancelamento);
+            Assert.Equal(HttpStatusCode.OK, await e.EnviarWebhookAsync(e.PayloadDeTexto("wamid.REC-KENV", "5511999990778", "KillEnvio", "Oi")));
+            sessao = await e.EsperarSessaoAsync("KillEnvio");
+            await e.EsperarAsync(async () => e.Graph.Capturas.Count == 1, "a chamada deveria chegar à Meta e ficar em andamento: " + primeiro.Saida);
+            primeiro.Matar();
+            Assert.True(primeiro.Saiu);
+        }
+        finally
+        {
+            primeiro.Matar();
+        }
+
+        // O novo processo acha o despacho em andamento: a Meta PODE ter recebido, então o desfecho é incerto, e a mensagem NUNCA é reenviada.
+        e.Graph.Antes = null;
+        e.Graph.Roteiro = _ => e.Graph.Aceita(); // se o novo processo (erradamente) reenviasse, a Meta aceitaria e a mensagem sairia DUAS vezes
+        var segundo = e.Ia.SubirWorkerComoProcesso();
+        await e.EsperarEntregaAsync(sessao, "SendUnknown", segundos: 60);
+        await Task.Delay(TimeSpan.FromSeconds(3));
+        Assert.Single(e.Graph.Capturas);
+        Assert.Equal(new Dictionary<short, int> { [4] = 1 }, await SaidasPorEstadoAsync(e));
+
+        // O status põe o resultado ambíguo na frente de quem opera, com a ação.
+        var (codigo, saida) = await StatusAsync(e);
+        Assert.Equal(1, codigo);
+        Assert.Contains("[ATENCAO]", saida);
+        Assert.Contains("1 mensagem(ns) de saída com resultado ambíguo", saida);
+        Assert.Contains("nunca são reenviadas sozinhas", saida);
+        Assert.Matches(@"\[OK\]\s+ativo", SecaoDoWorker(saida));
+        Assert.False(segundo.Saiu);
+    }
 }
