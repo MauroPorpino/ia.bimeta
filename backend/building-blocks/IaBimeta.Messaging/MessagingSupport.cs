@@ -29,7 +29,7 @@ public sealed class MessagingOptions
     /// <summary>De quanto em quanto tempo o relay olha o outbox (polling; <c>LISTEN/NOTIFY</c> só depois de medir).</summary>
     public TimeSpan PollInterval { get; set; } = TimeSpan.FromSeconds(2);
 
-    /// <summary>Quanto tempo os processados ficam guardados antes da purga.</summary>
+    /// <summary>Quanto tempo os processados ficam guardados antes da purga. Só vale quando NÃO há política de retenção registrada (relay isolado, testes): os hosts registram a política (seção <c>Retention</c>, ADR 0025), que decide o prazo de cada empresa.</summary>
     public TimeSpan ProcessedRetention { get; set; } = TimeSpan.FromDays(7);
 
     /// <summary>

@@ -1,0 +1,79 @@
+# Retenção de dados (ADR 0025)
+
+Política mínima de retenção por ambiente e por empresa, com relatório e expurgo **técnico** seguros. **Dados pessoais e registros de referência não são expurgados**: dependem de decisão jurídica (veja "Decisões que dependem do negócio").
+
+## O que a política expurga hoje (só dado técnico)
+
+| Categoria (`Retention:Days:<Categoria>`) | Padrão | O que sai | Tabelas |
+|---|---|---|---|
+| `Sessions` | 30 dias | sessões vencidas ou revogadas há mais que o prazo | `identity.sessions` |
+| `PasswordResetTokens` | 30 dias | tokens de redefinição usados, revogados ou vencidos há mais que o prazo | `identity.password_reset_tokens` |
+| `LoginThrottles` | 7 dias | contadores de falha de login parados (sem bloqueio vigente) | `identity.login_throttles` |
+| `ProcessedEvents` | 7 dias | eventos do outbox **já processados** (o payload do evento do canal carrega o texto do cliente: é aqui que ele expira) | `conversations.outbox_message`, `channels.outbox_message` |
+| `InboxMarkers` | 30 dias | marcas de idempotência (só identificadores) | `channels.inbox_message`, `agents.inbox_message`, `contact_center.inbox_message` |
+
+Os padrões de `ProcessedEvents` (7) e `InboxMarkers` (30) são os da política inicial aprovada (DP-06, ADR 0011).
+
+**Nunca são expurgados por esta rotina:** eventos **pendentes, em andamento ou mortos** (os mortos ficam até reenfileirar ou descartar com autorização), sessão ou token ainda válidos, bloqueio de login vigente, e **todo** dado pessoal ou de referência: mensagens, traduções, contatos, conversas, atendimentos, histórico e operações do ContactCenter, usuários e papéis, trilha de auditoria e ledger de IA.
+
+**Payload bruto do webhook:** não é guardado. O Receiver grava só o evento normalizado no outbox do Channels. O texto do cliente também fica em `conversations.messages` (dado pessoal, fora do expurgo).
+
+## Configuração (por ambiente e por empresa)
+
+Seção `Retention` (arquivo de configuração ou variáveis de ambiente, por exemplo `Retention__Days__Sessions=60`):
+
+```json
+{
+  "Retention": {
+    "Days": { "Sessions": 30, "ProcessedEvents": 7, "InboxMarkers": 30 },
+    "Tenants": {
+      "lab-exemplo": { "ProcessedEvents": 14, "InboxMarkers": 45 }
+    }
+  }
+}
+```
+
+- `Days` troca só as categorias citadas; as demais ficam com o padrão. `Tenants:<slug>` sobrescreve **só** as categorias citadas para aquela empresa (o slug do login).
+- Intervalo: 1 a 3650 dias. A retenção das marcas do Inbox tem de ser **maior** que a dos eventos processados (padrão e por empresa): a marca nunca expira antes do evento que ela protege. Valor inválido **impede a partida** do Api e do Worker.
+- Uma empresa citada que **não existe** faz o comando recusar a execução (nunca se aplica um prazo suposto, que poderia apagar mais cedo que o combinado).
+- O **relay do Worker** expurga os eventos processados do outbox, de hora em hora, com o prazo de cada empresa (sem a seção `Retention`, vale o padrão de 7 dias). A chave antiga `Messaging:ProcessedRetention` só vale onde **não** há política registrada (relay isolado, testes); nos hosts, use `Retention:Days:ProcessedEvents`. As demais categorias só são expurgadas pelo comando, nunca sozinhas.
+
+## Relatório e expurgo
+
+```powershell
+.\tools\ops\Retencao-De-Dados.ps1                        # relatório: nada é alterado
+.\tools\ops\Retencao-De-Dados.ps1 -Expurgar -Confirmar   # expurgo técnico
+```
+
+(ou `dotnet run --project backend/host/IaBimeta.Api --no-launch-profile -- retention report` e `... retention purge --confirm`). Sem `--confirm` o expurgo recusa. O comando roda na máquina de quem opera, com acesso ao banco; não há rota HTTP. Para outro banco, defina `ConnectionStrings__Default` antes.
+
+O relatório mostra, por categoria e por passada (cada empresa com prazo próprio e "padrão" para as demais), quantas linhas **seriam** removidas; os eventos mortos de cada outbox e a data do mais antigo; e o **inventário** de todas as tabelas (classe, linhas estimadas, tamanho). Guarde a saída do expurgo no registro da mudança: ela é, por enquanto, o registro do que foi removido.
+
+**Rotina sugerida:** faça um backup (`tools\ops\Backup-Banco.ps1`), rode o relatório, confira os números e só então o expurgo.
+
+### Bloqueio do Inbox por evento morto
+
+Reenfileirar um evento morto depois de a marca de idempotência ter sido apagada poderia repetir o efeito dele. Por isso o expurgo das marcas do Inbox é **bloqueado** (o relatório diz `BLOQUEADO` e por quê) enquanto houver evento morto mais antigo que o corte. Trate os mortos (reenfileirar ou descartar com autorização) e rode de novo.
+
+## Inventário: toda tabela tem uma classe
+
+| Classe | Significado | Expurgo |
+|---|---|---|
+| técnica | estado operacional sem valor depois de um prazo | por política (tabela acima) |
+| PESSOAL | conteúdo de cliente ou dado de colaborador | **nenhum**: só relatório |
+| REFERÊNCIA | trilha de auditoria, ledger de IA | **nenhum**: só relatório |
+| configuração | cadastros do tenant (organizações, filas, contas, credenciais cifradas...) | não expira por tempo; sai com o encerramento da empresa |
+| controle do banco | histórico de migrations | nenhum |
+
+Um teste de integração falha quando aparece uma tabela **sem classificação** (`RetentionInventory`), e garante que só as técnicas têm tarefa de expurgo: adicionar uma tabela obriga decidir a retenção dela.
+
+## Decisões que dependem do negócio (não implementadas de propósito)
+
+1. **Prazo e forma para dados pessoais** (apagar, anonimizar ou pseudonimizar): mensagens e traduções, contatos, conversas, atendimentos e histórico, usuários que saíram da empresa. Considerar a base legal, o prazo de guarda exigido para o setor (laboratórios, no caso do LabNet) e o direito de eliminação do titular.
+2. **Trilha de auditoria:** prazo mínimo de guarda e se algum dia se arquiva fora do banco.
+3. **Ledger de IA:** a correlação com o atendimento é a parte pessoal; pseudonimizar depois de N dias mantendo o consumo agregado.
+4. **Numeração de sessões:** o número nunca é reemitido (ADR 0012), então um expurgo cria lacuna conhecida; as referências cruzadas (ContactCenter, Agents) precisam ser tratadas junto.
+5. **Mortos:** quem autoriza o descarte, com que trilha, e depois de quanto tempo.
+6. **Anexos e mídia** (quando existirem) e o **payload bruto** (se um dia for guardado): ganham categoria e prazo próprios.
+
+Quando o negócio decidir, cada item vira uma categoria nova com tarefa própria, sempre com relatório antes, confirmação e teste de que o que é de referência continua intacto.

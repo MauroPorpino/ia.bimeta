@@ -76,6 +76,7 @@ No arquivo, `"mode": "real"` com `wabaId`, `phoneNumberId`, `appSecretEnv` e `ac
 
 ## 7. O que este procedimento ainda não faz
 
-- Trocar ou redefinir a senha de uma pessoa (não há rota para isso: pendência P1 do relatório de prontidão; `DELETE .../users/{id}/role` só revoga o papel, não libera o e-mail para outro cadastro).
+- Tela do administrador para emitir o token e entrega do token por e-mail. As **rotas** existem e a interface do atendente já troca a própria senha e usa o token (ADR 0025): a pessoa troca a própria senha, o administrador emite um token de redefinição e o operador recupera uma conta com `tools\ops\Redefinir-Senha.ps1 -Empresa <slug> -Email <e-mail>` (veja `docs/operations/SENHAS-E-SESSOES.md`). `DELETE .../users/{id}/role` só revoga o papel, não libera o e-mail para outro cadastro.
+- Retenção de dados pessoais (depende de decisão jurídica) e backup agendado: o relatório e o expurgo técnico estão em `RETENCAO-DE-DADOS.md`, e os scripts de backup, restauração e ensaio, em `BACKUP-E-RESTAURACAO.md`.
 - Remover ou suspender uma empresa inteira, e horários de atendimento da fila (a API de horários existe; o arquivo não os descreve).
 - Qualquer coisa fora do ambiente de homologação: não há hospedagem de produção, certificado nem cofre de segredos (dependem de infraestrutura).
