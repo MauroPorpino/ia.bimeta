@@ -41,6 +41,21 @@ public static class IdentityEndpoints
             return Results.NoContent();
         });
 
+        // O usuário autenticado troca a PRÓPRIA senha (a atual é exigida). As outras sessões dele são revogadas; esta continua.
+        autenticacao.MapPut("/me/password", async (ChangePasswordRequest requisicao, PasswordService servico, CancellationToken ct) =>
+        {
+            await servico.ChangeOwnPasswordAsync(requisicao.CurrentPassword, requisicao.NewPassword, ct);
+            return Results.NoContent();
+        });
+
+        // Uso do token de redefinição emitido por um administrador: anônimo, com o mesmo limite de taxa do login; toda falha tem a mesma resposta.
+        autenticacao.MapPost("/password-reset/redeem", async (RedeemPasswordResetRequest requisicao, PasswordService servico, HttpContext http, CancellationToken ct) =>
+        {
+            await servico.RedeemResetAsync(requisicao.Tenant, requisicao.Email, requisicao.Token, requisicao.NewPassword, ct);
+            http.Response.Headers.CacheControl = "no-store";
+            return Results.NoContent();
+        }).RequireRateLimiting(LoginRateLimitPolicy);
+
         autenticacao.MapGet("/me", async (UserService servico, CancellationToken ct) =>
             Results.Ok(CurrentUserResponse.From(await servico.GetCurrentAsync(ct))));
 
@@ -63,6 +78,18 @@ public static class IdentityEndpoints
                 organizationId, requisicao.Email, requisicao.DisplayName, requisicao.Password, papel, requisicao.PreferredLocale, ct);
             return Results.Created($"/organizations/{organizationId}/users", UserResponse.From(criado));
         });
+
+        // O administrador emite o token de redefinição de um usuário da organização. O token em claro vai SÓ nesta resposta.
+        usuarios.MapPost("/{userId:guid}/password-reset", async (Guid organizationId, Guid userId, PasswordService servico, HttpContext http, CancellationToken ct) =>
+        {
+            var emitido = await servico.IssueResetAsync(organizationId, userId, ct);
+            http.Response.Headers.CacheControl = "no-store";
+            return Results.Ok(new PasswordResetResponse(emitido.Token, emitido.ExpiresAt));
+        });
+
+        // O administrador revoga todas as sessões ativas de um usuário da organização (aparelho perdido, suspeita de vazamento).
+        usuarios.MapPost("/{userId:guid}/sessions/revoke", async (Guid organizationId, Guid userId, PasswordService servico, CancellationToken ct) =>
+            Results.Ok(new RevokedSessionsResponse(await servico.RevokeUserSessionsAsync(organizationId, userId, ct))));
 
         usuarios.MapGet("/", async (Guid organizationId, UserService servico, CancellationToken ct) =>
         {
@@ -105,6 +132,11 @@ public static class IdentityEndpoints
         catch (InvalidCredentialsException)
         {
             return Results.Problem(title: "Credenciais inválidas", detail: "Tenant, e-mail ou senha não conferem.", statusCode: StatusCodes.Status401Unauthorized);
+        }
+        catch (InvalidPasswordResetException)
+        {
+            // A mesma resposta para tenant, e-mail ou token inexistente, expirado, já usado ou revogado.
+            return Results.Problem(title: "Redefinição recusada", detail: "O token de redefinição é inválido ou expirou.", statusCode: StatusCodes.Status400BadRequest);
         }
         catch (LoginThrottledException ex)
         {

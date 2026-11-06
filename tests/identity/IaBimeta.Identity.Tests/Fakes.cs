@@ -198,6 +198,58 @@ internal sealed class IdentidadeEmMemoria : IUserRepository, IGrantRepository, I
         Contagens.Remove((tenantId, key));
         return Task.CompletedTask;
     }
+
+    public Task<int> RevokeSessionsAsync(TenantId tenantId, Guid userId, Guid? exceptSessionId, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var revogadas = 0;
+        foreach (var sessao in Sessoes.Where(s => s.TenantId == tenantId && s.UserId == userId && s.Id != exceptSessionId && s.IsActiveAt(now)))
+        {
+            sessao.Revoke(now);
+            revogadas++;
+        }
+
+        return Task.FromResult(revogadas);
+    }
+
+    public List<PasswordResetToken> TokensDeRedefinicao { get; } = new();
+
+    // Em memória o token é imutável; a marca de uso e de revogação ficam em dicionários ao lado.
+    public Dictionary<Guid, DateTimeOffset> TokensUsados { get; } = new();
+
+    public Dictionary<Guid, DateTimeOffset> TokensRevogados { get; } = new();
+
+    public Task AddPasswordResetTokenAsync(PasswordResetToken token, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        foreach (var anterior in TokensDeRedefinicao.Where(t => t.TenantId == token.TenantId && t.UserId == token.UserId && !TokensUsados.ContainsKey(t.Id) && !TokensRevogados.ContainsKey(t.Id)))
+        {
+            TokensRevogados[anterior.Id] = now;
+        }
+
+        TokensDeRedefinicao.Add(token);
+        return Task.CompletedTask;
+    }
+
+    public Task RevokePasswordResetTokensAsync(TenantId tenantId, Guid userId, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        foreach (var t in TokensDeRedefinicao.Where(t => t.TenantId == tenantId && t.UserId == userId && !TokensUsados.ContainsKey(t.Id) && !TokensRevogados.ContainsKey(t.Id)))
+        {
+            TokensRevogados[t.Id] = now;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public Task<bool> TryConsumePasswordResetTokenAsync(TenantId tenantId, Guid userId, byte[] tokenHash, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var token = TokensDeRedefinicao.FirstOrDefault(t => t.TenantId == tenantId && t.UserId == userId && t.TokenHash.AsSpan().SequenceEqual(tokenHash));
+        if (token is null || TokensUsados.ContainsKey(token.Id) || TokensRevogados.ContainsKey(token.Id) || token.ExpiresAt <= now)
+        {
+            return Task.FromResult(false);
+        }
+
+        TokensUsados[token.Id] = now;
+        return Task.FromResult(true);
+    }
 }
 
 /// <summary>Escritor de auditoria que sempre falha, para provar que a falha nunca vira sucesso silencioso.</summary>

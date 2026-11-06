@@ -46,3 +46,14 @@ public sealed class IdentityResourceNotFoundException : Exception
     {
     }
 }
+
+/// <summary>
+/// A redefinição de senha foi recusada. A mensagem é a mesma para tenant inexistente, usuário inexistente, token errado, expirado, já usado ou revogado, para não revelar o que existe.
+/// </summary>
+public sealed class InvalidPasswordResetException : Exception
+{
+    public InvalidPasswordResetException()
+        : base("O token de redefinição é inválido ou expirou.")
+    {
+    }
+}

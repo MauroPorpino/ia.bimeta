@@ -84,4 +84,18 @@ public interface IAuthenticationStore
 
     /// <summary>Zera a contagem depois de um login bem-sucedido.</summary>
     Task ClearLoginThrottleAsync(TenantId tenantId, string key, CancellationToken cancellationToken);
+
+    /// <summary>Revoga as sessões ATIVAS do usuário (menos <paramref name="exceptSessionId"/>, se informada). Devolve quantas revogou.</summary>
+    Task<int> RevokeSessionsAsync(TenantId tenantId, Guid userId, Guid? exceptSessionId, DateTimeOffset now, CancellationToken cancellationToken);
+
+    /// <summary>Grava o token de redefinição e revoga, na mesma operação, os anteriores ainda não usados do mesmo usuário.</summary>
+    Task AddPasswordResetTokenAsync(PasswordResetToken token, DateTimeOffset now, CancellationToken cancellationToken);
+
+    /// <summary>Revoga os tokens de redefinição ainda não usados do usuário (por exemplo, depois de uma troca de senha).</summary>
+    Task RevokePasswordResetTokensAsync(TenantId tenantId, Guid userId, DateTimeOffset now, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Consome o token de forma ATÔMICA: só devolve <c>true</c> para quem o marcou como usado (não usado, não revogado, não expirado, do usuário informado). Duas tentativas simultâneas com o mesmo token têm no máximo um vencedor.
+    /// </summary>
+    Task<bool> TryConsumePasswordResetTokenAsync(TenantId tenantId, Guid userId, byte[] tokenHash, DateTimeOffset now, CancellationToken cancellationToken);
 }

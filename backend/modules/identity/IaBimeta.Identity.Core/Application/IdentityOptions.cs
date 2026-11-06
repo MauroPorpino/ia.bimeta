@@ -22,4 +22,7 @@ public sealed class IdentityOptions
 
     /// <summary>Duração do bloqueio temporário. Durante ele nem a senha certa é aceita (e a senha nem é verificada).</summary>
     public TimeSpan LockoutDuration { get; set; } = TimeSpan.FromMinutes(15);
+
+    /// <summary>Validade do token de redefinição de senha emitido pelo administrador. Curta de propósito; o piso é 1 minuto e o teto, 24 horas.</summary>
+    public TimeSpan PasswordResetLifetime { get; set; } = TimeSpan.FromMinutes(30);
 }

@@ -10,6 +10,17 @@ public sealed record LoginRequest(string? Tenant, string? Email, string? Passwor
 
 public sealed record LoginResponse(string Token, DateTimeOffset ExpiresAt);
 
+/// <summary>Troca da própria senha: a atual e a nova. Sem campo de usuário: o alvo é sempre o da sessão.</summary>
+public sealed record ChangePasswordRequest(string? CurrentPassword, string? NewPassword);
+
+/// <summary>Uso do token de redefinição (anônimo, como o login): o <c>Tenant</c> (slug) só escolhe onde procurar o usuário; o token é o segredo.</summary>
+public sealed record RedeemPasswordResetRequest(string? Tenant, string? Email, string? Token, string? NewPassword);
+
+/// <summary>O token de redefinição EM CLARO: aparece só nesta resposta (e nada o guarda em cache, log ou auditoria).</summary>
+public sealed record PasswordResetResponse(string Token, DateTimeOffset ExpiresAt);
+
+public sealed record RevokedSessionsResponse(int Revoked);
+
 /// <summary>Corpo da criação de usuário. Sem campo de tenant nem de organização: a organização vem da rota e é validada.</summary>
 public sealed record CreateUserRequest(string? Email, string? DisplayName, string? Password, string? Role, string? PreferredLocale = null);
 

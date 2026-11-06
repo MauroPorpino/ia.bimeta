@@ -93,4 +93,42 @@ internal sealed class AuthenticationStore : IAuthenticationStore
             .Where(t => t.TenantId == tenantId && t.Key == key)
             .ExecuteDeleteAsync(cancellationToken);
     }
+
+    public async Task<int> RevokeSessionsAsync(TenantId tenantId, Guid userId, Guid? exceptSessionId, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        // Só as sessões ATIVAS do usuário NESTE tenant (predicado explícito): as já revogadas ou expiradas ficam como estão.
+        return await _db.Sessions.IgnoreQueryFilters()
+            .Where(s => s.TenantId == tenantId && s.UserId == userId && s.RevokedAt == null && s.ExpiresAt > now && (exceptSessionId == null || s.Id != exceptSessionId))
+            .ExecuteUpdateAsync(set => set.SetProperty(s => s.RevokedAt, now), cancellationToken);
+    }
+
+    public async Task AddPasswordResetTokenAsync(PasswordResetToken token, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        using var escopo = _db.UseAuthenticationTenant(token.TenantId);
+        await using var transacao = await _db.Database.BeginTransactionAsync(cancellationToken);
+
+        await RevokeUnusedAsync(token.TenantId, token.UserId, now, cancellationToken);
+        _db.PasswordResetTokens.Add(token);
+        await _db.SaveChangesAsync(cancellationToken);
+        await transacao.CommitAsync(cancellationToken);
+    }
+
+    public Task RevokePasswordResetTokensAsync(TenantId tenantId, Guid userId, DateTimeOffset now, CancellationToken cancellationToken) =>
+        RevokeUnusedAsync(tenantId, userId, now, cancellationToken);
+
+    public async Task<bool> TryConsumePasswordResetTokenAsync(TenantId tenantId, Guid userId, byte[] tokenHash, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        // Atômico: o UPDATE condicional tem no máximo um vencedor (UsedAt é a marca de uso; RevokedAt e ExpiresAt fecham o resto).
+        var alteradas = await _db.PasswordResetTokens.IgnoreQueryFilters()
+            .Where(t => t.TenantId == tenantId && t.UserId == userId && t.TokenHash == tokenHash && t.UsedAt == null && t.RevokedAt == null && t.ExpiresAt > now)
+            .ExecuteUpdateAsync(set => set.SetProperty(t => t.UsedAt, now), cancellationToken);
+        return alteradas == 1;
+    }
+
+    private async Task RevokeUnusedAsync(TenantId tenantId, Guid userId, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        await _db.PasswordResetTokens.IgnoreQueryFilters()
+            .Where(t => t.TenantId == tenantId && t.UserId == userId && t.UsedAt == null && t.RevokedAt == null)
+            .ExecuteUpdateAsync(set => set.SetProperty(t => t.RevokedAt, now), cancellationToken);
+    }
 }

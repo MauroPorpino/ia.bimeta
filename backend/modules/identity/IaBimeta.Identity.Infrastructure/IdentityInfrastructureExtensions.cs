@@ -38,6 +38,7 @@ public static class IdentityInfrastructureExtensions
         services.AddScoped<IAuthenticationStore, AuthenticationStore>();
 
         services.AddScoped<AuthenticationService>();
+        services.AddScoped<PasswordService>();
         services.AddScoped<SessionAuthenticator>();
         services.AddScoped<UserService>();
         services.AddScoped<UserDirectory>();

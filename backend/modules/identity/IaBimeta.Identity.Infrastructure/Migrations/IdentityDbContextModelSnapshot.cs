@@ -51,6 +51,58 @@ namespace IaBimeta.Identity.Infrastructure.Migrations
                     b.ToTable("login_throttles", "identity");
                 });
 
+            modelBuilder.Entity("IaBimeta.Identity.Domain.PasswordResetToken", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<Guid?>("IssuedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("issued_by_user_id");
+
+                    b.Property<DateTimeOffset?>("RevokedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("revoked_at");
+
+                    b.Property<byte[]>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("bytea")
+                        .HasColumnName("token_hash");
+
+                    b.Property<DateTimeOffset?>("UsedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("used_at");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("TenantId", "Id");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique()
+                        .HasDatabaseName("ix_password_reset_tokens_token_hash");
+
+                    b.HasIndex("TenantId", "UserId")
+                        .HasDatabaseName("ix_password_reset_tokens_tenant_id_user_id");
+
+                    b.ToTable("password_reset_tokens", "identity");
+                });
+
             modelBuilder.Entity("IaBimeta.Identity.Domain.Session", b =>
                 {
                     b.Property<Guid>("TenantId")
@@ -188,6 +240,15 @@ namespace IaBimeta.Identity.Infrastructure.Migrations
                     NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("TenantId", "UserId", "OrganizationId"), false);
 
                     b.ToTable("user_organization_grants", "identity");
+                });
+
+            modelBuilder.Entity("IaBimeta.Identity.Domain.PasswordResetToken", b =>
+                {
+                    b.HasOne("IaBimeta.Identity.Domain.User", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("IaBimeta.Identity.Domain.Session", b =>
