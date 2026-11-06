@@ -7,6 +7,7 @@ using IaBimeta.Api.Channels;
 using IaBimeta.Api.ContactCenter;
 using IaBimeta.Api.Development;
 using IaBimeta.Api.RequestContexts;
+using IaBimeta.Api.Retention;
 using IaBimeta.Audit.Infrastructure;
 using IaBimeta.Audit.Presentation;
 using IaBimeta.Channels.Infrastructure;
@@ -71,6 +72,9 @@ public static class ApiHost
         builder.Services.AddMessaging(mensageria => builder.Configuration.GetSection("Messaging").Bind(mensageria));
         builder.Services.AddSingleton<InMemoryEventPublisher>();
         builder.Services.AddSingleton<IEventPublisher>(provider => provider.GetRequiredService<InMemoryEventPublisher>());
+
+        // A retenção de dados (ADR 0025): a política por ambiente e por empresa e as tarefas de expurgo TÉCNICO, que só rodam pelo comando "retention" (o Api não expurga sozinho).
+        builder.Services.AddRetention(builder.Configuration);
 
         // Channels: cadastro de contas, números, unidades autorizadas e credenciais. A chave de cifra das credenciais vem da
         // configuração do ambiente (Channels:Secrets: ActiveKeyId e Keys), nunca de arquivo versionado; sem ela o cadastro

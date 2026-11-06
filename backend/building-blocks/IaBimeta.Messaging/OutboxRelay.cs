@@ -70,18 +70,23 @@ public sealed class OutboxRelay<TContext> : IOutboxRelay
     private readonly TimeProvider _clock;
     private readonly ILogger<OutboxRelay<TContext>> _logger;
 
+    // A política de retenção do host, quando há uma: ela decide o prazo de cada empresa. Sem ela (testes do relay isolado), vale só o prazo único do Messaging.
+    private readonly IRetentionPolicy? _retention;
+
     public OutboxRelay(
         IServiceScopeFactory scopes,
         IMessagingScopeInitializer initializer,
         MessagingOptions options,
         TimeProvider clock,
-        ILogger<OutboxRelay<TContext>> logger)
+        ILogger<OutboxRelay<TContext>> logger,
+        IRetentionPolicy? retention = null)
     {
         _scopes = scopes;
         _initializer = initializer;
         _options = options;
         _clock = clock;
         _logger = logger;
+        _retention = retention;
     }
 
     public string Name => typeof(TContext).Name;
@@ -259,8 +264,21 @@ public sealed class OutboxRelay<TContext> : IOutboxRelay
     {
         await using var escopo = _scopes.CreateAsyncScope();
         var db = escopo.ServiceProvider.GetRequiredService<TContext>();
-        var limite = _clock.GetUtcNow() - _options.ProcessedRetention;
-        return await db.Set<OutboxMessage>().Where(o => o.State == OutboxState.Processed && o.ProcessedAt < limite).ExecuteDeleteAsync(cancellationToken);
+        var agora = _clock.GetUtcNow();
+        if (_retention is null)
+        {
+            var limite = agora - _options.ProcessedRetention;
+            return await db.Set<OutboxMessage>().Where(o => o.State == OutboxState.Processed && o.ProcessedAt < limite).ExecuteDeleteAsync(cancellationToken);
+        }
+
+        // Com a política do host: uma passada por empresa com prazo próprio e uma para as demais. Só PROCESSADOS saem; os mortos ficam.
+        var apagados = 0;
+        foreach (var passada in await _retention.PassesAsync(RetentionCategory.ProcessedEvents, agora, cancellationToken))
+        {
+            apagados += await OutboxRetentionQueries.ProcessedBefore(db, passada).ExecuteDeleteAsync(cancellationToken);
+        }
+
+        return apagados;
     }
 
     private async Task<(IReadOnlyList<OutboxMessage> Entregar, int Considerados, int Mortos)> LeaseAsync(string owner, CancellationToken cancellationToken)

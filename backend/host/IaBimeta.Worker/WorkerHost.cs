@@ -11,6 +11,7 @@ using IaBimeta.Conversations.Infrastructure;
 using IaBimeta.Identity.Infrastructure;
 using IaBimeta.Messaging;
 using IaBimeta.SharedKernel;
+using IaBimeta.Tenancy.Contracts.Queries;
 using IaBimeta.Tenancy.Infrastructure;
 
 namespace IaBimeta.Worker;
@@ -86,6 +87,19 @@ public static class WorkerHost
         // e o relay do outbox do Conversations, que é quem produz os eventos consumidos hoje.
         builder.Services.AddMessaging(mensageria => builder.Configuration.GetSection("Messaging").Bind(mensageria));
         builder.Services.AddSingleton<IMessagingScopeInitializer, WorkerScopeInitializer>();
+
+        // A política de retenção (ADR 0025), a mesma do Api (seção Retention): o relay a usa para expurgar os eventos PROCESSADOS do outbox com o prazo de cada empresa. As demais tarefas (sessões, tokens, Inbox) só
+        // rodam pelo comando "retention" do Api. Configuração inválida falha na partida.
+        var retencao = new RetentionOptions();
+        builder.Configuration.GetSection(RetentionOptions.SectionName).Bind(retencao);
+        retencao.Validate();
+        builder.Services.AddSingleton(retencao);
+        builder.Services.AddSingleton<IRetentionPolicy>(provider => new ConfiguredRetentionPolicy(retencao, async (slug, cancellationToken) =>
+        {
+            await using var escopoDaConsulta = provider.CreateAsyncScope();
+            var tenant = await escopoDaConsulta.ServiceProvider.GetRequiredService<ITenantDirectory>().FindBySlugAsync(slug, cancellationToken);
+            return tenant?.TenantId.Value;
+        }));
         builder.Services.AddConversations(provider => ConnectionStringOf(provider, "Conversations"));
         builder.Services.AddContactCenter(provider => ConnectionStringOf(provider, "ContactCenter"));
 
