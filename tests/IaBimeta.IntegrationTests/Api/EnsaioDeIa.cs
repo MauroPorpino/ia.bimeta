@@ -276,6 +276,25 @@ internal sealed class EnsaioDeIa : IAsyncDisposable
         await Worker.StartAsync();
     }
 
+    private bool _workerParado;
+
+    /// <summary>Derruba o Worker (o processo que cai e NÃO volta): o que estava em andamento é cancelado sem concluir, e as conexões dele ficam sem atividade. Os eventos continuam entrando no banco.</summary>
+    public async Task PararWorkerAsync()
+    {
+        using var limite = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        await Worker.StopAsync(limite.Token);
+        Worker.Dispose();
+        _workerParado = true;
+    }
+
+    /// <summary>Sobe de novo o Worker parado por <see cref="PararWorkerAsync"/>, com a MESMA configuração.</summary>
+    public async Task SubirWorkerAsync()
+    {
+        Worker = _construirWorker();
+        await Worker.StartAsync();
+        _workerParado = false;
+    }
+
     /// <summary>
     /// Sobe OUTRO Worker com a mesma configuração, sem parar o atual (dois processos de Worker ao mesmo tempo, como numa implantação com mais de uma instância). É descartado com o ensaio.
     /// </summary>
@@ -381,8 +400,12 @@ internal sealed class EnsaioDeIa : IAsyncDisposable
             extra.Dispose();
         }
 
-        await Worker.StopAsync();
-        Worker.Dispose();
+        if (!_workerParado)
+        {
+            await Worker.StopAsync();
+            Worker.Dispose();
+        }
+
         await Api.DisposeAsync();
         await OpenAi.DisposeAsync();
     }

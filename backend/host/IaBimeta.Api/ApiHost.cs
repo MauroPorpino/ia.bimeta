@@ -6,6 +6,7 @@ using IaBimeta.AiGateway.Infrastructure;
 using IaBimeta.Api.Channels;
 using IaBimeta.Api.ContactCenter;
 using IaBimeta.Api.Development;
+using IaBimeta.Api.Operations;
 using IaBimeta.Api.RequestContexts;
 using IaBimeta.Api.Retention;
 using IaBimeta.Audit.Infrastructure;
@@ -75,6 +76,9 @@ public static class ApiHost
 
         // A retenção de dados (ADR 0025): a política por ambiente e por empresa e as tarefas de expurgo TÉCNICO, que só rodam pelo comando "retention" (o Api não expurga sozinho).
         builder.Services.AddRetention(builder.Configuration);
+
+        // A supervisão (ADR 0026): limites e sondas de saúde dos módulos, consultados só pelo comando "status".
+        builder.Services.AddOperationsHealth(builder.Configuration);
 
         // Channels: cadastro de contas, números, unidades autorizadas e credenciais. A chave de cifra das credenciais vem da
         // configuração do ambiente (Channels:Secrets: ActiveKeyId e Keys), nunca de arquivo versionado; sem ela o cadastro
@@ -207,9 +211,29 @@ public static class ApiHost
     private static string ConnectionStringOf(IServiceProvider provider, string module)
     {
         var configuracao = provider.GetRequiredService<IConfiguration>();
-        return configuracao.GetConnectionString(module)
+        var texto = configuracao.GetConnectionString(module)
             ?? configuracao.GetConnectionString("Default")
             ?? configuracao.GetConnectionString("Tenancy")
             ?? throw new InvalidOperationException($"A string de conexão 'ConnectionStrings:{module}' (ou 'Default') não está configurada.");
+        return WithApplicationName(texto, "IaBimeta.Api");
+    }
+
+    // O nome da aplicação nas conexões deixa o diagnóstico enxergar quem está ligado ao banco (por exemplo, o Worker vivo). Um nome já definido na configuração vale.
+    private static string WithApplicationName(string connectionString, string name)
+    {
+        try
+        {
+            var builder = new Npgsql.NpgsqlConnectionStringBuilder(connectionString);
+            if (string.IsNullOrEmpty(builder.ApplicationName))
+            {
+                builder.ApplicationName = name;
+            }
+
+            return builder.ConnectionString;
+        }
+        catch (ArgumentException)
+        {
+            return connectionString;
+        }
     }
 }

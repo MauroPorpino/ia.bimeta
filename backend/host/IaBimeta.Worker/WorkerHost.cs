@@ -147,10 +147,30 @@ public static class WorkerHost
     private static string ConnectionStringOf(IServiceProvider provider, string module)
     {
         var configuracao = provider.GetRequiredService<IConfiguration>();
-        return configuracao.GetConnectionString(module)
+        var texto = configuracao.GetConnectionString(module)
             ?? configuracao.GetConnectionString("Default")
             ?? configuracao.GetConnectionString("Tenancy")
             ?? throw new InvalidOperationException($"A string de conexão 'ConnectionStrings:{module}' (ou 'Default') não está configurada.");
+        return WithApplicationName(texto, "IaBimeta.Worker");
+    }
+
+    // O nome da aplicação nas conexões é como o comando "status" enxerga que o Worker está vivo (o laço do relay consulta o banco a cada poucos segundos). Um nome já definido na configuração vale.
+    private static string WithApplicationName(string connectionString, string name)
+    {
+        try
+        {
+            var builder = new Npgsql.NpgsqlConnectionStringBuilder(connectionString);
+            if (string.IsNullOrEmpty(builder.ApplicationName))
+            {
+                builder.ApplicationName = name;
+            }
+
+            return builder.ConnectionString;
+        }
+        catch (ArgumentException)
+        {
+            return connectionString;
+        }
     }
 }
 
