@@ -214,4 +214,43 @@ public interface IChannelProviderAdapter
     /// <see cref="ProviderProbeResult"/>; só o cancelamento do chamador propaga como <see cref="OperationCanceledException"/>.
     /// </summary>
     Task<ProviderProbeResult> ProbeAsync(ProviderProbeRequest request, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Baixa o arquivo de uma mídia recebida (ADR 0028), pelo identificador dela no provedor: consulta os dados da mídia e depois o conteúdo, com o token da conta SÓ nos cabeçalhos das duas chamadas, ao endereço do
+    /// provedor (o endereço do conteúdo que o provedor devolve só é seguido se for de um provedor conhecido), com o tamanho limitado a <see cref="ProviderMediaRequest.MaxBytes"/> e sem seguir redirecionamento.
+    /// Não lança por falha do provedor: o desfecho vai em <see cref="ProviderMediaResult"/>; só o cancelamento do chamador propaga.
+    /// </summary>
+    Task<ProviderMediaResult> DownloadMediaAsync(ProviderMediaRequest request, CancellationToken cancellationToken);
 }
+
+/// <param name="AccessToken">O token da conta (decifrado para esta chamada; nunca registrado nem devolvido).</param>
+/// <param name="ProviderMediaId">O identificador da mídia no provedor.</param>
+/// <param name="MaxBytes">O maior arquivo aceito: acima dele, o desfecho é <see cref="ProviderMediaOutcome.TooLarge"/> sem ler o corpo todo.</param>
+public sealed record ProviderMediaRequest(string AccessToken, string ProviderMediaId, long MaxBytes);
+
+public enum ProviderMediaOutcome
+{
+    /// <summary>O arquivo foi baixado (dentro do limite).</summary>
+    Downloaded = 1,
+
+    /// <summary>O provedor não tem a mídia (expirada ou inexistente): definitivo.</summary>
+    NotFound = 2,
+
+    /// <summary>O arquivo passa do limite (declarado pelo provedor ou medido na leitura): definitivo.</summary>
+    TooLarge = 3,
+
+    /// <summary>O provedor recusou o pedido ou devolveu algo que o adaptador não aceita (endereço de conteúdo inválido, redirecionamento, resposta ilegível): definitivo.</summary>
+    Rejected = 4,
+
+    /// <summary>A credencial da conta foi recusada: não adianta repetir até o administrador corrigir.</summary>
+    AccountError = 5,
+
+    /// <summary>Falha passageira (tempo esgotado, rede, erro do provedor, limite de taxa): repetir mais tarde pode dar certo.</summary>
+    Transient = 6,
+}
+
+/// <param name="Content">O arquivo, só no desfecho <see cref="ProviderMediaOutcome.Downloaded"/>.</param>
+/// <param name="MimeType">O tipo que o provedor informou (dados da mídia; na falta, o do cabeçalho do conteúdo).</param>
+/// <param name="Sha256">O resumo SHA-256 que o provedor informou, se houver (a integridade é conferida pelo Conversations).</param>
+/// <param name="ErrorCode">Código fixo do motivo (nunca texto do provedor).</param>
+public sealed record ProviderMediaResult(ProviderMediaOutcome Outcome, byte[]? Content, string? MimeType, string? Sha256, string? ErrorCode);

@@ -100,7 +100,8 @@ public static class WorkerHost
             var tenant = await escopoDaConsulta.ServiceProvider.GetRequiredService<ITenantDirectory>().FindBySlugAsync(slug, cancellationToken);
             return tenant?.TenantId.Value;
         }));
-        builder.Services.AddConversations(provider => ConnectionStringOf(provider, "Conversations"));
+        // Os arquivos de mídia (ADR 0028): Conversations:Attachments (pasta privada, tamanho máximo e tipos permitidos); Api e Worker apontam para a MESMA pasta.
+        builder.Services.AddConversations(provider => ConnectionStringOf(provider, "Conversations"), anexos => builder.Configuration.GetSection("Conversations:Attachments").Bind(anexos));
         builder.Services.AddContactCenter(provider => ConnectionStringOf(provider, "ContactCenter"));
 
         // O AiGateway que o Agents (C2) vai chamar neste processo: a mesma composição do Api, com a mesma configuração (catálogo e limites padrão em AiGateway:Catalog e

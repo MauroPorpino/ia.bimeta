@@ -76,6 +76,7 @@ public static class ChannelsInfrastructureExtensions
         services.AddEventHandler<InboundProviderMessageHandler>();
         services.AddEventHandler<InboundProviderStatusHandler>();
         services.AddEventHandler<OutboundMessageRequestedHandler>();
+        services.AddEventHandler<MediaFetchRequestedHandler>();
 
         return services;
     }

@@ -10,6 +10,9 @@ public static class ChannelEventTypes
 {
     public const string ProviderMessageReceived = "channels.provider-message-received";
     public const string ProviderStatusReceived = "channels.provider-status-received";
+
+    /// <summary>O pedido interno de baixar o arquivo de uma mídia recebida (ADR 0028): gravado depois de a mensagem ser aceita, entregue pelo mesmo relay (com espera, tentativas e mortos).</summary>
+    public const string MediaFetchRequested = "channels.media-fetch-requested";
 }
 
 /// <summary>Uma mensagem do cliente, já autenticada e atribuída a uma instância do tenant (o Receiver conferiu conta, número e situação). Carrega o texto do cliente: vive no Inbox só pelo tempo da retenção.</summary>
@@ -22,6 +25,12 @@ public sealed record ProviderMessageReceivedV1(
     ProviderMessageKind Kind,
     string? Text,
     IReadOnlyDictionary<string, string>? ChannelData);
+
+/// <summary>
+/// Pede o download do arquivo da mensagem de mídia já registrada no Conversations (ADR 0028). Só identificadores: o identificador da mídia no provedor, o tipo e os limites vêm do plano do Conversations na hora de
+/// baixar. O identificador do evento é determinístico por mensagem, então repetir o pedido é uma linha só.
+/// </summary>
+public sealed record ChannelMediaFetchRequestedV1(Guid ChannelInstanceId, Guid MessageId);
 
 /// <summary>Um status de entrega, já autenticado e atribuído a uma instância do tenant.</summary>
 public sealed record ProviderStatusReceivedV1(
@@ -75,6 +84,10 @@ public static class ChannelsMetrics
     public static readonly Counter<long> OutboundRateLimited = Meter.CreateCounter<long>("channels.outbound.rate_limited", description: "Recusas de limite de taxa do provedor (a conta passa a esperar, SND-2).");
 
     public static readonly Counter<long> AccountPaused = Meter.CreateCounter<long>("channels.account.paused", description: "Contas pausadas por erro de conta do provedor ou por ação do administrador (SND-6).");
+
+    public static readonly Counter<long> MediaDownloaded = Meter.CreateCounter<long>("channels.media.downloaded", description: "Arquivos de mídia baixados e entregues ao Conversations.");
+
+    public static readonly Counter<long> MediaFailed = Meter.CreateCounter<long>("channels.media.failed", description: "Arquivos de mídia que não ficaram disponíveis (expirados, grandes demais, recusados ou sem sucesso depois das tentativas).");
 
     public static readonly Counter<long> OutboundBlockedByPause = Meter.CreateCounter<long>("channels.outbound.blocked_by_pause", description: "Mensagens recusadas porque a conta está pausada (SND-6).");
 }

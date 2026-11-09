@@ -37,6 +37,19 @@ public sealed class WhatsAppOptions
     /// <summary>Quanto tempo uma conexão do pool vive (renova o DNS de um cliente que vive o tempo do processo).</summary>
     public TimeSpan PooledConnectionLifetime { get; set; } = TimeSpan.FromMinutes(2);
 
+    /// <summary>
+    /// Quanto o download de uma mídia (consulta dos dados e conteúdo, cada etapa) pode durar. A Meta não documenta um tempo: é parâmetro nosso. Esgotado, o desfecho é falha passageira (repete depois).
+    /// </summary>
+    public TimeSpan MediaTimeout { get; set; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// Os domínios de onde o conteúdo de uma mídia pode ser baixado (ADR 0028): o endereço do conteúdo vem na resposta do provedor e o token da conta vai junto, então só um domínio daqui (ou o do próprio endereço da
+    /// Graph API) é seguido. A página oficial não fixa os domínios (os exemplos usam <c>lookaside.fbsbx.com</c>): a lista cobre os domínios da Meta e é configurável. Vazio ou nulo, os padrões.
+    /// </summary>
+    public List<string>? MediaHostSuffixes { get; set; }
+
+    internal static readonly string[] DefaultMediaHostSuffixes = ["fbsbx.com", "facebook.com", "fbcdn.net", "whatsapp.net", "whatsapp.com"];
+
     /// <summary>A base já resolvida, com a versão: <c>https://graph.facebook.com/v26.0/</c>.</summary>
     internal Uri VersionedBase => new(new Uri(BaseAddress, UriKind.Absolute), GraphApiVersion + "/");
 
@@ -60,6 +73,8 @@ public sealed class WhatsAppOptions
         if (RequestTimeout <= TimeSpan.Zero
             || RequestTimeout > TimeSpan.FromMinutes(5)
             || MaxResponseBytes is < 1024 or > 16_777_216
+            || MediaTimeout <= TimeSpan.Zero
+            || MediaTimeout > TimeSpan.FromMinutes(10)
             || ConnectTimeout <= TimeSpan.Zero
             || PooledConnectionLifetime <= TimeSpan.Zero)
         {

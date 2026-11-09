@@ -51,6 +51,8 @@ public sealed class WhatsAppCloudAdapter : IChannelProviderAdapter, IDisposable
     private readonly Uri _versionedBase;
     private readonly TimeSpan _requestTimeout;
     private readonly int _maxResponseBytes;
+    private readonly TimeSpan _mediaTimeout;
+    private readonly string[] _mediaHostSuffixes;
 
     /// <param name="http">O cliente HTTP. NÃO deve ter cabeçalho padrão de autorização: o token é por requisição.</param>
     /// <param name="options">A configuração já validada.</param>
@@ -65,6 +67,9 @@ public sealed class WhatsAppCloudAdapter : IChannelProviderAdapter, IDisposable
         _versionedBase = options.VersionedBase;
         _requestTimeout = options.RequestTimeout;
         _maxResponseBytes = options.MaxResponseBytes;
+        _mediaTimeout = options.MediaTimeout;
+        _mediaHostSuffixes = (options.MediaHostSuffixes is { Count: > 0 } configurados ? configurados : WhatsAppOptions.DefaultMediaHostSuffixes.ToList())
+            .Select(s => s.Trim().Trim('.').ToLowerInvariant()).Where(s => s.Length > 0).Distinct(StringComparer.Ordinal).ToArray();
         _clock = clock ?? TimeProvider.System;
         _ownsClient = ownsClient;
     }
@@ -250,6 +255,143 @@ public sealed class WhatsAppCloudAdapter : IChannelProviderAdapter, IDisposable
         {
             resposta?.Dispose();
         }
+    }
+
+    // Mídia (ADR 0028)
+
+    /// <summary>
+    /// O download de uma mídia recebida, em duas etapas: os dados (<c>GET /{versão}/{media-id}</c>, que devolvem o endereço do conteúdo, o tipo, o resumo e o tamanho) e o conteúdo (<c>GET</c> no endereço devolvido, com o
+    /// mesmo token, como a documentação exige). O token só vai a endereço da Graph API configurada ou de um domínio conhecido da Meta, só por HTTPS (exceto o laço local da própria base, nos testes), sem redirecionamento
+    /// e sem usuário na URL. O tamanho é conferido antes (o declarado) e durante a leitura (o medido): nunca mais que o limite entra na memória.
+    /// </summary>
+    public async Task<ProviderMediaResult> DownloadMediaAsync(ProviderMediaRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.MaxBytes < 1)
+        {
+            return WhatsAppMediaResponseReader.Fail(ProviderMediaOutcome.Rejected, "invalid-limit");
+        }
+
+        using var consulta = WhatsAppSendRequestFactory.CreateMediaLookup(request, _versionedBase, out var recusa);
+        if (consulta is null)
+        {
+            // Token ou identificador fora do formato: nada foi pedido ao provedor.
+            return recusa!;
+        }
+
+        using var limite = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        try
+        {
+            limite.CancelAfter(_mediaTimeout);
+            WhatsAppMediaResponseReader.Lookup dados;
+            using (var respostaDados = await SendMediaStepAsync(consulta, limite.Token))
+            {
+                var corpo = await ReadBoundedAsync(respostaDados.Content, _maxResponseBytes, limite.Token);
+                var (lido, falha) = WhatsAppMediaResponseReader.ReadLookup((int)respostaDados.StatusCode, corpo);
+                if (lido is null)
+                {
+                    return falha!;
+                }
+
+                dados = lido;
+            }
+
+            if (!Uri.TryCreate(dados.Url, UriKind.Absolute, out var endereco) || !IsAllowedMediaUrl(endereco))
+            {
+                // O provedor devolveu um endereço que não é dele: o token NÃO é enviado para lá.
+                return WhatsAppMediaResponseReader.Fail(ProviderMediaOutcome.Rejected, "media-url-not-allowed");
+            }
+
+            if (dados.FileSize is { } declarado && declarado > request.MaxBytes)
+            {
+                return WhatsAppMediaResponseReader.Fail(ProviderMediaOutcome.TooLarge, "too-large");
+            }
+
+            limite.CancelAfter(_mediaTimeout);
+            using var download = WhatsAppSendRequestFactory.CreateMediaDownload(request, endereco);
+            using var respostaConteudo = await SendMediaStepAsync(download, limite.Token);
+            var estado = (int)respostaConteudo.StatusCode;
+            if (estado is < 200 or >= 300)
+            {
+                var erro = estado == 400 ? await ReadBoundedAsync(respostaConteudo.Content, _maxResponseBytes, limite.Token) : null;
+                return WhatsAppMediaResponseReader.FromStatus(estado, erro, "content");
+            }
+
+            if (respostaConteudo.Content.Headers.ContentLength is { } tamanho && tamanho > request.MaxBytes)
+            {
+                return WhatsAppMediaResponseReader.Fail(ProviderMediaOutcome.TooLarge, "too-large");
+            }
+
+            var conteudo = await ReadUpToAsync(respostaConteudo.Content, request.MaxBytes, limite.Token);
+            if (conteudo is null)
+            {
+                return WhatsAppMediaResponseReader.Fail(ProviderMediaOutcome.TooLarge, "too-large");
+            }
+
+            var tipo = dados.MimeType ?? respostaConteudo.Content.Headers.ContentType?.MediaType;
+            return new ProviderMediaResult(ProviderMediaOutcome.Downloaded, conteudo, tipo, dados.Sha256, null);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            return WhatsAppMediaResponseReader.Fail(ProviderMediaOutcome.Transient, "timeout");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException)
+        {
+            return WhatsAppMediaResponseReader.Fail(ProviderMediaOutcome.Transient, "network-error");
+        }
+    }
+
+    /// <summary>O ÚNICO ponto de chamada HTTP da mídia (as duas etapas passam por aqui).</summary>
+    private Task<HttpResponseMessage> SendMediaStepAsync(HttpRequestMessage mensagem, CancellationToken cancellationToken) =>
+        _http.SendAsync(mensagem, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+
+    /// <summary>
+    /// O endereço do conteúdo só é seguido se for o da Graph API configurada (mesmo esquema e autoridade) ou HTTPS de um domínio da lista (o próprio domínio ou um subdomínio), na porta padrão, sem usuário nem
+    /// fragmento. Endereço IP, outro domínio ou HTTP simples: recusado, e o token não sai.
+    /// </summary>
+    private bool IsAllowedMediaUrl(Uri endereco)
+    {
+        if (!string.IsNullOrEmpty(endereco.UserInfo) || !string.IsNullOrEmpty(endereco.Fragment))
+        {
+            return false;
+        }
+
+        if (string.Equals(endereco.Scheme, _versionedBase.Scheme, StringComparison.OrdinalIgnoreCase) && string.Equals(endereco.Authority, _versionedBase.Authority, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (endereco.Scheme != Uri.UriSchemeHttps || !endereco.IsDefaultPort || endereco.HostNameType != UriHostNameType.Dns)
+        {
+            return false;
+        }
+
+        var dominio = endereco.IdnHost.ToLowerInvariant();
+        return _mediaHostSuffixes.Any(sufixo => dominio == sufixo || dominio.EndsWith("." + sufixo, StringComparison.Ordinal));
+    }
+
+    /// <summary>Lê o conteúdo até o limite. Mais que isso: nulo (grande demais), e o excesso nunca entra na memória.</summary>
+    private static async Task<byte[]?> ReadUpToAsync(HttpContent conteudo, long limite, CancellationToken cancellationToken)
+    {
+        await using var fluxo = await conteudo.ReadAsStreamAsync(cancellationToken);
+        using var memoria = new MemoryStream();
+        var bloco = new byte[81920];
+        int lidos;
+        while ((lidos = await fluxo.ReadAsync(bloco, cancellationToken)) > 0)
+        {
+            if (memoria.Length + lidos > limite)
+            {
+                return null;
+            }
+
+            memoria.Write(bloco, 0, lidos);
+        }
+
+        return memoria.ToArray();
     }
 
     /// <summary>Lê o corpo até o limite. Acima dele (ou com o <c>Content-Length</c> acima) devolve nulo: a resposta é ilegível, e nada gigante entra na memória.</summary>

@@ -213,6 +213,7 @@ public sealed class WorkerHostTests(PostgresFixture banco)
         Assert.Equal(
             new[]
             {
+                "channels.media-fetch-requested/1",
                 "channels.provider-message-received/1",
                 "channels.provider-status-received/1",
                 "conversations.conversation-locale-changed/1",

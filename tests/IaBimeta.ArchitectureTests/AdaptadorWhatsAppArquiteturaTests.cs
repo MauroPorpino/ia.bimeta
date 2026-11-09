@@ -89,17 +89,22 @@ public class AdaptadorWhatsAppArquiteturaTests
     }
 
     [Fact]
-    public void O_adaptador_nunca_baixa_midia_nem_le_a_url_ou_o_hash_dela_e_so_faz_o_envio_de_texto_e_a_leitura_do_numero()
+    public void O_adaptador_so_baixa_midia_pelo_id_com_endereco_validado_e_o_parser_nunca_le_a_url_ou_o_hash_dela()
     {
         var arquivos = Arquivos().ToDictionary(a => Path.GetFileName(a)!, a => Codigo(a));
 
         foreach (var (nome, codigo) in arquivos)
         {
-            Assert.False(Regex.IsMatch(codigo, @"\.(GetAsync|GetStreamAsync|GetByteArrayAsync|GetStringAsync|DownloadAsync|DeleteAsync|PutAsync)\b"), $"{nome} faz uma chamada HTTP além do envio e da leitura do número.");
+            Assert.False(Regex.IsMatch(codigo, @"\.(GetAsync|GetStreamAsync|GetByteArrayAsync|GetStringAsync|DownloadAsync|DeleteAsync|PutAsync)\b"), $"{nome} faz uma chamada HTTP além do envio, da leitura do número e da mídia.");
         }
 
-        // As ÚNICAS chamadas HTTP: o envio (POST .../messages) e a sonda do teste de prontidão (um GET de leitura do número, sem mensagem nem mídia). Cada uma monta o pedido num só lugar.
-        Assert.Equal(2, arquivos.Values.Sum(c => Regex.Matches(c, @"_http\.SendAsync\(").Count));
+        // As ÚNICAS chamadas HTTP: o envio (POST .../messages), a sonda do teste de prontidão (um GET de leitura do número) e o download de mídia (ADR 0028: dois GET, a consulta pelo id e o conteúdo, por UM ponto de
+        // chamada). Cada uma monta o pedido num só lugar (a fábrica), e o token só é lido ali.
+        Assert.Equal(3, arquivos.Values.Sum(c => Regex.Matches(c, @"_http\.SendAsync\(").Count));
+        Assert.DoesNotContain(arquivos, a => a.Key != "WhatsAppSendRequestFactory.cs" && a.Value.Contains("new HttpRequestMessage(", StringComparison.Ordinal));
+
+        // O endereço do conteúdo que o provedor devolve só é seguido depois de validado (domínio conhecido, HTTPS, sem usuário): o token da conta nunca vai para um endereço qualquer.
+        Assert.Contains("IsAllowedMediaUrl(endereco)", arquivos["WhatsAppCloudAdapter.cs"]);
         var fabrica = arquivos["WhatsAppSendRequestFactory.cs"];
         Assert.Single(Regex.Matches(fabrica, @"HttpMethod\.Post"));
         Assert.Single(Regex.Matches(fabrica, @"HttpMethod\.Get"));

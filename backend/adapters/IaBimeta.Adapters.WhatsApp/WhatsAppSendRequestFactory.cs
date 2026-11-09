@@ -236,10 +236,40 @@ internal static class WhatsAppSendRequestFactory
             return null;
         }
 
-        var endereco = new Uri(versionedBase, $"{request.ExternalAccountId}?fields=id,display_phone_number,verified_name,quality_rating");
-        var mensagem = new HttpRequestMessage(HttpMethod.Get, endereco);
-        mensagem.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-        mensagem.Headers.Authorization = new AuthenticationHeaderValue("Bearer", request.AccessToken);
+        return BuildGet(new Uri(versionedBase, $"{request.ExternalAccountId}?fields=id,display_phone_number,verified_name,quality_rating"), request.AccessToken, "application/json");
+    }
+
+    /// <summary>O identificador da mídia no caminho da URL: só letras, dígitos e <c>_.-</c> (nada que mude o caminho).</summary>
+    private static readonly Regex MediaIdPattern = new("^[A-Za-z0-9_.-]{1,128}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    /// <summary>A consulta dos dados da mídia (ADR 0028): <c>GET {base}{versão}/{media-id}</c>, com o token SÓ neste cabeçalho. Nulo se o identificador ou o token estão fora do formato (nada é pedido).</summary>
+    public static HttpRequestMessage? CreateMediaLookup(ProviderMediaRequest request, Uri versionedBase, out ProviderMediaResult? refusal)
+    {
+        refusal = null;
+        if (!IsHeaderSafeToken(request.AccessToken))
+        {
+            refusal = new ProviderMediaResult(ProviderMediaOutcome.AccountError, null, null, null, "credential-invalid-format");
+            return null;
+        }
+
+        if (request.ProviderMediaId is null || !MediaIdPattern.IsMatch(request.ProviderMediaId))
+        {
+            refusal = new ProviderMediaResult(ProviderMediaOutcome.Rejected, null, null, null, "invalid-media-id");
+            return null;
+        }
+
+        return BuildGet(new Uri(versionedBase, request.ProviderMediaId), request.AccessToken, "application/json");
+    }
+
+    /// <summary>O download do conteúdo no endereço que o provedor devolveu (já validado pelo adaptador), com o token no cabeçalho como a documentação exige.</summary>
+    public static HttpRequestMessage CreateMediaDownload(ProviderMediaRequest request, Uri contentAddress) => BuildGet(contentAddress, request.AccessToken, "*/*");
+
+    /// <summary>O ÚNICO lugar que monta um GET (a sonda do número e as duas etapas da mídia): o token vai só no cabeçalho DESTA requisição.</summary>
+    private static HttpRequestMessage BuildGet(Uri address, string accessToken, string accept)
+    {
+        var mensagem = new HttpRequestMessage(HttpMethod.Get, address);
+        mensagem.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(accept));
+        mensagem.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
         return mensagem;
     }
 

@@ -16,11 +16,15 @@ public sealed class InboundProviderMessageHandler : EventHandlerBase<ProviderMes
 {
     private readonly IConversationIngestion _ingestion;
     private readonly IChannelRouting _routing;
+    private readonly IInboundEventWriter _events;
+    private readonly TimeProvider _clock;
 
-    public InboundProviderMessageHandler(IConversationIngestion ingestion, IChannelRouting routing)
+    public InboundProviderMessageHandler(IConversationIngestion ingestion, IChannelRouting routing, IInboundEventWriter events, TimeProvider clock)
     {
         _ingestion = ingestion;
         _routing = routing;
+        _events = events;
+        _clock = clock;
     }
 
     public override string EventType => ChannelEventTypes.ProviderMessageReceived;
@@ -56,7 +60,12 @@ public sealed class InboundProviderMessageHandler : EventHandlerBase<ProviderMes
         var texto = tipo == MessageKind.Text ? payload.Text : null;
         var dados = payload.ChannelData is { Count: > 0 } valores ? new ChannelData(1, valores) : null;
 
-        await _ingestion.IngestInboundMessageAsync(
+        // Áudio, imagem e documento com identificador de mídia ganham o registro do arquivo (Pending) na mesma transação da mensagem (ADR 0028). Vídeo e os demais tipos seguem como antes.
+        var anexo = tipo is MessageKind.Audio or MessageKind.Image or MessageKind.Document && payload.ChannelData is { } midia && midia.TryGetValue("media_id", out var idDaMidia)
+            ? new InboundAttachment(idDaMidia, midia.GetValueOrDefault("mime_type"), midia.GetValueOrDefault("filename"), midia.GetValueOrDefault("caption"))
+            : null;
+
+        var resultado = await _ingestion.IngestInboundMessageAsync(
             new IngestInboundMessageCommand(
                 instancia,
                 payload.ContactExternalRef,
@@ -70,8 +79,27 @@ public sealed class InboundProviderMessageHandler : EventHandlerBase<ProviderMes
                 DepartmentId: rota.DefaultDepartmentId,
                 ChannelDefaultLocale: rota.DefaultLocale,
                 InitialHandlingMode: HandlingMode.AiAutonomous,
-                ChannelData: dados),
+                ChannelData: dados,
+                Attachment: anexo),
             cancellationToken);
+
+        if (anexo is not null)
+        {
+            // O pedido de download vai para o MESMO relay, com identificador determinístico por mensagem: uma repetição (inclusive a de uma entrega que caiu entre a gravação da mensagem e este ponto) é uma
+            // linha só. O download não atrasa a mensagem nem a IA: roda em outra lane, com as tentativas e os mortos do relay.
+            await _events.WriteAsync(
+                new[]
+                {
+                    new InboundEventRecord(
+                        DeterministicGuid.From($"media-fetch:{resultado.MessageId:N}"),
+                        ChannelEventTypes.MediaFetchRequested,
+                        $"media:{resultado.MessageId:N}",
+                        new ChannelMediaFetchRequestedV1(instancia.Value, resultado.MessageId),
+                        _clock.GetUtcNow()),
+                },
+                cancellationToken);
+        }
+
         return HandlerResult.Success;
     }
 }
