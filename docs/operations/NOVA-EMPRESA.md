@@ -26,9 +26,23 @@ Copie `tools\ops\empresa-exemplo.json` e ajuste (o arquivo aceita comentários `
 | `administrator` | e-mail, nome e `passwordEnv`; sem a variável, uma senha forte é **gerada** e mostrada uma única vez |
 | `organization` | nome da organização e da unidade (matriz) |
 | `queue` | a fila de atendimento humano (a regra que manda toda conversa a ela é criada junto) |
-| `ai` | `providerId`, `modelId`, `instructions`, `handoffNotice`, `faq` (até 50 perguntas) e `apiKeyEnv` (a chave BYOK) |
+| `ai` | `providerId`, `modelId`, `instructions`, `handoffNotice`, `faq` (até 50 perguntas; veja "FAQ com resposta direta" abaixo), `faqLocale` (o idioma do FAQ, padrão `pt-BR`) e `apiKeyEnv` (a chave BYOK) |
 | `whatsApp` | `mode`: `simulated` (conta sintética, para a Meta simulada) ou `real` (veja a seção 5); `templates`: os **modelos de mensagem já aprovados na Meta** que o atendente pode enviar fora da janela de 24 horas, cada um como a Graph API o devolve (só **associa** os modelos à conta; repetir atualiza; o que o MVP não suporta é recusado com o motivo: `docs/operations/MODELOS-DE-MENSAGEM.md`) |
 | `attendants` | lista de atendentes (e-mail, nome, `passwordEnv`), todos colocados na fila |
+
+### FAQ com resposta direta (sem chamar a IA)
+
+Todo FAQ vai ao prompt da IA. Uma entrada com **`"autoReply": true`** faz mais (ADR 0029): quando a mensagem do cliente é **igual** à `question` ou a um dos `aliases` da entrada, ela é respondida direto com a `answer`, **sem chamar a IA** (e sem gastar tokens). Regras que valem sempre:
+
+- **Só igualdade, depois de normalizar:** não importam caixa, acento, pontuação nem espaços repetidos ("QUAL O HORARIO DE ATENDIMENTO???" é igual a "Qual o horário de atendimento?"). **Não há busca aproximada:** erro de digitação, palavra a mais ou a menos e duas perguntas na mesma mensagem vão à IA. Por isso cadastre em `aliases` (até 10 por entrada) as formas que seus clientes realmente usam.
+- **Desligado por padrão**, entrada por entrada. Só ligue em resposta que **se sustenta sozinha**: sem preço, agenda, cobertura, orientação clínica nem referência ao que foi dito antes ("esse exame"); isso o sistema consulta no sistema de origem ou o atendente responde.
+- **Duas entradas para a mesma pergunta ou alias** (inclusive um alias igual à pergunta de outra): nenhuma responde direto, e a mensagem vai à IA. Corrija a duplicata.
+- **Idioma:** a resposta direta só vale numa conversa cujo idioma é o do FAQ (`faqLocale`, padrão `pt-BR`; `pt-PT` não é `pt-BR`). Outro idioma vai à IA.
+- Só vale para **uma única mensagem de texto** pendente (mídia, áudio e rajada de mensagens vão pelo caminho de sempre).
+- Para desligar tudo sem reimplantar: `Agents:Options:FaqDirectAnswerEnabled = false` na configuração do **Worker**. Para desligar uma entrada: republique com `autoReply` removido (`provision` de novo).
+- O FAQ publicado **antes** deste recurso continua sem resposta direta até o arquivo da empresa ligar `autoReply`; rodar o comando de novo com `autoReply` ou `aliases` novos publica uma versão nova do agente.
+
+Quanto isso economiza fica no `status` (seção **FAQ direto**; `OPERACAO-E-SUPERVISAO.md`): as chamadas evitadas são **contadas** (exato) e os tokens e o custo evitados são uma **estimativa** (acertos × a média das chamadas da própria empresa).
 
 ## 3. Conferir e executar
 

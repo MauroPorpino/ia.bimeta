@@ -23,11 +23,21 @@ Como saber se o ambiente está de pé, o que cada alerta significa e o que fazer
 | `outbox:conversations`, `outbox:channels` | eventos entregues pelo relay | evento elegível parado além do limite; entrega interrompida (lease vencido); **atenção** para mortos |
 | `channels` | contas e saída | conta com o envio **PAUSADO**; saída sem desfecho; **atenção** para chamada sem desfecho e resultado ambíguo |
 | `agents` | turnos de IA | turno vencido sem executar; executor interrompido; **atenção** para turnos mortos (com o motivo) |
+| FAQ direto | economia da resposta direta do FAQ (ADR 0029): chamadas evitadas **(contagem exata)** e tokens e custo evitados **(estimativa)** | nunca: é informativa |
 | `contact-center` | fila | **atenção** para conversa esperando atendente além do limite e auditoria parada |
 | Retenção | o que o expurgo removeria agora, bloqueios, agendamento | atenção se há linhas vencidas e o agendamento está desligado, ou se o expurgo do Inbox está bloqueado |
 | Backup, Cópia externa, Disco, Agendador | `estado-backup.json`, `ALERTA-BACKUP.txt`, destino externo, espaço livre, tarefas `ia.bimeta-*` | última execução falhou; último bom mais velho que o limite; destino inacessível; < 1 GB livre; tarefa com código de erro |
 
 **Como o Worker é visto:** ele não tem porta. Os hosts nomeiam as conexões (`Application Name=IaBimeta.Worker` e `IaBimeta.Api`) e o laço do relay consulta o banco a cada poucos segundos, então a **última atividade** das conexões `IaBimeta.Worker` em `pg_stat_activity` diz se ele anda. Sem tabela nem migração. Cuidados: o papel do banco só enxerga as sessões do próprio papel (use o mesmo para Api, Worker e o diagnóstico); se você aumentar muito `Messaging:PollInterval`, aumente `Health:WorkerSilenceAfter`.
+
+### Como ler a seção FAQ direto
+
+Nos últimos 7 dias, por empresa (`status --tenant <empresa>` mostra a empresa mesmo sem acertos; sem `--tenant` só aparecem as com acerto):
+
+- **"N turno(s) respondido(s) direto pelo FAQ, SEM chamar o modelo (chamadas evitadas; contagem exata)"**: cada turno que terminou como `faq-hit` é uma chamada à IA que **não** foi feita. É medido. (Numa queda do Worker entre o registro da resposta e a conclusão do turno, o turno termina como `nothing-pending`: a contagem pode ficar um pouco abaixo, nunca acima.)
+- **"o modelo respondeu M turno(s)"** e a **taxa**: acertos ÷ (acertos + turnos que o modelo respondeu).
+- **"ESTIMATIVA (não medida): ~X tokens e ~Y moeda"**: **acertos × a média por chamada confirmada da própria empresa na janela** (ledger do AiGateway; o custo vem da tabela de preços configurada em `AiGateway:Catalog`, **não é fatura**). A pergunta do FAQ pode ser mais curta ou mais longa que a média. **Sem chamada confirmada na janela não há média** e o texto diz isso, sem inventar número. Para o consumo real, o ledger (`ai_requests`) e a fatura do provedor.
+- Taxa baixa com `autoReply` ligado: faltam **aliases** (os clientes perguntam de outro jeito) ou há entradas **ambíguas** (duas para a mesma pergunta: nenhuma responde direto). Taxa zero com o FAQ ligado: confira `Agents:Options:FaqDirectAnswerEnabled` no Worker e o idioma (`faqLocale`).
 
 ## Limites (seção `Health`)
 
