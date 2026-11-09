@@ -117,6 +117,27 @@ public enum ContactCenterRule
     /// humano daquele período) ou a operação não registrou esse estado. Nada foi alterado na conversa: releia e peça de novo.
     /// </summary>
     ConversationChanged = 11,
+
+    /// <summary>
+    /// A janela de resposta livre do provedor (24 horas no WhatsApp, a contar da última mensagem do cliente) está FECHADA: o texto livre não pode ser enviado, só um modelo de mensagem aprovado (ADR 0027).
+    /// Nada foi gravado nem enviado.
+    /// </summary>
+    ReplyWindowClosed = 12,
+
+    /// <summary>O modelo de mensagem não existe para este número ou não está aprovado (a Meta o pausou, desativou ou ele não foi aprovado).</summary>
+    ReplyTemplateUnavailable = 13,
+}
+
+/// <summary>Os parâmetros do modelo de mensagem não passam na validação (faltando, a mais, vazios, longos demais ou com caractere que a Meta recusa). A lista tem todos os problemas, para o formulário mostrá-los de uma vez.</summary>
+public sealed class ReplyTemplateInvalidException : Exception
+{
+    public ReplyTemplateInvalidException(IReadOnlyList<ReplyParameterError> errors)
+        : base("Os parâmetros do modelo de mensagem são inválidos.")
+    {
+        Errors = errors;
+    }
+
+    public IReadOnlyList<ReplyParameterError> Errors { get; }
 }
 
 public sealed class ContactCenterRuleException : Exception

@@ -35,6 +35,16 @@ internal sealed record CapturaGraph(string Credencial, string Caminho, string Co
     public string Texto => Json["text"]!["body"]!.GetValue<string>();
 
     public string? DadoOpaco => Json["biz_opaque_callback_data"]?.GetValue<string>();
+
+    /// <summary>O tipo da mensagem do envio: <c>text</c> (livre) ou <c>template</c> (modelo aprovado).</summary>
+    public string? Tipo => Json["type"]?.GetValue<string>();
+
+    public string? NomeDoModelo => Json["template"]?["name"]?.GetValue<string>();
+
+    public string? IdiomaDoModelo => Json["template"]?["language"]?["code"]?.GetValue<string>();
+
+    /// <summary>Os componentes do modelo (cabeçalho, corpo, botões) com os parâmetros, como a Meta os recebeu; nulo se o modelo não tem parâmetros.</summary>
+    public JsonArray? Componentes => Json["template"]?["components"]?.AsArray();
 }
 
 /// <summary>
@@ -258,12 +268,12 @@ internal sealed class EnsaioDeWhatsApp : IAsyncDisposable
 
     // O que a "Meta" envia
 
-    /// <summary>O corpo de um webhook de mensagem de texto, na forma da Cloud API.</summary>
-    public byte[] PayloadDeTexto(string idDaMensagem, string waId, string nome, string texto, string? numero = null) =>
-        MontarPayloadDeTexto(ContaDoProvedor, numero ?? NumeroDoCanal, idDaMensagem, waId, nome, texto);
+    /// <summary>O corpo de um webhook de mensagem de texto, na forma da Cloud API. <paramref name="momento"/> é o relógio do provedor (padrão: agora): uma mensagem antiga fecha a janela de 24 horas.</summary>
+    public byte[] PayloadDeTexto(string idDaMensagem, string waId, string nome, string texto, string? numero = null, DateTimeOffset? momento = null) =>
+        MontarPayloadDeTexto(ContaDoProvedor, numero ?? NumeroDoCanal, idDaMensagem, waId, nome, texto, momento);
 
     /// <summary>O mesmo corpo, sem depender de um ensaio (a conta e o número vêm do chamador).</summary>
-    public static byte[] MontarPayloadDeTexto(string conta, string numero, string idDaMensagem, string waId, string nome, string texto) =>
+    public static byte[] MontarPayloadDeTexto(string conta, string numero, string idDaMensagem, string waId, string nome, string texto, DateTimeOffset? momento = null) =>
         Encoding.UTF8.GetBytes(Envelope(
             conta,
             new JsonObject
@@ -275,7 +285,7 @@ internal sealed class EnsaioDeWhatsApp : IAsyncDisposable
                 {
                     ["from"] = waId,
                     ["id"] = idDaMensagem,
-                    ["timestamp"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(),
+                    ["timestamp"] = (momento ?? DateTimeOffset.UtcNow).ToUnixTimeSeconds().ToString(),
                     ["type"] = "text",
                     ["text"] = new JsonObject { ["body"] = texto },
                 }),

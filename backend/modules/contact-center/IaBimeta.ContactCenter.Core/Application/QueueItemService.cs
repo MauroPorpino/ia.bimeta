@@ -36,6 +36,7 @@ public sealed class QueueItemService
     private readonly IRequestContextAccessor _context;
     private readonly TimeProvider _clock;
     private readonly IDeferredAudit _audit;
+    private readonly IChannelReplyPolicy _channelReply;
 
     public QueueItemService(
         IQueueItemRepository items,
@@ -45,7 +46,8 @@ public sealed class QueueItemService
         QueueRouter router,
         IRequestContextAccessor context,
         TimeProvider clock,
-        IDeferredAudit audit)
+        IDeferredAudit audit,
+        IChannelReplyPolicy channelReply)
     {
         _items = items;
         _queues = queues;
@@ -55,6 +57,7 @@ public sealed class QueueItemService
         _context = context;
         _clock = clock;
         _audit = audit;
+        _channelReply = channelReply;
     }
 
     // Entrada
@@ -722,14 +725,76 @@ public sealed class QueueItemService
     /// <exception cref="ContactCenterResourceNotFoundException">O item não existe ou não é visível.</exception>
     /// <exception cref="AccessDeniedException">O usuário não é o responsável pela conversa.</exception>
     /// <exception cref="QueueItemConflictException">O atendimento mudou (outro período, modo ou responsável).</exception>
-    public async Task<RegisterHumanReplyResult> ReplyAsync(Guid itemId, Guid requestId, string text, CancellationToken cancellationToken = default)
+    /// <exception cref="ContactCenterRuleException">A janela de resposta livre do provedor está fechada (<see cref="ContactCenterRule.ReplyWindowClosed"/>): só um modelo aprovado.</exception>
+    public Task<RegisterHumanReplyResult> ReplyAsync(Guid itemId, Guid requestId, string text, CancellationToken cancellationToken = default)
     {
-        var contexto = _context.GetRequired();
-        RequireId(requestId);
         if (string.IsNullOrWhiteSpace(text))
         {
             throw new ContactCenterValidationException("A resposta não pode ser vazia.");
         }
+
+        return ReplyCoreAsync(itemId, requestId, text, templateId: null, parameters: null, cancellationToken);
+    }
+
+    /// <summary>
+    /// A resposta do atendente por um MODELO de mensagem aprovado (ADR 0027): a única que o provedor aceita fora da janela de resposta livre, mas que também vale dentro dela. Mesmas regras e mesma idempotência da
+    /// resposta de texto: só o responsável, base lida AGORA, <paramref name="requestId"/> como chave de efeito. Os parâmetros são validados ANTES de qualquer gravação (faltando, a mais, vazios, longos demais ou com
+    /// caractere que a Meta recusa): o atendente vê os erros no formulário, e nada é registrado nem enviado. O texto da mensagem no histórico é o que o cliente lerá, já com os parâmetros.
+    /// </summary>
+    /// <param name="parameters">Os valores por chave de parâmetro, como <see cref="ReplyTemplateParameterOption.Key"/>.</param>
+    /// <exception cref="ReplyTemplateInvalidException">Algum parâmetro é inválido (a lista traz todos).</exception>
+    /// <exception cref="ContactCenterRuleException">O modelo não existe para este número ou não está aprovado (<see cref="ContactCenterRule.ReplyTemplateUnavailable"/>).</exception>
+    public Task<RegisterHumanReplyResult> ReplyWithTemplateAsync(
+        Guid itemId, Guid requestId, Guid templateId, IReadOnlyDictionary<string, string>? parameters, CancellationToken cancellationToken = default)
+    {
+        if (templateId == Guid.Empty)
+        {
+            throw new ContactCenterValidationException("Escolha o modelo de mensagem.");
+        }
+
+        return ReplyCoreAsync(itemId, requestId, text: null, templateId, parameters ?? new Dictionary<string, string>(), cancellationToken);
+    }
+
+    /// <summary>
+    /// O que o atendente precisa para responder: se o texto livre ainda é aceito (a janela de 24 horas do provedor, contada da última mensagem do CLIENTE) e os modelos aprovados do número. Só enxerga quem enxerga o
+    /// item. Sem a consulta do canal, o texto livre vale e não há modelos (o provedor continua sendo a defesa final).
+    /// </summary>
+    /// <exception cref="ContactCenterResourceNotFoundException">O item não existe ou não é visível.</exception>
+    public async Task<ReplyOptionsView> GetReplyOptionsAsync(Guid itemId, CancellationToken cancellationToken = default)
+    {
+        var contexto = _context.GetRequired();
+        var item = await _items.FindItemReadOnlyAsync(itemId, cancellationToken) ?? throw new ContactCenterResourceNotFoundException("Conversa na fila");
+        var acesso = await ResolveAccessAsync(contexto, item, cancellationToken);
+        if (!acesso.CanSee(item))
+        {
+            throw new ContactCenterResourceNotFoundException("Conversa na fila");
+        }
+
+        var sessao = await _conversations.GetSessionAsync(item.SessionId, cancellationToken) ?? throw new ContactCenterResourceNotFoundException("Conversa");
+        var opcoes = await _channelReply.GetOptionsAsync(sessao.ChannelInstanceId, cancellationToken);
+        return BuildReplyOptions(opcoes, sessao, _clock.GetUtcNow());
+    }
+
+    private static ReplyOptionsView BuildReplyOptions(ReplyOptions? opcoes, SessionView sessao, DateTimeOffset agora)
+    {
+        var modelos = opcoes?.Templates ?? Array.Empty<ReplyTemplateOption>();
+        if (opcoes?.Window is not { } janela)
+        {
+            // Sem janela no provedor (ou sem a consulta do canal): o texto livre vale sempre.
+            return new ReplyOptionsView(true, true, null, sessao.LastInboundAt, null, modelos);
+        }
+
+        // A janela conta da última mensagem do CLIENTE. Cliente que nunca escreveu: nada a responder com texto livre.
+        var fecha = sessao.LastInboundAt is { } ultima ? ultima + janela : (DateTimeOffset?)null;
+        var aberta = fecha is { } limite && agora < limite;
+        return new ReplyOptionsView(aberta, aberta, janela.TotalHours, sessao.LastInboundAt, fecha, modelos);
+    }
+
+    private async Task<RegisterHumanReplyResult> ReplyCoreAsync(
+        Guid itemId, Guid requestId, string? text, Guid? templateId, IReadOnlyDictionary<string, string>? parameters, CancellationToken cancellationToken)
+    {
+        var contexto = _context.GetRequired();
+        RequireId(requestId);
 
         var item = await _items.FindItemReadOnlyAsync(itemId, cancellationToken) ?? throw new ContactCenterResourceNotFoundException("Conversa na fila");
         var acesso = await ResolveAccessAsync(contexto, item, cancellationToken);
@@ -754,15 +819,18 @@ public sealed class QueueItemService
             throw new QueueItemConflictException(QueueItemConflict.ConcurrentChange, "A conversa não está mais sob o seu atendimento. Releia e tente de novo.");
         }
 
+        // O conteúdo, decidido ANTES de gravar qualquer coisa: texto livre só com a janela do provedor aberta; modelo só aprovado, da conta do número e com os parâmetros válidos.
+        var conteudo = await BuildReplyContentAsync(sessao, text, templateId, parameters, cancellationToken);
+
         var precondicao = new ReplyPrecondition(sessao.HandlingPeriod, sessao.PlacementEpoch, ResponderMatch.Exact, autor);
         var resultado = await _conversations.RegisterHumanReplyAsync(
-            new RegisterHumanReplyCommand(sessao.Id, requestId, autor, precondicao, sessao.StateVersion, 0, new ReplyContent(text)), cancellationToken);
+            new RegisterHumanReplyCommand(sessao.Id, requestId, autor, precondicao, sessao.StateVersion, 0, conteudo), cancellationToken);
 
         // A versão do estado mudou e a pré-condição ainda vale: relê a versão e repete com a MESMA pré-condição (uma vez). Se o atendimento mudou de verdade, a repetição devolve HandlingChanged.
         if (resultado.Outcome == RegisterHumanReplyOutcome.StaleState && await _conversations.GetSessionAsync(sessao.Id, cancellationToken) is { } atual)
         {
             resultado = await _conversations.RegisterHumanReplyAsync(
-                new RegisterHumanReplyCommand(sessao.Id, requestId, autor, precondicao, atual.StateVersion, 0, new ReplyContent(text)), cancellationToken);
+                new RegisterHumanReplyCommand(sessao.Id, requestId, autor, precondicao, atual.StateVersion, 0, conteudo), cancellationToken);
         }
 
         // A nova resposta é a RECUPERAÇÃO de uma falha de envio (SND-7): o atendente já agiu, então o sinal sai da fila. Sinal de monitoramento: não muda o item nem avança a versão.
@@ -772,6 +840,42 @@ public sealed class QueueItemService
         }
 
         return resultado;
+    }
+
+    private async Task<ReplyContent> BuildReplyContentAsync(
+        SessionView sessao, string? text, Guid? templateId, IReadOnlyDictionary<string, string>? parameters, CancellationToken cancellationToken)
+    {
+        if (templateId is not { } modelo)
+        {
+            var opcoes = await _channelReply.GetOptionsAsync(sessao.ChannelInstanceId, cancellationToken);
+            var vista = BuildReplyOptions(opcoes, sessao, _clock.GetUtcNow());
+            if (!vista.FreeTextAllowed)
+            {
+                throw new ContactCenterRuleException(
+                    ContactCenterRule.ReplyWindowClosed,
+                    $"A janela de {vista.WindowHours:0.##} horas para responder livremente a este cliente está fechada. Envie um modelo de mensagem aprovado.");
+            }
+
+            return new ReplyContent(text!);
+        }
+
+        var preparo = await _channelReply.PrepareTemplateAsync(sessao.ChannelInstanceId, modelo, parameters ?? new Dictionary<string, string>(), cancellationToken);
+        if (preparo.FailureCode is not null)
+        {
+            throw new ContactCenterRuleException(ContactCenterRule.ReplyTemplateUnavailable, "O modelo de mensagem não está disponível para este número (não existe ou não está aprovado).");
+        }
+
+        if (preparo.Errors.Count > 0)
+        {
+            throw new ReplyTemplateInvalidException(preparo.Errors);
+        }
+
+        if (!preparo.IsReady)
+        {
+            throw new ContactCenterRuleException(ContactCenterRule.ReplyTemplateUnavailable, "O modelo de mensagem não pôde ser preparado.");
+        }
+
+        return new ReplyContent(preparo.PreviewText!, null, preparo.ChannelData);
     }
 
     /// <summary>

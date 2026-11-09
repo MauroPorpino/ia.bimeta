@@ -205,16 +205,14 @@ public static class ContactCenterEndpoints
 
         // A resposta do atendente ao cliente e o encerramento do atendimento (7ª e 9ª operações do gateway elevado). O desfecho do Conversations vira o status HTTP.
         itens.MapPost("/{id:guid}/reply", async (Guid id, ReplyToItemRequest pedido, QueueItemService servico, CancellationToken ct) =>
-        {
-            var resultado = await servico.ReplyAsync(id, pedido.RequestId, pedido.Text, ct);
-            return resultado.Outcome switch
-            {
-                RegisterHumanReplyOutcome.Applied or RegisterHumanReplyOutcome.AlreadyApplied => Results.Ok(resultado),
-                RegisterHumanReplyOutcome.ContentRejected => Results.Problem(title: "Resposta recusada", detail: "O conteúdo da resposta não é aceito.", statusCode: StatusCodes.Status400BadRequest),
-                RegisterHumanReplyOutcome.SessionNotFound => Results.NotFound(),
-                _ => Results.Problem(title: "O atendimento mudou", detail: $"A resposta não foi enviada ({resultado.Outcome}). Releia a conversa e tente de novo.", statusCode: StatusCodes.Status409Conflict),
-            };
-        });
+            ReplyResult(await servico.ReplyAsync(id, pedido.RequestId, pedido.Text, ct)));
+
+        // Responder por modelo de mensagem aprovado (ADR 0027): o que vale fora da janela de 24 horas. As opções dizem se a janela está aberta e quais modelos o número pode enviar.
+        itens.MapGet("/{id:guid}/reply-options", async (Guid id, QueueItemService servico, CancellationToken ct) =>
+            Results.Ok(await servico.GetReplyOptionsAsync(id, ct)));
+
+        itens.MapPost("/{id:guid}/reply-template", async (Guid id, ReplyWithTemplateRequest pedido, QueueItemService servico, CancellationToken ct) =>
+            ReplyResult(await servico.ReplyWithTemplateAsync(id, pedido.RequestId, pedido.TemplateId, pedido.Parameters, ct)));
 
         itens.MapPost("/{id:guid}/close", async (Guid id, CloseItemRequest pedido, QueueItemService servico, CancellationToken ct) =>
         {
@@ -233,6 +231,15 @@ public static class ContactCenterEndpoints
 
         return app;
     }
+
+    // O desfecho do Conversations vira o status HTTP (o mesmo para a resposta de texto e para a de modelo).
+    private static IResult ReplyResult(RegisterHumanReplyResult resultado) => resultado.Outcome switch
+    {
+        RegisterHumanReplyOutcome.Applied or RegisterHumanReplyOutcome.AlreadyApplied => Results.Ok(resultado),
+        RegisterHumanReplyOutcome.ContentRejected => Results.Problem(title: "Resposta recusada", detail: "O conteúdo da resposta não é aceito.", statusCode: StatusCodes.Status400BadRequest),
+        RegisterHumanReplyOutcome.SessionNotFound => Results.NotFound(),
+        _ => Results.Problem(title: "O atendimento mudou", detail: $"A resposta não foi enviada ({resultado.Outcome}). Releia a conversa e tente de novo.", statusCode: StatusCodes.Status409Conflict),
+    };
 
     // 202 enquanto o Conversations não confirmou: a intenção está registrada e repetir o pedido (mesmo requestId) a conclui.
     private static IResult Resultado(QueueItemOperationResult resultado) =>
@@ -270,6 +277,19 @@ public static class ContactCenterEndpoints
                 detail: ex.Message,
                 statusCode: StatusCodes.Status409Conflict,
                 extensions: new Dictionary<string, object?> { ["code"] = ex.Conflict.ToString() });
+        }
+        catch (ReplyTemplateInvalidException ex)
+        {
+            // Todos os problemas de uma vez, por chave de parâmetro: o formulário os mostra junto de cada campo. Só chave, código e mensagem fixa (nunca o valor digitado).
+            return Results.Problem(
+                title: "Parâmetros do modelo inválidos",
+                detail: ex.Message,
+                statusCode: StatusCodes.Status422UnprocessableEntity,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["code"] = "TemplateParametersInvalid",
+                    ["errors"] = ex.Errors.Select(e => new { key = e.Key, code = e.Code, message = e.Message }).ToList(),
+                });
         }
         catch (ContactCenterRuleException ex)
         {

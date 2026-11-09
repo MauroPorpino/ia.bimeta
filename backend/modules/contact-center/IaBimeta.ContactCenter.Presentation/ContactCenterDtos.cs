@@ -17,6 +17,9 @@ public sealed record ItemActionRequest(Guid RequestId, string? Reason);
 /// <summary>A resposta do atendente: o <c>RequestId</c> é a chave de idempotência (repetir o mesmo pedido devolve a mesma mensagem).</summary>
 public sealed record ReplyToItemRequest(Guid RequestId, string Text);
 
+/// <summary>A resposta por modelo de mensagem aprovado: <c>Parameters</c> vai por chave de parâmetro (<c>body.1</c>, <c>body.nome</c>, <c>header.1</c>, <c>button.0</c>), como as opções de resposta as listam.</summary>
+public sealed record ReplyWithTemplateRequest(Guid RequestId, Guid TemplateId, Dictionary<string, string>? Parameters);
+
 public sealed record CloseItemRequest(Guid RequestId, string? ReasonCode);
 
 public sealed record AssignItemRequest(Guid UserId, Guid RequestId, string? Reason);

@@ -100,6 +100,9 @@ public static class ApiHost
         // depois de o ContactCenter decidir o acesso pela fila. Registrada ANTES do AddContactCenter, que só instala a padrão
         // (a que usa o contexto de quem chamou) se não houver outra.
         builder.Services.AddScoped<IConversationGateway, ElevatedConversationGateway>();
+
+        // A janela de resposta livre e os modelos de mensagem do número (ADR 0027): o ContactCenter pergunta por uma porta própria e quem responde é o Channels, ligado aqui no host.
+        builder.Services.AddScoped<IChannelReplyPolicy, ChannelsBackedReplyPolicy>();
         builder.Services.AddContactCenter(provider => ConnectionStringOf(provider, "ContactCenter"));
 
         // AiGateway (ADR 0017, C1.4): a configuração de IA do tenant, a credencial BYOK cifrada, o ledger de uso e o IAiGateway. O catálogo de modelos e os limites padrão vêm da

@@ -36,6 +36,9 @@ public static class ContactCenterInfrastructureExtensions
         services.AddScoped<RoutingRuleService>();
         services.AddScoped<AgentPresenceService>();
         services.TryAddScoped<IConversationGateway, DirectConversationGateway>();
+
+        // A janela de resposta livre e os modelos de mensagem do número (ADR 0027): o host registra a sua (com o Channels) ANTES desta chamada; a padrão não conhece janela nem modelo.
+        services.TryAddScoped<IChannelReplyPolicy, NoChannelReplyPolicy>();
         services.AddScoped<ServiceQueueService>();
         services.AddScoped<HandlingExecutor>();
         services.AddScoped<QueueItemService>();
