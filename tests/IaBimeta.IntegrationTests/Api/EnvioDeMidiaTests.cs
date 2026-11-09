@@ -454,7 +454,8 @@ public sealed class EnvioDeMidiaTests(PostgresFixture banco)
     [Fact]
     public async Task Arquivo_cujo_prazo_de_guarda_venceu_antes_do_Sender_falha_de_forma_visivel_sem_chamar_a_Meta()
     {
-        await using var e = await IniciarAsync("envmidiaprazo");
+        // O Worker é parado e subido de novo no meio: o lease curto (como nos testes de reinício) evita que um evento da conversa que o Worker antigo segurava no instante da parada atrase a fila da mesma conversa.
+        await using var e = await IniciarAsync("envmidiaprazo", new Dictionary<string, string?> { ["Messaging:LeaseDuration"] = "00:00:03" });
         var a = await AtenderAsync(e, "Envio Prazo");
 
         // O Worker está parado: a mensagem fica no outbox. Passado o prazo, o expurgo apaga o conteúdo (o arquivo vira "indisponível").
