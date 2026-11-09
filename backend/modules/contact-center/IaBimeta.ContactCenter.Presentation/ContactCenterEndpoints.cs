@@ -188,6 +188,32 @@ public static class ContactCenterEndpoints
             return pagina is null ? Results.NotFound() : Results.Ok(pagina);
         });
 
+        // O arquivo de UMA mensagem de mídia (ADR 0028): só para quem enxerga a mensagem no histórico do item, lido do armazenamento privado (nenhuma URL pública ou permanente existe). O navegador recebe o
+        // tipo VERIFICADO, sem adivinhação de tipo, sem execução (sandbox) e sem cache compartilhado; imagem e áudio podem ser exibidos, o resto só baixado.
+        itens.MapGet("/{id:guid}/messages/{messageId:guid}/attachment", async (Guid id, Guid messageId, QueueItemService servico, HttpContext http, CancellationToken ct) =>
+        {
+            var anexo = await servico.OpenAttachmentAsync(id, messageId, ct);
+            if (anexo is null)
+            {
+                return Results.NotFound();
+            }
+
+            var exibivel = anexo.MimeType.StartsWith("image/", StringComparison.Ordinal) || anexo.MimeType.StartsWith("audio/", StringComparison.Ordinal);
+            var disposicao = new System.Net.Http.Headers.ContentDispositionHeaderValue(exibivel ? "inline" : "attachment") { FileNameStar = anexo.FileName };
+            http.Response.Headers.ContentDisposition = disposicao.ToString();
+            http.Response.Headers["X-Content-Type-Options"] = "nosniff";
+            http.Response.Headers.ContentSecurityPolicy = "default-src 'none'; sandbox";
+            http.Response.Headers["Cross-Origin-Resource-Policy"] = "same-origin";
+            http.Response.Headers.CacheControl = "private, no-store";
+            if (anexo.Attachment.SizeBytes is { } tamanho)
+            {
+                http.Response.ContentLength = tamanho;
+            }
+
+            http.Response.RegisterForDisposeAsync(anexo);
+            return Results.Stream(anexo.Content, anexo.MimeType);
+        });
+
         itens.MapPost("/{id:guid}/claim", async (Guid id, ItemActionRequest pedido, QueueItemService servico, CancellationToken ct) =>
             Resultado(await servico.ClaimAsync(id, pedido.RequestId, pedido.Reason, ct)));
 

@@ -93,13 +93,15 @@ public static class ApiHost
         // dependências não liga os dois módulos: a ligação é feita aqui, no host. Registrada ANTES do AddConversations, que
         // só instala a implementação que nega tudo se não houver outra.
         builder.Services.AddScoped<IChannelUnitAuthorization, ChannelsBackedUnitAuthorization>();
-        builder.Services.AddConversations(provider => ConnectionStringOf(provider, "Conversations"));
+        // Os arquivos de mídia (ADR 0028): Conversations:Attachments (pasta privada, tamanho máximo e tipos permitidos); Api e Worker apontam para a MESMA pasta.
+        builder.Services.AddConversations(provider => ConnectionStringOf(provider, "Conversations"), anexos => builder.Configuration.GetSection("Conversations:Attachments").Bind(anexos));
 
         // ContactCenter (etapa 4): filas, atendentes, entrada de conversas, atribuição, transferência e handoff IA/humano. O
         // ContactCenter chama o Conversations por uma porta própria; a do host age com o contexto de sistema do mesmo tenant,
         // depois de o ContactCenter decidir o acesso pela fila. Registrada ANTES do AddContactCenter, que só instala a padrão
         // (a que usa o contexto de quem chamou) se não houver outra.
         builder.Services.AddScoped<IConversationGateway, ElevatedConversationGateway>();
+        builder.Services.AddScoped<IAttachmentGateway, ElevatedAttachmentGateway>();
 
         // A janela de resposta livre e os modelos de mensagem do número (ADR 0027): o ContactCenter pergunta por uma porta própria e quem responde é o Channels, ligado aqui no host.
         builder.Services.AddScoped<IChannelReplyPolicy, ChannelsBackedReplyPolicy>();

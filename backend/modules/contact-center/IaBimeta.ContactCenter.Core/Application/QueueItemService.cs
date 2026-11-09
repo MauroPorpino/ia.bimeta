@@ -37,6 +37,7 @@ public sealed class QueueItemService
     private readonly TimeProvider _clock;
     private readonly IDeferredAudit _audit;
     private readonly IChannelReplyPolicy _channelReply;
+    private readonly IAttachmentGateway _attachments;
 
     public QueueItemService(
         IQueueItemRepository items,
@@ -47,7 +48,8 @@ public sealed class QueueItemService
         IRequestContextAccessor context,
         TimeProvider clock,
         IDeferredAudit audit,
-        IChannelReplyPolicy channelReply)
+        IChannelReplyPolicy channelReply,
+        IAttachmentGateway attachments)
     {
         _items = items;
         _queues = queues;
@@ -58,6 +60,7 @@ public sealed class QueueItemService
         _clock = clock;
         _audit = audit;
         _channelReply = channelReply;
+        _attachments = attachments;
     }
 
     // Entrada
@@ -1293,7 +1296,26 @@ public sealed class QueueItemService
     }
 
     /// <summary>As mensagens da conversa do item, paginadas. As mesmas regras de acesso de <see cref="GetConversationAsync"/>.</summary>
-    public async Task<Page<MessageView>?> GetMessagesAsync(Guid itemId, int take, string? cursor, HistoryOrder order, CancellationToken cancellationToken = default)
+    public Task<Page<MessageView>?> GetMessagesAsync(Guid itemId, int take, string? cursor, HistoryOrder order, CancellationToken cancellationToken = default) =>
+        GetMessagesCoreAsync(itemId, take, cursor, order, null, cancellationToken);
+
+    /// <summary>
+    /// O arquivo (imagem, áudio ou documento) de UMA mensagem da conversa do item (ADR 0028), ou nulo. Passa pelas MESMAS regras do histórico (acesso ao item, período, colocação, fronteira do atendimento): só abre o
+    /// arquivo de uma mensagem que o histórico mostraria a este usuário agora, e só se o arquivo estiver disponível. O conteúdo é lido do armazenamento privado pelo Conversations; nenhuma URL é criada.
+    /// </summary>
+    public async Task<AttachmentContent?> OpenAttachmentAsync(Guid itemId, Guid messageId, CancellationToken cancellationToken = default)
+    {
+        var pagina = await GetMessagesCoreAsync(itemId, 1, null, HistoryOrder.OldestFirst, messageId, cancellationToken);
+        var mensagem = pagina?.Items.FirstOrDefault(m => m.Id == messageId);
+        if (mensagem?.Attachment is not { Status: AttachmentStatus.Available })
+        {
+            return null;
+        }
+
+        return await _attachments.OpenAsync(mensagem.SessionId, messageId, cancellationToken);
+    }
+
+    private async Task<Page<MessageView>?> GetMessagesCoreAsync(Guid itemId, int take, string? cursor, HistoryOrder order, Guid? messageId, CancellationToken cancellationToken)
     {
         // Parâmetros do cliente são validados aqui, antes de qualquer leitura: parâmetro inválido é erro do pedido (400).
         if (take < 1 || take > MaxPageSize)
@@ -1364,7 +1386,7 @@ public sealed class QueueItemService
                 return ClosedPage();
             }
 
-            var pagina = await _conversations.GetHistoryAsync(new GetHistoryQuery(item.SessionId, take, cursor, order, ate), cancellationToken);
+            var pagina = await _conversations.GetHistoryAsync(new GetHistoryQuery(item.SessionId, take, cursor, order, ate, messageId), cancellationToken);
             if (pagina is null)
             {
                 return null;
@@ -1388,7 +1410,7 @@ public sealed class QueueItemService
             return ClosedPage();
         }
 
-        var doPeriodo = await _conversations.GetHistoryAsync(new GetHistoryQuery(item.SessionId, take, cursor, order, fronteira), cancellationToken);
+        var doPeriodo = await _conversations.GetHistoryAsync(new GetHistoryQuery(item.SessionId, take, cursor, order, fronteira, messageId), cancellationToken);
         return doPeriodo is null ? null : await StillAuthorizedAsync(item, null, doPeriodo, cancellationToken);
     }
 

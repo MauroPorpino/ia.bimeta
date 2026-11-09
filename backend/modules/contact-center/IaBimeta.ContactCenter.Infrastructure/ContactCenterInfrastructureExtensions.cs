@@ -37,6 +37,9 @@ public static class ContactCenterInfrastructureExtensions
         services.AddScoped<AgentPresenceService>();
         services.TryAddScoped<IConversationGateway, DirectConversationGateway>();
 
+        // Abrir o arquivo de uma mensagem (ADR 0028): o host registra a sua (contexto de sistema do mesmo tenant) ANTES desta chamada; a padrão usa o contexto de quem chamou.
+        services.TryAddScoped<IAttachmentGateway, DirectAttachmentGateway>();
+
         // A janela de resposta livre e os modelos de mensagem do número (ADR 0027): o host registra a sua (com o Channels) ANTES desta chamada; a padrão não conhece janela nem modelo.
         services.TryAddScoped<IChannelReplyPolicy, NoChannelReplyPolicy>();
         services.AddScoped<ServiceQueueService>();
