@@ -21,8 +21,17 @@
     "modelId": "gpt-5-mini",                 // precisa constar em AiGateway:Catalog:Models (tools\dev\Set-ConfiguracaoDeIa.ps1)
     "instructions": "Voce e a assistente virtual do Laboratorio Exemplo. Responda em portugues do Brasil, de forma curta e cordial. Voce nao conhece precos, agenda nem resultados de exames: nesses casos, ou se o cliente pedir uma pessoa, transfira para um atendente.",
     "handoffNotice": "Vou chamar uma pessoa da nossa equipe. Um instante!",
+    // O FAQ vai ao prompt da IA. "autoReply": true faz mais: a mensagem do cliente IGUAL a pergunta ou a um dos "aliases" (sem diferenca de maiusculas, acento ou pontuacao)
+    // e respondida direto com a resposta abaixo, SEM chamar a IA (economiza tokens). Nao ha busca aproximada: so igualdade. Desligado por padrao; ligue so em resposta que se sustenta
+    // sozinha (sem preco, agenda, cobertura nem "esse exame"). Duas entradas para a mesma pergunta ou alias: nenhuma responde direto (vai a IA).
+    "faqLocale": "pt-BR",                    // o idioma em que o FAQ esta escrito (padrao pt-BR); a resposta direta so vale em conversa nesse idioma
     "faq": [
-      { "question": "Qual o horario de atendimento?", "answer": "De segunda a sexta, das 7h as 17h, e aos sabados, das 7h as 11h." },
+      {
+        "question": "Qual o horario de atendimento?",
+        "answer": "De segunda a sexta, das 7h as 17h, e aos sabados, das 7h as 11h.",
+        "aliases": [ "que horas voces abrem", "horario de funcionamento" ],
+        "autoReply": true
+      },
       { "question": "Preciso de jejum para o hemograma?", "answer": "Em geral nao. A orientacao oficial depende do pedido medico: confirme com o atendente." }
     ],
     "apiKeyEnv": "EXEMPLO_CHAVE_IA"          // a chave BYOK do provedor; na demonstracao com a OpenAI simulada, qualquer texto serve

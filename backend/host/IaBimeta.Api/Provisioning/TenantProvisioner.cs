@@ -339,8 +339,9 @@ internal sealed class TenantProvisioner
         var definicoes = sp.GetRequiredService<AgentDefinitionService>();
         var desejado = new AgentDefinitionContent(
             string.IsNullOrWhiteSpace(spec.Ai.Instructions) ? DefaultInstructions : spec.Ai.Instructions.Trim(),
-            spec.Ai.Faq.Select(f => new FaqEntry(f.Question!.Trim(), f.Answer!.Trim())).ToList(),
-            HandoffNoticeText: string.IsNullOrWhiteSpace(spec.Ai.HandoffNotice) ? DefaultHandoffNotice : spec.Ai.HandoffNotice.Trim());
+            spec.Ai.Faq.Select(f => new FaqEntry(f.Question!.Trim(), f.Answer!.Trim(), f.Aliases?.Select(a => a.Trim()).ToList(), f.AutoReply)).ToList(),
+            HandoffNoticeText: string.IsNullOrWhiteSpace(spec.Ai.HandoffNotice) ? DefaultHandoffNotice : spec.Ai.HandoffNotice.Trim(),
+            FaqLocale: string.IsNullOrWhiteSpace(spec.Ai.FaqLocale) ? null : Locale.Parse(spec.Ai.FaqLocale).ToString());
 
         var publicada = await definicoes.GetPublishedAsync(ct);
         if (publicada is not null && Same(publicada.Content, desejado))
@@ -351,13 +352,25 @@ internal sealed class TenantProvisioner
 
         await definicoes.SaveDraftAsync(desejado, ct);
         var nova = await definicoes.PublishAsync(ct);
-        report.Steps.Add(new ProvisioningStep("Agente de IA", publicada is null ? StepOutcome.Created : StepOutcome.Updated, $"Versão {nova.Number} publicada ({desejado.Faq.Count} pergunta(s) frequente(s))."));
+        report.Steps.Add(new ProvisioningStep("Agente de IA", publicada is null ? StepOutcome.Created : StepOutcome.Updated, $"Versão {nova.Number} publicada ({desejado.Faq.Count} pergunta(s) frequente(s), {desejado.Faq.Count(f => f.AutoReply)} com resposta direta, sem chamar a IA)."));
     }
 
     private static bool Same(AgentDefinitionContent a, AgentDefinitionContent b) =>
         string.Equals(a.Instructions, b.Instructions, StringComparison.Ordinal)
         && string.Equals(a.HandoffNoticeText, b.HandoffNoticeText, StringComparison.Ordinal)
-        && a.Faq.Select(f => (f.Question, f.Answer)).SequenceEqual(b.Faq.Select(f => (f.Question, f.Answer)));
+        && a.EffectiveFaqLocale.Equals(b.EffectiveFaqLocale)
+        && a.Faq.Count == b.Faq.Count
+        && a.Faq.Zip(b.Faq).All(par => SameFaqEntry(par.First, par.Second));
+
+    /// <summary>
+    /// Pergunta, resposta, a resposta direta e os aliases (na ordem, depois de aparados e sem repetição, como a definição os guarda). Sem isto, reprovisionar com um alias novo ou com <c>autoReply</c> ligado
+    /// seria "sem mudança" e a definição publicada continuaria a antiga. O idioma ausente e <c>pt-BR</c> são o mesmo (<see cref="AgentDefinitionContent.EffectiveFaqLocale"/>).
+    /// </summary>
+    private static bool SameFaqEntry(FaqEntry a, FaqEntry b) =>
+        string.Equals(a.Question, b.Question, StringComparison.Ordinal)
+        && string.Equals(a.Answer, b.Answer, StringComparison.Ordinal)
+        && a.AutoReply == b.AutoReply
+        && a.GetCleanAliases().SequenceEqual(b.GetCleanAliases(), StringComparer.Ordinal);
 
     /// <summary>Escolhe o provedor e o modelo do tenant e, se a variável de ambiente existir, cadastra a chave BYOK (cifrada). Sem a chave a IA fica configurada e o atendimento humano assume tudo até ela existir.</summary>
     private async Task EnsureTenantAiAsync(IServiceProvider sp, ProvisioningSpec spec, ProvisioningReport report, CancellationToken ct)

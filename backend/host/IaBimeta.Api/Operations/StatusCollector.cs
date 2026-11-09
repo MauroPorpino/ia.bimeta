@@ -106,6 +106,8 @@ internal static class StatusCollector
             }
         }
 
+        await CheckFaqSavingsAsync(root, agora, so, linhas, slugs, cancellationToken);
+
         // A retenção é do ambiente todo: numa conferência de UMA empresa não entra.
         if (so is null)
         {
@@ -113,6 +115,36 @@ internal static class StatusCollector
         }
 
         return new StatusReport(agora, linhas);
+    }
+
+    /// <summary>
+    /// A economia da resposta direta do FAQ (ADR 0029): a contagem exata de chamadas evitadas e, separada e rotulada, a estimativa de tokens e custo. Informativa: nunca é atenção nem falha (o FAQ direto é
+    /// uma melhoria, não um serviço que possa parar). Se a leitura falha, vira atenção com o tipo da falha, sem derrubar o resto do relatório.
+    /// </summary>
+    private static async Task CheckFaqSavingsAsync(
+        IServiceProvider root, DateTimeOffset agora, Guid? so, List<StatusLine> linhas, Dictionary<Guid, string> slugs, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var (contagens, medias) = await FaqSavingsReport.LoadAsync(root, agora, so, cancellationToken);
+            var obrigatorias = so is { } uma ? new[] { uma } : Array.Empty<Guid>();
+            var textos = FaqSavingsReport.Describe(contagens, medias, obrigatorias);
+            if (textos.Count == 0)
+            {
+                linhas.Add(new StatusLine(FaqSavingsReport.Section, HealthSeverity.Ok, $"nenhum turno respondido direto pelo FAQ nos últimos {HealthText.Age(FaqSavingsReport.Window)}."));
+                return;
+            }
+
+            foreach (var (tenant, mensagem) in textos)
+            {
+                var slug = tenant is { } id ? await SlugOfAsync(root, slugs, id, cancellationToken) : null;
+                linhas.Add(new StatusLine(FaqSavingsReport.Section, HealthSeverity.Ok, mensagem, null, slug));
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            linhas.Add(new StatusLine(FaqSavingsReport.Section, HealthSeverity.Warning, $"a economia do FAQ não pôde ser calculada ({ex.GetType().Name}).", "Confira o banco e rode de novo."));
+        }
     }
 
     /// <summary>

@@ -1,6 +1,8 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using IaBimeta.Agents.Domain;
+using IaBimeta.SharedKernel;
 
 namespace IaBimeta.Api.Provisioning;
 
@@ -107,6 +109,21 @@ internal sealed class ProvisioningSpec
         {
             Exigir(erros, Ai.Faq[i].Question, $"ai.faq[{i}].question");
             Exigir(erros, Ai.Faq[i].Answer, $"ai.faq[{i}].answer");
+            if ((Ai.Faq[i].Aliases?.Count ?? 0) > AgentDefinitionContent.AliasMaxCount)
+            {
+                erros.Add($"ai.faq[{i}].aliases aceita no máximo {AgentDefinitionContent.AliasMaxCount} aliases.");
+            }
+
+            var aliases = Ai.Faq[i].Aliases;
+            for (var a = 0; aliases is not null && a < aliases.Count; a++)
+            {
+                Exigir(erros, aliases[a], $"ai.faq[{i}].aliases[{a}]");
+            }
+        }
+
+        if (Ai.FaqLocale is not null && !Locale.TryParse(Ai.FaqLocale, out _))
+        {
+            erros.Add("ai.faqLocale deve ser um identificador BCP 47 bem formado, como pt-BR ou en-US.");
         }
 
         if (WhatsApp is { } wa)
@@ -220,6 +237,9 @@ internal sealed class AiSpec
     /// <summary>O aviso que o cliente recebe antes da transferência para uma pessoa. Vazio usa o aviso padrão.</summary>
     public string? HandoffNotice { get; set; }
 
+    /// <summary>O idioma em que o FAQ está escrito (BCP 47, como <c>pt-BR</c>); a resposta direta (<c>autoReply</c>) só vale numa conversa desse idioma. Vazio é <c>pt-BR</c> (ADR 0029).</summary>
+    public string? FaqLocale { get; set; }
+
     public List<FaqSpec> Faq { get; set; } = new();
 
     /// <summary>O NOME da variável de ambiente com a chave do provedor (BYOK). Sem ela, a chave é cadastrada depois e a IA transfere tudo ao atendente enquanto isso.</summary>
@@ -231,6 +251,15 @@ internal sealed class FaqSpec
     public string? Question { get; set; }
 
     public string? Answer { get; set; }
+
+    /// <summary>Outras formas, cadastradas de propósito, de fazer a MESMA pergunta (até 10). Servem só à resposta direta; não vão ao prompt.</summary>
+    public List<string>? Aliases { get; set; }
+
+    /// <summary>
+    /// Liga a resposta direta (ADR 0029): a mensagem do cliente IGUAL à pergunta ou a um alias, depois de normalizada (caixa, acento, pontuação), é respondida com <c>answer</c> sem chamar a IA. Desligado por padrão;
+    /// só ligue numa resposta que se sustenta sozinha (sem preço, agenda, cobertura nem referência ao que foi dito antes).
+    /// </summary>
+    public bool AutoReply { get; set; }
 }
 
 internal enum WhatsAppMode
