@@ -48,6 +48,11 @@ namespace IaBimeta.Agents.Infrastructure.Migrations
                         .HasColumnType("jsonb")
                         .HasColumnName("faq");
 
+                    b.Property<string>("FaqLocale")
+                        .HasMaxLength(35)
+                        .HasColumnType("character varying(35)")
+                        .HasColumnName("faq_locale");
+
                     b.Property<string>("HandoffNoticeText")
                         .HasColumnType("text")
                         .HasColumnName("handoff_notice_text");

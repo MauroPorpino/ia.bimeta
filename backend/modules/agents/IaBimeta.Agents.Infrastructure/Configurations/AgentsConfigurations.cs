@@ -1,4 +1,5 @@
 using IaBimeta.Agents.Domain;
+using IaBimeta.SharedKernel;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -107,6 +108,7 @@ internal sealed class AgentDefinitionVersionConfiguration : IEntityTypeConfigura
         builder.Property(v => v.FaqJson).HasColumnName("faq").HasColumnType("jsonb").IsRequired();
         builder.Property(v => v.AudioInformativeText).HasColumnName("audio_informative_text");
         builder.Property(v => v.HandoffNoticeText).HasColumnName("handoff_notice_text");
+        builder.Property(v => v.FaqLocale).HasColumnName("faq_locale").HasMaxLength(Locale.MaxLength);
         builder.Property(v => v.CreatedAt).HasColumnName("created_at");
         builder.Property(v => v.UpdatedAt).HasColumnName("updated_at");
         builder.Property(v => v.UpdatedBy).HasColumnName("updated_by");

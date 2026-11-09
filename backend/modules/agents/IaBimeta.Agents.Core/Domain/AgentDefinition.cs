@@ -3,8 +3,57 @@ using IaBimeta.SharedKernel;
 
 namespace IaBimeta.Agents.Domain;
 
-/// <summary>A entrada de um FAQ do tenant: uma pergunta e a resposta aprovada.</summary>
-public sealed record FaqEntry(string Question, string Answer);
+/// <summary>
+/// A entrada de um FAQ do tenant: uma pergunta e a resposta aprovada. <paramref name="Aliases"/> são outras formas, cadastradas de propósito, de fazer a MESMA pergunta (ADR 0029); só servem à resposta
+/// direta e nunca vão ao prompt. <paramref name="AutoReply"/> liga a resposta direta, sem chamar o modelo, quando a mensagem do cliente é IGUAL (depois de normalizada) à pergunta ou a um alias: é opt-in
+/// por entrada e fica desligada nas definições que não a conhecem (JSON antigo sem o campo). Uma resposta escrita para orientar o modelo pode não servir, palavra por palavra, ao cliente: só marque
+/// <c>AutoReply</c> numa resposta que se sustenta sozinha.
+/// </summary>
+public sealed record FaqEntry(string Question, string Answer, IReadOnlyList<string>? Aliases = null, bool AutoReply = false)
+{
+    private static readonly IReadOnlyList<string> NoAliases = Array.Empty<string>();
+
+    /// <summary>Os aliases, nunca nulo (o JSON antigo não os tem).</summary>
+    public IReadOnlyList<string> GetAliases() => Aliases ?? NoAliases;
+
+    /// <summary>Igualdade por VALOR: sem aliases (nulo) é o mesmo que uma lista vazia, e a lista se compara pelos itens, na ordem (a lista em si é referência, e o JSON antigo não a tem).</summary>
+    public bool Equals(FaqEntry? other) =>
+        other is not null
+        && string.Equals(Question, other.Question, StringComparison.Ordinal)
+        && string.Equals(Answer, other.Answer, StringComparison.Ordinal)
+        && AutoReply == other.AutoReply
+        && GetAliases().SequenceEqual(other.GetAliases(), StringComparer.Ordinal);
+
+    public override int GetHashCode()
+    {
+        var codigo = new HashCode();
+        codigo.Add(Question, StringComparer.Ordinal);
+        codigo.Add(Answer, StringComparer.Ordinal);
+        codigo.Add(AutoReply);
+        foreach (var alias in GetAliases())
+        {
+            codigo.Add(alias, StringComparer.Ordinal);
+        }
+
+        return codigo.ToHashCode();
+    }
+
+    /// <summary>Os aliases aparados e sem repetição (repetição é a MESMA pergunta depois de normalizada), na ordem do cadastro: a forma em que a definição os guarda.</summary>
+    public IReadOnlyList<string> GetCleanAliases()
+    {
+        var vistos = new HashSet<string>(StringComparer.Ordinal);
+        var limpos = new List<string>();
+        foreach (var alias in GetAliases())
+        {
+            if (vistos.Add(FaqMatcher.Normalize(alias)))
+            {
+                limpos.Add(alias.Trim());
+            }
+        }
+
+        return limpos;
+    }
+}
 
 /// <summary>Uma regra de formato ou de tamanho da definição do agente foi violada.</summary>
 public sealed class AgentsValidationException : Exception
@@ -18,13 +67,14 @@ public sealed class AgentsValidationException : Exception
 /// <summary>
 /// O conteúdo de uma definição de agente publicável (ADR 0017, seção F): instruções do tenant, FAQ (pares pergunta e resposta), o texto da resposta informativa de áudio (MED-3) e o texto do
 /// aviso de transferência. Cabe INTEIRO no prompt (sem busca), por isso tem limites de tamanho. NÃO é o Knowledge Engine: dado transacional (preço, agenda, cobertura, resultado) não entra, e
-/// a IA transfere a pergunta.
+/// a IA transfere a pergunta. <paramref name="FaqLocale"/> é o idioma em que o FAQ está escrito (ADR 0029): a resposta direta só vale numa conversa cujo idioma efetivo é esse; vazio é <c>pt-BR</c>.
 /// </summary>
 public sealed record AgentDefinitionContent(
     string Instructions,
     IReadOnlyList<FaqEntry> Faq,
     string? AudioInformativeText = null,
-    string? HandoffNoticeText = null)
+    string? HandoffNoticeText = null,
+    string? FaqLocale = null)
 {
     public const int InstructionsMaxLength = 8000;
     public const int FaqMaxEntries = 50;
@@ -32,6 +82,15 @@ public sealed record AgentDefinitionContent(
     public const int AnswerMaxLength = 1500;
     public const int FaqMaxTotalLength = 30000;
     public const int NoticeMaxLength = 600;
+
+    /// <summary>Quantos aliases uma entrada aceita (ADR 0029). Eles não entram no prompt: o limite protege o armazenamento e a comparação.</summary>
+    public const int AliasMaxCount = 10;
+
+    /// <summary>O idioma do FAQ quando a definição não informa outro.</summary>
+    public const string DefaultFaqLocale = "pt-BR";
+
+    /// <summary>O idioma do FAQ já resolvido (o padrão quando não informado ou inválido; a validação recusa o inválido).</summary>
+    public Locale EffectiveFaqLocale => FaqLocale is not null && Locale.TryParse(FaqLocale, out var idioma) ? idioma : Locale.Parse(DefaultFaqLocale);
 
     /// <exception cref="AgentsValidationException">Algum limite foi violado.</exception>
     public void Validate()
@@ -58,6 +117,7 @@ public sealed record AgentDefinitionContent(
             }
 
             total += entrada.Question.Length + entrada.Answer.Length;
+            ValidateDirectAnswerFields(entrada);
         }
 
         if (total > FaqMaxTotalLength)
@@ -65,8 +125,36 @@ public sealed record AgentDefinitionContent(
             throw new AgentsValidationException($"O FAQ inteiro aceita no máximo {FaqMaxTotalLength} caracteres.");
         }
 
+        if (FaqLocale is not null && !Locale.TryParse(FaqLocale, out _))
+        {
+            throw new AgentsValidationException("O idioma do FAQ, quando informado, deve ser um identificador BCP 47 bem formado, como pt-BR ou en-US.");
+        }
+
         ValidateOptionalText(AudioInformativeText, "A resposta informativa de áudio");
         ValidateOptionalText(HandoffNoticeText, "O aviso de transferência");
+    }
+
+    /// <summary>Os campos da resposta direta (ADR 0029): aliases com texto de verdade, e uma entrada com resposta direta tem de poder ser encontrada.</summary>
+    private static void ValidateDirectAnswerFields(FaqEntry entrada)
+    {
+        var aliases = entrada.GetAliases();
+        if (aliases.Count > AliasMaxCount)
+        {
+            throw new AgentsValidationException($"Cada entrada do FAQ aceita no máximo {AliasMaxCount} aliases.");
+        }
+
+        foreach (var alias in aliases)
+        {
+            if (string.IsNullOrWhiteSpace(alias) || alias.Length > QuestionMaxLength || FaqMatcher.Normalize(alias).Length == 0)
+            {
+                throw new AgentsValidationException($"Cada alias do FAQ precisa ter letras ou números e no máximo {QuestionMaxLength} caracteres.");
+            }
+        }
+
+        if (entrada.AutoReply && FaqMatcher.Normalize(entrada.Question).Length == 0)
+        {
+            throw new AgentsValidationException("Uma entrada com resposta direta precisa de uma pergunta com letras ou números.");
+        }
     }
 
     private static void ValidateOptionalText(string? texto, string nome)
@@ -120,6 +208,9 @@ public sealed class AgentDefinitionVersion : ITenantOwned
 
     public string? HandoffNoticeText { get; private set; }
 
+    /// <summary>O idioma do FAQ (BCP 47 canônico), ou nulo para o padrão <c>pt-BR</c> (as versões anteriores ao ADR 0029 não o têm).</summary>
+    public string? FaqLocale { get; private set; }
+
     public DateTimeOffset CreatedAt { get; private set; }
 
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -137,7 +228,8 @@ public sealed class AgentDefinitionVersion : ITenantOwned
         Instructions,
         JsonSerializer.Deserialize<List<FaqEntry>>(FaqJson, Json) ?? new List<FaqEntry>(),
         AudioInformativeText,
-        HandoffNoticeText);
+        HandoffNoticeText,
+        FaqLocale);
 
     public static AgentDefinitionVersion CreateDraft(TenantId tenant, int number, AgentDefinitionContent content, DateTimeOffset now, Guid? userId)
     {
@@ -212,8 +304,9 @@ public sealed class AgentDefinitionVersion : ITenantOwned
     private void Apply(AgentDefinitionContent content)
     {
         Instructions = content.Instructions.Trim();
-        FaqJson = JsonSerializer.Serialize(content.Faq.Select(f => new FaqEntry(f.Question.Trim(), f.Answer.Trim())).ToList(), Json);
+        FaqJson = JsonSerializer.Serialize(content.Faq.Select(f => new FaqEntry(f.Question.Trim(), f.Answer.Trim(), f.GetCleanAliases(), f.AutoReply)).ToList(), Json);
         AudioInformativeText = content.AudioInformativeText?.Trim();
         HandoffNoticeText = content.HandoffNoticeText?.Trim();
+        FaqLocale = content.FaqLocale is null ? null : Locale.Parse(content.FaqLocale).ToString();
     }
 }
