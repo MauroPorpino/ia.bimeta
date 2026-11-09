@@ -96,6 +96,8 @@ Modos (`-Modo`):
 
 ## Limites conhecidos
 
+- **Arquivos de mídia do WhatsApp (ADR 0028) ficam FORA do backup do banco.** O `pg_dump` leva `conversations.message_attachments` (estado, tipo, tamanho, resumo), mas os bytes estão na pasta `Conversations:Attachments:RootPath`. Copie essa pasta junto com o backup (e proteja a cópia como o backup); sem ela, depois de restaurar, o arquivo aparece como disponível e o Api responde 404 ao abri-lo. O ensaio de restauração isolado **não** valida a pasta de arquivos.
+
 - Backup lógico (`pg_dump`): não faz recuperação ponto no tempo (PITR); isso pede arquivamento de WAL e é decisão de infraestrutura.
 - O destino externo é uma **pasta**: destinos de nuvem entram como pasta sincronizada ou compartilhamento mapeado (a credencial fica no sistema operacional). Um cliente próprio de S3/SFTP exigiria guardar credencial: não foi feito.
 - O backup cifrado protege contra roubo do arquivo; contra perda da máquina só protege se a cópia externa existir **e a frase estiver guardada fora dela**.

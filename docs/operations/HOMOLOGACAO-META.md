@@ -167,6 +167,10 @@ Abra `http://localhost:5173` e entre com o atendente do passo 4.2.
 
 Opcional e **independente** dos passos acima; exige um modelo **realmente aprovado** na Meta (o número de teste não tem os do seu negócio). Siga o checklist da seção 6 de `docs/operations/MODELOS-DE-MENSAGEM.md`: associe o JSON do modelo à conta (`POST /channels/accounts/{id}/templates`), deixe o cliente **sem escrever por mais de 24 horas** (ou use um número cuja última mensagem seja antiga), assuma a conversa, envie o modelo e confira no celular e no estado de entrega. Nenhum passo dos itens 4.1 a 4.7 depende deste.
 
+### 4.9 Mídia recebida (foto, nota de voz, PDF)
+
+Opcional e independente. Com o número de teste, mande do celular **uma foto, uma nota de voz e um PDF** para o número; na interface, o atendente deve ver a miniatura, ouvir o áudio e baixar o documento. Siga o checklist da seção 7 de `docs/operations/MIDIA-DO-WHATSAPP.md` (domínio do endereço de conteúdo, formato do resumo, tipo da nota de voz, expiração). **Antes de operar com cliente real:** decidir antivírus, cópia e criptografia da pasta de arquivos e o prazo de guarda.
+
 ## 5. Se algo falhar
 
 | Sintoma | Causa provável | O que fazer |
@@ -186,4 +190,4 @@ Opcional e **independente** dos passos acima; exige um modelo **realmente aprova
 
 ## 7. Limites deste teste
 
-Número de **teste** da Meta (destinatários verificados, sem templates aprovados do seu negócio); só **texto**; IA **simulada** (a chamada real à OpenAI continua suspensa até os créditos); túnel **de desenvolvimento** (sem garantia de disponibilidade). Para um número real de produção: domínio/URL estável com TLS válido, token de usuário do sistema, app em modo Live e revisão dos requisitos da Meta.
+Número de **teste** da Meta (destinatários verificados, sem templates aprovados do seu negócio); **texto** na saída e mídia só **recebida** (ADR 0028); IA **simulada** (a chamada real à OpenAI continua suspensa até os créditos); túnel **de desenvolvimento** (sem garantia de disponibilidade). Para um número real de produção: domínio/URL estável com TLS válido, token de usuário do sistema, app em modo Live e revisão dos requisitos da Meta.

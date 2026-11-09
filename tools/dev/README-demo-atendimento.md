@@ -39,6 +39,15 @@ Abre uma janela para cada peça. Depois que o Api subir, cadastre uma chave de I
 3. **O atendente atende.** Em `http://localhost:5173`, entre com tenant `demo-ia`, `admin@demo-ia.local` e `DevLocal-Admin-2026!`. Abra a conversa, **Assumir**, escreva a resposta e envie: ela aparece na janela do WhatsApp simulado. O cliente responde com outro `Send-MensagemWhatsApp.ps1` (mesmo `-Numero`): quem responde agora é o humano, a IA não fala.
 4. **Encerrar.** **Encerrar** na interface (com confirmação): a sessão fecha e o item sai da fila.
 
+## Mídia do cliente: imagem, áudio e documento (ADR 0028)
+
+O WhatsApp simulado também faz o papel da Graph API para **arquivos**: o `Send-MensagemWhatsApp.ps1 -Midia` deposita o arquivo na pasta de mídia (`%TEMP%iabimeta-midia-demo`, a mesma do simulador) e manda o webhook só com o identificador; o Worker busca o arquivo (com o token no cabeçalho), valida e guarda em pasta privada, e o atendente o vê na interface.
+
+1. Faça a conversa chegar a um atendente (o passo 2 acima) e **assuma**.
+2. `.	oolsdevSend-MensagemWhatsApp.ps1 -Midia imagem -Legenda Foto da requisicao do exame` mostra a **miniatura** (clique amplia). `-Midia audio` mostra **Carregar áudio** e o player (o áudio de demonstração é **silencioso**, 3 s; use `-Arquivo` com um áudio seu para ouvir). `-Midia documento -NomeDoArquivo laudo.pdf` mostra o documento com **Baixar**.
+3. `-Midia imagem -Expirada` mostra **Arquivo indisponível** (a Meta já não tem o arquivo) e `-Midia documento -Arquivo C:	empalso.pdf` (um HTML com extensão `.pdf`) mostra **Arquivo bloqueado**.
+4. A IA **nunca** recebe o arquivo: com um cliente novo mandando só uma imagem, a conversa vai ao atendente (conteúdo indisponível para a IA). O WhatsApp simulado imprime cada consulta de mídia **sem** o token. Api e Worker precisam apontar para a mesma pasta de arquivos (`Conversations__Attachments__RootPath`; por padrão, a mesma pasta do usuário). Guia: `docs/operations/MIDIA-DO-WHATSAPP.md`.
+
 ## Fora da janela de 24 horas: modelos de mensagem (ADR 0027)
 
 1. `.\tools\dev\Add-ModelosDeDemonstracao.ps1` associa à conta de demonstração os modelos de `modelos-demonstracao.json` (como se a Meta já os tivesse aprovado; o de cabeçalho de imagem é **recusado com o motivo**, de propósito).

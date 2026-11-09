@@ -87,6 +87,6 @@ Um teste de integração falha quando aparece uma tabela **sem classificação**
 3. **Ledger de IA:** a correlação com o atendimento é a parte pessoal; pseudonimizar depois de N dias mantendo o consumo agregado.
 4. **Numeração de sessões:** o número nunca é reemitido (ADR 0012), então um expurgo cria lacuna conhecida; as referências cruzadas (ContactCenter, Agents) precisam ser tratadas junto.
 5. **Mortos:** quem autoriza o descarte, com que trilha, e depois de quanto tempo.
-6. **Anexos e mídia** (quando existirem) e o **payload bruto** (se um dia for guardado): ganham categoria e prazo próprios.
+6. **Arquivos de mídia** (ADR 0028) e o **payload bruto** (se um dia for guardado): a tabela `conversations.message_attachments` já é classificada como dado pessoal (só relatório), mas **os objetos na pasta de arquivos (`Conversations:Attachments:RootPath`) não são apagados por nenhuma rotina**: definir prazo de guarda, apagamento por titular e se o expurgo remove também o objeto do disco. O payload bruto ganha categoria e prazo próprios se um dia for guardado.
 
 Quando o negócio decidir, cada item vira uma categoria nova com tarefa própria, sempre com relatório antes, confirmação e teste de que o que é de referência continua intacto.
