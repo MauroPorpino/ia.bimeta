@@ -1,6 +1,6 @@
 # ADR 0029 — Resposta direta do FAQ sem chamar o modelo: igualdade normalizada, aliases, idioma e medição da economia
 
-- **Status:** **Proposto para ratificação.** Implementado em 09/11/2026 sob a autorização do decisor ("Pacote A" do diagnóstico do Knowledge Engine interno, com as três decisões abaixo), depois da ratificação do ADR 0028. Nenhuma chamada real à Meta ou à OpenAI; a migração só **adiciona uma coluna anulável** (backup do banco de teste feito antes); `main` intocada; sem push.
+- **Status:** **Aceito para o MVP (ratificado pelo decisor em 09/11/2026).** Implementado em 09/11/2026 sob a autorização do decisor ("Pacote A" do diagnóstico do Knowledge Engine interno, com as três decisões abaixo), depois da ratificação do ADR 0028. Nenhuma chamada real à Meta ou à OpenAI; a migração só **adiciona uma coluna anulável** (backup do banco de teste feito antes); `main` intocada; sem push.
 - **Data:** 09/11/2026
 - **Decisor:** Mauro Porpino
 - **Referências:** ADR 0017 (seção F: FAQ no prompt; o Knowledge Engine fica para a etapa 6b), 0007 e `CONVERSATION-LIFECYCLE.md` (turno, cercas de aceitação, resposta defasada sempre recusada), 0018 (fluxo do MVP), 0024 (`provision`), 0026 (`status`), `docs/architecture/BOUNDARIES.md` (módulo Knowledge previsto; nada dele é implementado aqui).
