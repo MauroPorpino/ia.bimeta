@@ -10,12 +10,20 @@
     (veja tools\dev\README-demo-atendimento.md). Este script e o "celular do cliente": o que aparece aqui e o
     que o cliente leria no WhatsApp (a resposta da IA, o aviso de transferencia e a resposta do atendente).
 
+    MIDIA (imagem, audio, documento): tambem serve os arquivos que Send-MensagemWhatsApp.ps1 -Midia deposita na
+    pasta de midia, como a Graph API: GET /{versao}/{media-id} devolve os dados (url, tipo, resumo, tamanho) e
+    GET /media-content/{media-id} devolve o conteudo. As duas exigem o token da conta no cabecalho Authorization
+    (Bearer), como a Meta; o token NUNCA e impresso.
+
 .EXAMPLE
     .\tools\dev\Start-WhatsAppSimulado.ps1
 #>
 [CmdletBinding()]
 param(
-    [int]$Porta = 5198
+    [int]$Porta = 5198,
+
+    # Onde Send-MensagemWhatsApp.ps1 -Midia deposita os arquivos ({id}.bin e {id}.json). A mesma pasta nos dois scripts.
+    [string]$PastaDeMidia = (Join-Path ([System.IO.Path]::GetTempPath()) 'iabimeta-midia-demo')
 )
 
 Set-StrictMode -Version Latest
@@ -29,11 +37,72 @@ Write-Host 'Aqui aparece o que o cliente recebe no celular.'
 Write-Host ''
 
 $contador = 0
+
+function Send-Bytes {
+    param($Contexto, [int]$Status, [byte[]]$Bytes, [string]$Tipo)
+    $Contexto.Response.StatusCode = $Status
+    $Contexto.Response.ContentType = $Tipo
+    $Contexto.Response.ContentLength64 = $Bytes.Length
+    $Contexto.Response.OutputStream.Write($Bytes, 0, $Bytes.Length)
+    $Contexto.Response.Close()
+}
+
+function Send-ErroDaGraph {
+    param($Contexto, [int]$Status, [int]$Codigo)
+    $erro = @{ error = @{ message = 'Erro simulado'; type = 'OAuthException'; code = $Codigo; fbtrace_id = 'SIMULADO' } }
+    Send-Bytes $Contexto $Status ([System.Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject $erro -Depth 5 -Compress))) 'application/json'
+}
+
 try {
     while ($ouvinte.IsListening) {
         $contexto = $ouvinte.GetContext()
         $leitor = New-Object System.IO.StreamReader($contexto.Request.InputStream, [System.Text.Encoding]::UTF8)
         $corpo = $leitor.ReadToEnd()
+
+        # MIDIA recebida de um cliente (imagem, audio, documento): a consulta dos dados e o conteudo, como a Graph API. O token da conta e exigido nas duas
+        # (Authorization: Bearer ...), e nunca e impresso. O identificador so pode ter letras, digitos e _.- (nada que saia da pasta de midia).
+        $partes = @($contexto.Request.Url.AbsolutePath.Trim('/') -split '/')
+        if ($contexto.Request.HttpMethod -eq 'GET' -and $partes.Count -eq 2) {
+            $idDaMidia = $partes[1]
+            $ehConteudo = ($partes[0] -eq 'media-content')
+            $arquivoDeDados = Join-Path $PastaDeMidia ($idDaMidia + '.json')
+            $marcaDeExpirada = Join-Path $PastaDeMidia ($idDaMidia + '.expirada')
+            if ($idDaMidia -match '^[A-Za-z0-9_.-]{1,128}$' -and -not $ehConteudo -and (Test-Path -LiteralPath $marcaDeExpirada)) {
+                # Midia que a Meta nao tem mais (o identificador vale 7 dias): 404, como a Graph API.
+                Write-Host ((Get-Date).ToString('HH:mm:ss') + '  [midia] dados de ' + $idDaMidia + ': EXPIRADA (404)')
+                Send-ErroDaGraph $contexto 404 100
+                continue
+            }
+            if ($idDaMidia -match '^[A-Za-z0-9_.-]{1,128}$' -and (Test-Path -LiteralPath $arquivoDeDados)) {
+                $autorizacao = [string]$contexto.Request.Headers['Authorization']
+                $comToken = $autorizacao.StartsWith('Bearer ') -and $autorizacao.Length -gt 8
+                $etapa = 'dados'
+                if ($ehConteudo) { $etapa = 'conteudo' }
+                Write-Host ((Get-Date).ToString('HH:mm:ss') + '  [midia] ' + $etapa + ' de ' + $idDaMidia + ' (token da conta no cabecalho: ' + $(if ($comToken) { 'sim' } else { 'NAO' }) + ')')
+                if (-not $comToken) {
+                    Send-ErroDaGraph $contexto 401 190
+                    continue
+                }
+
+                $dados = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText($arquivoDeDados))
+                $arquivoDeConteudo = Join-Path $PastaDeMidia ($idDaMidia + '.bin')
+                if ($ehConteudo) {
+                    Send-Bytes $contexto 200 ([System.IO.File]::ReadAllBytes($arquivoDeConteudo)) ([string]$dados.mime_type)
+                }
+                else {
+                    $resposta = @{
+                        messaging_product = 'whatsapp'
+                        url = ('http://127.0.0.1:' + $Porta + '/media-content/' + $idDaMidia)
+                        mime_type = [string]$dados.mime_type
+                        sha256 = [string]$dados.sha256
+                        file_size = [string]$dados.file_size
+                        id = $idDaMidia
+                    }
+                    Send-Bytes $contexto 200 ([System.Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject $resposta -Compress))) 'application/json'
+                }
+                continue
+            }
+        }
 
         # A SONDA do teste de prontidao: GET /{versao}/{phone_number_id} (so leitura, nenhuma mensagem). Responde como a Meta responde ao dono do numero.
         if ($contexto.Request.HttpMethod -eq 'GET') {

@@ -48,14 +48,102 @@ internal sealed record CapturaGraph(string Credencial, string Caminho, string Co
 }
 
 /// <summary>
+/// Um arquivo que a "Meta" tem para entregar (ADR 0028): a consulta <c>GET /{versão}/{media-id}</c> devolve os dados (endereço do conteúdo, tipo, resumo e tamanho) e o endereço devolvido serve o conteúdo. Cada
+/// comportamento é uma propriedade para o teste provocar: mídia expirada, resumo errado, falha passageira, resposta presa. Guarda o que recebeu (o token do cabeçalho e quantas vezes).
+/// </summary>
+internal sealed class MidiaDaMeta
+{
+    private readonly ConcurrentQueue<string> _credenciaisDaConsulta = new();
+    private readonly ConcurrentQueue<string> _credenciaisDoConteudo = new();
+    private int _consultas;
+    private int _downloads;
+    private int _falhasRestantes;
+
+    public required string Id { get; init; }
+
+    public required byte[] Conteudo { get; set; }
+
+    public string? Mime { get; set; }
+
+    /// <summary>O resumo SHA-256 informado na consulta: nulo calcula o certo; <see cref="SemResumo"/> não informa nenhum.</summary>
+    public string? Sha256 { get; set; }
+
+    public bool SemResumo { get; set; }
+
+    /// <summary>O estado HTTP da CONSULTA (404 é a mídia expirada ou inexistente).</summary>
+    public int StatusDaConsulta { get; set; } = 200;
+
+    /// <summary>O estado HTTP do CONTEÚDO (depois das falhas passageiras).</summary>
+    public int StatusDoConteudo { get; set; } = 200;
+
+    /// <summary>Quantas respostas 500 o conteúdo dá antes de entregar o arquivo (falha passageira do provedor).</summary>
+    public int FalhasPassageirasDoConteudo
+    {
+        get => Volatile.Read(ref _falhasRestantes);
+        set => Volatile.Write(ref _falhasRestantes, value);
+    }
+
+    /// <summary>O tamanho declarado na consulta (nulo: o real).</summary>
+    public long? TamanhoDeclarado { get; set; }
+
+    /// <summary>O endereço do conteúdo informado na consulta (nulo: o do próprio servidor).</summary>
+    public string? EnderecoDoConteudo { get; set; }
+
+    /// <summary>Roda antes de entregar o conteúdo: serve para segurar o download (o Worker cai com ele em andamento). O cancelamento é o da conexão.</summary>
+    public Func<CancellationToken, Task>? AntesDoConteudo { get; set; }
+
+    public int Consultas => Volatile.Read(ref _consultas);
+
+    public int Downloads => Volatile.Read(ref _downloads);
+
+    public IReadOnlyList<string> CredenciaisDaConsulta => _credenciaisDaConsulta.ToList();
+
+    public IReadOnlyList<string> CredenciaisDoConteudo => _credenciaisDoConteudo.ToList();
+
+    internal void RegistrarConsulta(string credencial)
+    {
+        Interlocked.Increment(ref _consultas);
+        _credenciaisDaConsulta.Enqueue(credencial);
+    }
+
+    internal void RegistrarDownload(string credencial)
+    {
+        Interlocked.Increment(ref _downloads);
+        _credenciaisDoConteudo.Enqueue(credencial);
+    }
+
+    /// <summary>Consome uma das falhas passageiras programadas, se ainda houver.</summary>
+    internal bool ConsumirFalhaPassageira()
+    {
+        while (true)
+        {
+            var atual = Volatile.Read(ref _falhasRestantes);
+            if (atual <= 0)
+            {
+                return false;
+            }
+
+            if (Interlocked.CompareExchange(ref _falhasRestantes, atual - 1, atual) == atual)
+            {
+                return true;
+            }
+        }
+    }
+
+    internal string ResumoInformado() => SemResumo ? string.Empty : Sha256 ?? Convert.ToHexString(SHA256.HashData(Conteudo)).ToLowerInvariant();
+}
+
+/// <summary>
 /// Um "servidor da Graph API" por HTTP de verdade, em porta local aleatória (loopback): recebe o <c>POST /{versão}/{phone_number_id}/messages</c> que o adaptador REAL do WhatsApp faz e responde pelo roteiro.
-/// Nenhuma rede, nenhum token real. Sem roteiro, aceita a mensagem com um identificador novo a cada chamada.
+/// Nenhuma rede, nenhum token real. Sem roteiro, aceita a mensagem com um identificador novo a cada chamada. Também entrega arquivos de mídia (<see cref="RegistrarMidia"/>): a consulta dos dados pelo identificador e o
+/// conteúdo no endereço devolvido, ambos exigindo o token da conta no cabeçalho.
 /// </summary>
 internal sealed class ServidorGraphLoopback : IAsyncDisposable
 {
     private readonly WebApplication _app;
     private readonly ConcurrentQueue<CapturaGraph> _capturas = new();
     private readonly ConcurrentQueue<CapturaGraph> _leituras = new();
+    private readonly ConcurrentDictionary<string, MidiaDaMeta> _midias = new(StringComparer.Ordinal);
     private int _contador;
 
     private ServidorGraphLoopback(WebApplication app)
@@ -96,6 +184,7 @@ internal sealed class ServidorGraphLoopback : IAsyncDisposable
         app.Urls.Add("http://127.0.0.1:0");
         var servidor = new ServidorGraphLoopback(app);
         app.MapPost("/{versao}/{numero}/messages", servidor.AtenderAsync);
+        app.MapGet("/media-content/{id}", servidor.AtenderConteudoDeMidiaAsync);
         app.MapGet("/{versao}/{numero}", servidor.AtenderLeituraAsync);
         await app.StartAsync();
         var endereco = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
@@ -154,8 +243,112 @@ internal sealed class ServidorGraphLoopback : IAsyncDisposable
         await http.Response.WriteAsync(resposta, http.RequestAborted);
     }
 
+    /// <summary>Registra um arquivo que a "Meta" tem: a consulta pelo identificador e o conteúdo passam a ser atendidos. O <paramref name="mime"/> é o tipo informado na consulta e no conteúdo.</summary>
+    public MidiaDaMeta RegistrarMidia(string id, byte[] conteudo, string? mime)
+    {
+        var midia = new MidiaDaMeta { Id = id, Conteudo = conteudo, Mime = mime };
+        _midias[id] = midia;
+        return midia;
+    }
+
+    private static string CredencialDe(HttpContext http)
+    {
+        var autorizacao = http.Request.Headers.Authorization.ToString();
+        return autorizacao.StartsWith("Bearer ", StringComparison.Ordinal) ? autorizacao[7..] : string.Empty;
+    }
+
+    private static async Task ResponderErroAsync(HttpContext http, int status)
+    {
+        http.Response.StatusCode = status;
+        http.Response.ContentType = "application/json";
+        await http.Response.WriteAsync(Erro(status, status == 404 ? 100 : 1).Corpo, http.RequestAborted);
+    }
+
+    /// <summary>A consulta dos dados da mídia: sem o token, 401; mídia desconhecida ou expirada, 404.</summary>
+    private async Task AtenderConsultaDeMidiaAsync(HttpContext http, MidiaDaMeta midia)
+    {
+        var credencial = CredencialDe(http);
+        midia.RegistrarConsulta(credencial);
+        if (credencial.Length == 0)
+        {
+            await ResponderErroAsync(http, 401);
+            return;
+        }
+
+        if (midia.StatusDaConsulta != 200)
+        {
+            await ResponderErroAsync(http, midia.StatusDaConsulta);
+            return;
+        }
+
+        var dados = new JsonObject
+        {
+            ["messaging_product"] = "whatsapp",
+            ["url"] = midia.EnderecoDoConteudo ?? $"{EnderecoBase}media-content/{midia.Id}",
+            ["mime_type"] = midia.Mime,
+            ["file_size"] = (midia.TamanhoDeclarado ?? midia.Conteudo.Length).ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["id"] = midia.Id,
+        };
+        if (!midia.SemResumo)
+        {
+            dados["sha256"] = midia.ResumoInformado();
+        }
+
+        http.Response.StatusCode = 200;
+        http.Response.ContentType = "application/json";
+        await http.Response.WriteAsync(dados.ToJsonString(), http.RequestAborted);
+    }
+
+    /// <summary>O conteúdo da mídia: exige o token da conta no cabeçalho (como a Meta), dá as falhas passageiras programadas e entrega os bytes.</summary>
+    private async Task AtenderConteudoDeMidiaAsync(HttpContext http, string id)
+    {
+        if (!_midias.TryGetValue(id, out var midia))
+        {
+            await ResponderErroAsync(http, 404);
+            return;
+        }
+
+        var credencial = CredencialDe(http);
+        midia.RegistrarDownload(credencial);
+        if (credencial.Length == 0)
+        {
+            await ResponderErroAsync(http, 401);
+            return;
+        }
+
+        if (midia.AntesDoConteudo is { } antes)
+        {
+            await antes(http.RequestAborted);
+        }
+
+        if (midia.ConsumirFalhaPassageira())
+        {
+            await ResponderErroAsync(http, 500);
+            return;
+        }
+
+        if (midia.StatusDoConteudo != 200)
+        {
+            await ResponderErroAsync(http, midia.StatusDoConteudo);
+            return;
+        }
+
+        http.Response.StatusCode = 200;
+        http.Response.ContentType = midia.Mime ?? "application/octet-stream";
+        http.Response.ContentLength = midia.Conteudo.Length;
+        await http.Response.Body.WriteAsync(midia.Conteudo, http.RequestAborted);
+    }
+
     private async Task AtenderLeituraAsync(HttpContext http)
     {
+        // O mesmo caminho serve a consulta de uma mídia (o identificador é o último trecho) e a sonda do número: mídia registrada é mídia.
+        var ultimo = (http.Request.Path.Value ?? string.Empty).Split('/', StringSplitOptions.RemoveEmptyEntries).Last();
+        if (_midias.TryGetValue(ultimo, out var registrada))
+        {
+            await AtenderConsultaDeMidiaAsync(http, registrada);
+            return;
+        }
+
         var autorizacao = http.Request.Headers.Authorization.ToString();
         var captura = new CapturaGraph(
             autorizacao.StartsWith("Bearer ", StringComparison.Ordinal) ? autorizacao[7..] : string.Empty, http.Request.Path.Value ?? string.Empty, string.Empty, "GET", DateTimeOffset.UtcNow);
@@ -290,6 +483,46 @@ internal sealed class EnsaioDeWhatsApp : IAsyncDisposable
                     ["text"] = new JsonObject { ["body"] = texto },
                 }),
             }));
+
+    /// <summary>
+    /// O corpo de um webhook de mensagem de MÍDIA (<c>image</c>, <c>audio</c> ou <c>document</c>), na forma da Cloud API: o objeto do tipo traz o <c>id</c> da mídia, o tipo, o resumo, e conforme o caso a legenda,
+    /// o nome do arquivo e o <c>voice</c>. Nenhum arquivo vai no webhook: o Channels o busca depois, pelo identificador.
+    /// </summary>
+    public byte[] PayloadDeMidia(string tipo, string idDaMensagem, string waId, string nome, string idDaMidia, string mime, string? legenda = null, string? nomeDoArquivo = null, bool? voz = null, string? numero = null)
+    {
+        var midia = new JsonObject { ["mime_type"] = mime, ["sha256"] = "resumo-do-webhook-nao-e-lido", ["id"] = idDaMidia };
+        if (legenda is not null)
+        {
+            midia["caption"] = legenda;
+        }
+
+        if (nomeDoArquivo is not null)
+        {
+            midia["filename"] = nomeDoArquivo;
+        }
+
+        if (voz is { } eVoz)
+        {
+            midia["voice"] = eVoz;
+        }
+
+        return Encoding.UTF8.GetBytes(Envelope(
+            ContaDoProvedor,
+            new JsonObject
+            {
+                ["messaging_product"] = "whatsapp",
+                ["metadata"] = new JsonObject { ["display_phone_number"] = "551130000000", ["phone_number_id"] = numero ?? NumeroDoCanal },
+                ["contacts"] = new JsonArray(new JsonObject { ["profile"] = new JsonObject { ["name"] = nome }, ["wa_id"] = waId }),
+                ["messages"] = new JsonArray(new JsonObject
+                {
+                    ["from"] = waId,
+                    ["id"] = idDaMensagem,
+                    ["timestamp"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(),
+                    ["type"] = tipo,
+                    [tipo] = midia,
+                }),
+            }));
+    }
 
     /// <summary>O corpo de um webhook de status de entrega de uma mensagem de saída.</summary>
     public byte[] PayloadDeStatus(string idDoProvedor, string status, string? dadoOpaco, string waId) =>
