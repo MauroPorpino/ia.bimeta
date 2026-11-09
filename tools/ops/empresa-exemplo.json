@@ -28,7 +28,7 @@
     "apiKeyEnv": "EXEMPLO_CHAVE_IA"          // a chave BYOK do provedor; na demonstracao com a OpenAI simulada, qualquer texto serve
   },
   "whatsApp": {
-    "mode": "simulated"                      // "simulated": conta sintetica para a Meta simulada local. Para a Meta real, veja "real" abaixo
+    "mode": "simulated",                     // "simulated": conta sintetica para a Meta simulada local. Para a Meta real, veja "real" abaixo
     // "mode": "real",
     // "accountName": "Conta do Laboratorio",
     // "wabaId": "COLE_O_WABA_ID",
@@ -37,6 +37,31 @@
     // "appSecretEnv": "EXEMPLO_WA_APP_SECRET",
     // "accessTokenEnv": "EXEMPLO_WA_ACCESS_TOKEN",
     // "verifyTokenEnv": "EXEMPLO_WA_VERIFY_TOKEN"   // opcional: sem ele, e gerado e mostrado uma vez
+
+    // Os modelos de mensagem (templates) JA aprovados na Meta que o atendente pode enviar, principalmente fora da janela de 24 horas.
+    // Cole cada modelo como a Graph API o devolve (GET /{waba-id}/message_templates). O comando so ASSOCIA os modelos a conta: nao cria nem aprova nada na Meta.
+    // Repetir o comando atualiza o que a Meta mudou. Modelo com cabecalho de imagem/video/documento, botao de copiar codigo ou categoria de autenticacao e recusado com o motivo.
+    "templates": [
+      {
+        "name": "resultado_disponivel",
+        "language": "pt_BR",
+        "category": "UTILITY",
+        "status": "APPROVED",
+        "components": [
+          { "type": "BODY", "text": "Ola {{1}}, o resultado do seu exame {{2}} ja esta disponivel. Qualquer duvida, e so responder esta mensagem.", "example": { "body_text": [ [ "Maria", "hemograma" ] ] } },
+          { "type": "FOOTER", "text": "Laboratorio Exemplo" }
+        ]
+      },
+      {
+        "name": "retomar_atendimento",
+        "language": "pt_BR",
+        "category": "UTILITY",
+        "status": "APPROVED",
+        "components": [
+          { "type": "BODY", "text": "Ola! Estamos retomando o seu atendimento no Laboratorio Exemplo. Pode continuar por aqui." }
+        ]
+      }
+    ]
   },
   "attendants": [
     { "email": "ana@laboratorio-exemplo.local", "displayName": "Ana Atendente", "passwordEnv": "EXEMPLO_SENHA_ANA" },

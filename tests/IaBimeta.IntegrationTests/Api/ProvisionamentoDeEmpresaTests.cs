@@ -115,6 +115,59 @@ public sealed class ProvisionamentoDeEmpresaTests(PostgresFixture banco)
     }
 
     [Fact]
+    public async Task Os_modelos_de_mensagem_aprovados_sao_associados_a_conta_da_empresa_certa_repetir_atualiza_e_modelo_nao_suportado_e_recusado_com_o_motivo()
+    {
+        await using var e = await IniciarAsync("provmodelos");
+        var slug = NovoSlug();
+        var modelos = """
+            "templates": [
+              { "name": "resultado_disponivel", "language": "pt_BR", "category": "UTILITY", "status": "APPROVED",
+                "components": [ { "type": "BODY", "text": "Olá {{1}}, o exame {{2}} está pronto." } ] },
+              { "name": "com_imagem", "language": "pt_BR", "category": "MARKETING", "status": "APPROVED",
+                "components": [ { "type": "HEADER", "format": "IMAGE" }, { "type": "BODY", "text": "Oi" } ] }
+            ]
+            """;
+
+        var primeira = await ProvisionarAsync(e, Especificacao(slug, whatsApp: "{ \"mode\": \"simulated\", " + modelos + " }"));
+
+        Assert.True(primeira.Succeeded, string.Join(" | ", primeira.Steps.Select(s => $"{s.Name}: {s.Outcome} {s.Detail}")));
+        var etapa = primeira.Steps.Single(s => s.Name == "Modelos de mensagem");
+        Assert.Equal(StepOutcome.Created, etapa.Outcome);
+        Assert.Contains("1 novo(s)", etapa.Detail);
+        Assert.Contains("1 aprovado(s)", etapa.Detail);
+        Assert.Contains("IMAGE", etapa.Detail); // o recusado, com o motivo
+
+        // Os modelos estão na conta DESTA empresa (e só nela): o administrador da empresa os vê pela API.
+        var admin = await LoginAsync(e, slug, $"admin@{slug}.local", SenhaDoAdministrador);
+        var lista = (await e.Ia.Api.LerAsync<JsonNode>(admin, $"/channels/accounts/{primeira.ChannelAccountId}/templates")).AsArray();
+        Assert.Equal("resultado_disponivel", Assert.Single(lista)!["name"]!.GetValue<string>());
+        Assert.Empty((await e.Ia.Api.LerAsync<JsonNode>(await e.TokenDeAsync(IaBimeta.Identity.Domain.Role.OrganizationAdmin), $"/channels/accounts/{e.ContaId}/templates")).AsArray());
+
+        // Repetir não muda nada; o texto novo na Meta atualiza o mesmo modelo.
+        var segunda = await ProvisionarAsync(e, Especificacao(slug, whatsApp: "{ \"mode\": \"simulated\", " + modelos + " }"));
+        Assert.Equal(StepOutcome.Exists, segunda.Steps.Single(s => s.Name == "Modelos de mensagem").Outcome);
+        var terceira = await ProvisionarAsync(e, Especificacao(slug, whatsApp: "{ \"mode\": \"simulated\", " + modelos.Replace("está pronto", "já está disponível") + " }"));
+        Assert.Equal(StepOutcome.Updated, terceira.Steps.Single(s => s.Name == "Modelos de mensagem").Outcome);
+
+        // Se NENHUM modelo é aceito, a etapa falha com o motivo e o relatório diz.
+        var slugRuim = NovoSlug();
+        var ruim = await ProvisionarAsync(e, Especificacao(slugRuim, whatsApp: "{ \"mode\": \"simulated\", \"templates\": [ { \"name\": \"x\", \"language\": \"pt_BR\", \"category\": \"AUTHENTICATION\", \"status\": \"APPROVED\", \"components\": [ { \"type\": \"BODY\", \"text\": \"Código {{1}}\" } ] } ] }"));
+        Assert.False(ruim.Succeeded);
+        Assert.Contains("autenticação", ruim.Steps.Single(s => s.Name == "Modelos de mensagem").Detail);
+    }
+
+    [Fact]
+    public void O_arquivo_da_empresa_recusa_modelo_que_nao_e_objeto_e_lista_grande_demais()
+    {
+        var naoObjeto = Assert.Throws<ProvisioningSpecException>(() => Especificacao("abc-modelo", whatsApp: """{ "mode": "simulated", "templates": [ "texto" ] }"""));
+        Assert.Contains("whatsApp.templates[0]", naoObjeto.Message);
+
+        var demais = string.Join(",", Enumerable.Repeat("""{ "name": "a" }""", IaBimeta.Channels.Application.ChannelTemplateService.MaxTemplatesPerRegistration + 1));
+        var grande = Assert.Throws<ProvisioningSpecException>(() => Especificacao("abc-modelo", whatsApp: "{ \"mode\": \"simulated\", \"templates\": [" + demais + "] }"));
+        Assert.Contains("no máximo", grande.Message);
+    }
+
+    [Fact]
     public async Task A_empresa_provisionada_percorre_o_fluxo_completo_e_nao_enxerga_nem_e_vista_pela_outra()
     {
         await using var e = await IniciarAsync("provfluxo");
@@ -284,6 +337,13 @@ public sealed class ProvisionamentoDeEmpresaTests(PostgresFixture banco)
         Assert.Equal(WhatsAppMode.Simulated, spec.WhatsApp!.Mode);
         Assert.Equal(2, spec.Attendants.Count);
         Assert.Equal(2, spec.Ai.Faq.Count);
+        Assert.Equal(2, spec.WhatsApp.Templates.Count);
+
+        // Os modelos do exemplo passam no leitor do cadastro de verdade (nenhum é recusado).
+        foreach (var modelo in spec.WhatsApp.Templates)
+        {
+            Assert.Equal(IaBimeta.Channels.Contracts.TemplateStatus.Approved, IaBimeta.Channels.Application.TemplateDefinitionParser.Parse(modelo).Status);
+        }
 
         var saida = new StringWriter();
         Assert.Equal(0, await ProvisionCommand.RunAsync(new[] { "--file", exemplo, "--validate-only" }, saida));

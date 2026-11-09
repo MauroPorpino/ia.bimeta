@@ -122,6 +122,19 @@ internal sealed class ProvisioningSpec
             VerificarNomeDeVariavel(erros, wa.AppSecretEnv, "whatsApp.appSecretEnv");
             VerificarNomeDeVariavel(erros, wa.AccessTokenEnv, "whatsApp.accessTokenEnv");
             VerificarNomeDeVariavel(erros, wa.VerifyTokenEnv, "whatsApp.verifyTokenEnv");
+
+            if (wa.Templates.Count > IaBimeta.Channels.Application.ChannelTemplateService.MaxTemplatesPerRegistration)
+            {
+                erros.Add($"whatsApp.templates aceita no máximo {IaBimeta.Channels.Application.ChannelTemplateService.MaxTemplatesPerRegistration} modelos por execução.");
+            }
+
+            for (var i = 0; i < wa.Templates.Count; i++)
+            {
+                if (wa.Templates[i].ValueKind != JsonValueKind.Object)
+                {
+                    erros.Add($"whatsApp.templates[{i}] deve ser o modelo como a Meta o devolve (um objeto JSON).");
+                }
+            }
         }
 
         if (Attendants.Count > MaxAttendants)
@@ -249,6 +262,13 @@ internal sealed class WhatsAppSpec
 
     /// <summary>O token de verificação do webhook. Sem ele, no modo real, é gerado e mostrado uma única vez (para colar no painel da Meta).</summary>
     public string? VerifyTokenEnv { get; set; }
+
+    /// <summary>
+    /// Os modelos de mensagem (templates) JÁ aprovados na Meta que esta conta pode enviar (ADR 0027), cada um como a Graph API o devolve (<c>name</c>, <c>language</c>, <c>category</c>, <c>status</c>,
+    /// <c>components</c>). O comando só os ASSOCIA à conta (não cria nem aprova nada na Meta); repetir o comando atualiza o que mudou. Um modelo que o MVP não sabe enviar (cabeçalho de mídia, copiar código,
+    /// autenticação) é recusado com o motivo, sem impedir os demais.
+    /// </summary>
+    public List<JsonElement> Templates { get; set; } = new();
 }
 
 internal sealed class AttendantSpec

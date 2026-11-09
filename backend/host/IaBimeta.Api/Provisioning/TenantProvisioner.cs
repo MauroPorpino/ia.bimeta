@@ -137,6 +137,10 @@ internal sealed class TenantProvisioner
             if (spec.WhatsApp is { } whatsApp)
             {
                 await RunAsync(report, "WhatsApp", () => EnsureWhatsAppAsync(sp, organizacao.Id, unidade.Id, spec, whatsApp, report, cancellationToken));
+                if (whatsApp.Templates.Count > 0)
+                {
+                    await RunAsync(report, "Modelos de mensagem", () => EnsureTemplatesAsync(sp, whatsApp, report, cancellationToken));
+                }
             }
             else
             {
@@ -386,6 +390,25 @@ internal sealed class TenantProvisioner
         }
 
         report.Steps.Add(new ProvisioningStep("IA do tenant", igual ? StepOutcome.Exists : StepOutcome.Created, $"{provedor}/{modelo}; {credencial}."));
+    }
+
+    // Modelos de mensagem (templates) aprovados na Meta
+
+    private static async Task EnsureTemplatesAsync(IServiceProvider sp, WhatsAppSpec wa, ProvisioningReport report, CancellationToken ct)
+    {
+        var contaId = report.ChannelAccountId ?? throw new InvalidOperationException("A conta de WhatsApp ainda não foi cadastrada.");
+        var registro = await sp.GetRequiredService<ChannelTemplateService>().RegisterAsync(contaId, System.Text.Json.JsonSerializer.SerializeToElement(wa.Templates), ct);
+
+        var detalhe = $"{registro.Created.Count} novo(s), {registro.Updated.Count} atualizado(s), {registro.Unchanged.Count} sem mudança.";
+        var aprovados = registro.Created.Concat(registro.Updated).Concat(registro.Unchanged).Count(m => m.Status == TemplateStatus.Approved);
+        detalhe += $" {aprovados} aprovado(s) e enviável(is) pelo atendente.";
+        if (registro.Rejected.Count > 0)
+        {
+            detalhe += $" Recusado(s): {string.Join(" | ", registro.Rejected)}";
+        }
+
+        report.Steps.Add(new ProvisioningStep(
+            "Modelos de mensagem", registro.Created.Count > 0 ? StepOutcome.Created : registro.Updated.Count > 0 ? StepOutcome.Updated : StepOutcome.Exists, detalhe));
     }
 
     // WhatsApp
