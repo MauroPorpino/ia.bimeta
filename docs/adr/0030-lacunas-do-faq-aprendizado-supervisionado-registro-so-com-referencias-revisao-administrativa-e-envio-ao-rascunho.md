@@ -1,6 +1,6 @@
 # ADR 0030 — Lacunas do FAQ: aprendizado supervisionado, com registro só de referências, revisão administrativa e envio ao rascunho
 
-- **Status:** **Proposto para ratificação.** Implementado em 09/11/2026 sob a autorização do decisor ("Pacote B: aprendizado supervisionado da base de conhecimento, sem treinamento automático de modelos"), depois da ratificação do ADR 0029. Nenhuma chamada real à Meta ou à OpenAI; a migração só **cria duas tabelas** (backup do banco de teste feito antes); `main` intocada; sem push.
+- **Status:** **Aceito para o MVP (ratificado pelo decisor em 09/11/2026), depois da homologação local pela interface (seção "Homologação local pela interface").** Implementado em 09/11/2026 sob a autorização do decisor ("Pacote B: aprendizado supervisionado da base de conhecimento, sem treinamento automático de modelos"), depois da ratificação do ADR 0029. Nenhuma chamada real à Meta ou à OpenAI; a migração só **cria duas tabelas** (backup do banco de teste feito antes); `main` intocada; sem push.
 - **Data:** 09/11/2026
 - **Decisor:** Mauro Porpino
 - **Referências:** ADR 0029 (resposta direta do FAQ; `FaqMatcher`, aliases, `AutoReply`, idioma), 0017 (seção F: definição do agente com rascunho e publicação; a `Presentation` do Agents estava prevista), 0007 e `CONVERSATION-LIFECYCLE.md` (turno e cercas), 0025 (retenção) e `RetentionInventory`, 0026 (`status`), 0024 (`provision`), `docs/architecture/BOUNDARIES.md` (nenhum texto normativo alterado).
@@ -101,6 +101,16 @@ Só **`TenantSettingsManage`** (o administrador de escopo do tenant); o tenant e
   No mesmo teste: a lista só aparece para o administrador (atendente 403, sem token 401); a lacuna foi vista pelo `status` como "1 lacuna(s) do FAQ aberta(s)"; antes de publicar a versão publicada continuou a 1 com uma entrada; depois, o `status` contou **2 turnos respondidos direto pelo FAQ**.
 - **Banco de teste:** backup (`tools\ops\Backup-Banco.ps1 -Origem Teste`) antes da migração; a migração só cria `agents.knowledge_gaps` e `agents.knowledge_gap_occurrences`; nenhum dado foi alterado nem apagado; `iabimeta_dev` não foi tocado.
 
+## Homologação local pela interface (09/11/2026)
+
+Procedimento e resultado completos em `docs/operations/HOMOLOGACAO-DO-CONHECIMENTO.md`. Em resumo: **PostgreSQL 17 descartável** (porta 5441), **Api e Worker reais**, a OpenAI e a Meta **simuladas**, a interface React em `localhost:5173` num navegador, e **nenhuma chamada real**. A chave do hash foi configurada **só no Worker**, por variável de ambiente, fora do repositório (o log de partida do Worker confirmou "Registro de lacunas ... LIGADO").
+
+- **Ciclo executado pela interface:** pergunta desconhecida (a OpenAI simulada transferiu, 1 requisição) → lacuna registrada (só hash, `kind = NoMatch`) → a atendente respondeu → o administrador abriu **Conhecimento**, leu a pergunta e a **sugestão** (resposta vazia até "Usar esta resposta"; `autoReply` desmarcado), editou pergunta, aliases e resposta, ligou `autoReply` de propósito e **enviou ao rascunho** ("Nada foi publicado": v1 publicada, v2 rascunho) → um 2º cliente ainda foi à IA (2 requisições) → **Publicar rascunho**, Cancelar (nada mudou) e **Confirmar** (v2) → dois clientes (outra caixa e pontuação, e um alias) receberam a resposta revisada, **sem nenhuma requisição nova à OpenAI simulada**. O `status` contou 2 turnos respondidos direto.
+- **Permissões, erros e navegação:** sem token 401; a atendente 403 em toda rota do Conhecimento (e nem vê a área); o administrador 200. Conflito do FAQ (pergunta já existente) com mensagem clara e sem perder o digitado; resposta vazia; Descartar com confirmação; Api parado (faixa de reconexão, "API indisponível", "Tentar novamente" e recuperação); alternância de áreas, filtros e recarga mantendo a sessão.
+- **Dado pessoal:** consulta em todas as linhas das lacunas, das ocorrências e das definições: nenhum nome, telefone ou texto original do cliente. O FAQ só recebeu o que o administrador digitou.
+- **Defeito real encontrado e corrigido:** a pergunta vem pré-preenchida com a mensagem do cliente (ponto de partida editável, por desenho), e a tela **não avisava** que ela pode ter nome, telefone ou documento: enviar sem editar levaria o dado ao FAQ. Agora o formulário traz o aviso para removê-lo antes de enviar (conferido ao vivo com um cliente que escreveu nome e telefone; teste de componente novo; frontend 298 testes). Nenhum defeito de backend apareceu.
+- **Novo na árvore:** `tools/dev/Send-MensagemParaEmpresa.ps1` (faz o papel da Meta para uma empresa provisionada em modo simulado, fora do ambiente Development).
+
 ## Limites e riscos aceitos
 
 - **Igualdade exata.** "Qual o horário" e "qual o horário de vocês" são lacunas **diferentes**: sem agrupamento por similaridade (mesmo princípio do ADR 0029). A lista pode ter variações da mesma dúvida; o administrador as une cadastrando aliases.
@@ -111,7 +121,7 @@ Só **`TenantSettingsManage`** (o administrador de escopo do tenant); o tenant e
 - **A contagem é das ocorrências retidas** (derivada): uma futura retenção que apague ocorrências a reduz.
 - **Sem rota** para criar a primeira definição (nasce no `provision`), remover entrada do rascunho ou reabrir lacuna descartada; correção pelo arquivo da empresa. Uma lacuna promovida e depois perdida (rascunho substituído por fora) continua "enviada".
 - **Trocar a chave** do hash separa os grupos; o Api não precisa dela (a revisão lê por identificador).
-- **Interface verificada** por testes de componente (Vitest) e por uma conferência visual do agente com a API simulada em servidor local, **não** contra o Api real em navegador; o contrato HTTP é o que os testes de integração provam (formato e códigos).
+- **Interface** verificada por testes de componente (Vitest) e, na homologação de 09/11/2026, num navegador contra o Api e o Worker reais (seção acima); o contrato HTTP também é provado pelos testes de integração. Uma pergunta pré-preenchida pode conter dado pessoal do cliente: a tela avisa, e quem decide o que vai ao FAQ é o administrador.
 
 ## Plano de reversão
 
@@ -121,7 +131,5 @@ Só **`TenantSettingsManage`** (o administrador de escopo do tenant); o tenant e
 
 ## Pendências e decisões abertas
 
-- Ratificar este ADR.
 - **Homologação:** configurar a chave do hash no Worker de cada ambiente; revisar com uma empresa real a lista e o texto dos avisos; decidir o prazo de guarda das ocorrências (`RETENCAO-DE-DADOS.md`, item 7).
-- Conferir a interface no navegador contra o Api real (esta versão a provou por testes de componente e integração).
 - Evoluções fora do pacote: criar a primeira definição e remover entrada do rascunho pela API; reabrir lacuna; agrupar variações por **aliases sugeridos** (nunca por similaridade automática); expurgo por prazo; o módulo Knowledge e a busca, quando a economia medida os justificar.

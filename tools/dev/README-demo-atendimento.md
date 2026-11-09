@@ -11,6 +11,7 @@ Mostra, na sua máquina, o fluxo completo do MVP: **cliente no WhatsApp → Rece
 | Api (5155) e Worker | os de verdade, com o perfil `simulador-ia` (tenant `demo-ia`, IA e canal de demonstração preparados) |
 | `frontend/` (5173) | a interface do atendente |
 | `Send-MensagemWhatsApp.ps1` | faz o papel da Meta: envia ao Receiver um webhook **assinado** (HMAC-SHA256 com o App Secret) |
+| `Send-MensagemParaEmpresa.ps1` | o mesmo papel da Meta para uma empresa colocada em funcionamento pelo `provision` (conta simulada), com o Api fora de Development; veja `docs/operations/HOMOLOGACAO-DO-CONHECIMENTO.md` |
 
 ## Antes (uma vez), no seu terminal
 

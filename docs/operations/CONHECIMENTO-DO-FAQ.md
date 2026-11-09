@@ -1,5 +1,7 @@
 # Aprender com as perguntas dos clientes: lacunas do FAQ (ADR 0030)
 
+Roteiro de homologação pela interface (com o resultado de 09/11/2026): `HOMOLOGACAO-DO-CONHECIMENTO.md`.
+
 Este guia explica como a empresa descobre **o que os clientes perguntam e o FAQ não responde direto**, revisa isso e transforma em entrada de FAQ **sem treinar modelo algum e sem publicar nada sozinho**. A resposta direta, que usa o FAQ sem chamar a IA, está em `NOVA-EMPRESA.md` ("FAQ com resposta direta", ADR 0029). Quem muda o FAQ é sempre uma pessoa, e quem publica é sempre uma pessoa.
 
 ## 1. O que acontece
@@ -46,7 +48,7 @@ Quem revisa é quem tem a permissão de **configurar a empresa** (`TenantSetting
 - **Revisão da lacuna:**
   - A **pergunta original** aparece se a mensagem ainda existe e **você tem permissão de ler a conversa**. Se foi removida, ou você não pode vê-la, aparece o aviso e você **escreve a pergunta**.
   - A **resposta de um atendente**, se houver, aparece como **sugestão**: "Resposta de um atendente: confira antes de usar; não é usada automaticamente". Se o cliente mandou outras mensagens antes dela, há um aviso a mais: ela pode ser de outra pergunta. **Nada é copiado sozinho:** o botão "Usar esta resposta" a leva ao campo, onde você a edita.
-  - Edite **pergunta**, **aliases** (um por linha, até 10) e **resposta**. A caixa **autoReply vem desmarcada**: só ligue em resposta que se sustenta sozinha (sem preço, agenda, cobertura, orientação clínica nem referência ao que foi dito antes). **Não copie dados pessoais do cliente** (nome, telefone, exame de uma pessoa) para a resposta do FAQ.
+  - Edite **pergunta**, **aliases** (um por linha, até 10) e **resposta**. A caixa **autoReply vem desmarcada**: só ligue em resposta que se sustenta sozinha (sem preço, agenda, cobertura, orientação clínica nem referência ao que foi dito antes). **Não copie dados pessoais do cliente** (nome, telefone, exame de uma pessoa) para o FAQ: a pergunta já vem preenchida com o texto do cliente, e a tela avisa, ao lado do campo, para removê-los antes de enviar.
   - **Enviar ao rascunho:** cria o rascunho a partir da versão publicada (ou usa o que já existe) e acrescenta a entrada. Recusa uma pergunta ou alias **igual** a qualquer um já existente no FAQ (duas respostas para a mesma pergunta nunca dariam resposta direta). **Descartar:** a decisão vale para aquela pergunta (as próximas vezes só contam).
 - **Rascunho da definição:** mostra o rascunho ao lado da versão publicada (entradas novas, alteradas e com resposta direta) e o botão **Publicar rascunho**, com confirmação. Publicar cria uma versão nova e aposenta a anterior; é auditado.
 
