@@ -163,6 +163,10 @@ Abra `http://localhost:5173` e entre com o atendente do passo 4.2.
 
 **Critério de sucesso:** os 6 passos acima, sem 401 no Receiver, sem conta pausada e sem falhas no diagnóstico.
 
+### 4.8 Modelo de mensagem (só com um modelo aprovado na sua conta de teste)
+
+Opcional e **independente** dos passos acima; exige um modelo **realmente aprovado** na Meta (o número de teste não tem os do seu negócio). Siga o checklist da seção 6 de `docs/operations/MODELOS-DE-MENSAGEM.md`: associe o JSON do modelo à conta (`POST /channels/accounts/{id}/templates`), deixe o cliente **sem escrever por mais de 24 horas** (ou use um número cuja última mensagem seja antiga), assuma a conversa, envie o modelo e confira no celular e no estado de entrega. Nenhum passo dos itens 4.1 a 4.7 depende deste.
+
 ## 5. Se algo falhar
 
 | Sintoma | Causa provável | O que fazer |
@@ -171,7 +175,7 @@ Abra `http://localhost:5173` e entre com o atendente do passo 4.2.
 | Mensagem do celular não chega ao ia.bimeta | `messages` não assinado; app em modo Dev e número não habilitado; callback antigo | confira o 4.5; veja **Receiver** no log do Api (401 = App Secret; 404 = identificador do webhook) |
 | Chega e a IA não responde | Worker parado; chave fictícia não cadastrada (`Set-ChaveDaOpenAI.ps1`); simulador parado | veja o terminal do Worker; `Get-DiagnosticoDeEnvio.ps1` |
 | Resposta não chega ao celular, conta **pausada** | token temporário **expirou** (190) ou sem permissão | gere novo token e rode `Conectar-ContaWhatsApp.ps1 ... -RegravarTokenDeAcesso`; retome: `POST /channels/accounts/{id}/sending/resume` (exige a prova do provedor) |
-| `window-closed` (131047) | mais de 24 h desde a última mensagem do cliente | mande uma nova mensagem do celular |
+| `window-closed` (131047) | mais de 24 h desde a última mensagem do cliente (a interface já bloqueia o texto livre fora da janela; isto só aparece se o relógio da Meta divergir) | envie um **modelo aprovado** (`docs/operations/MODELOS-DE-MENSAGEM.md`) ou mande uma nova mensagem do celular |
 | Falha `send-unknown` | tempo esgotado/5xx: a Meta pode ter recebido | confira no celular; **nunca reenvie às cegas** |
 
 ## 6. Encerrar e limpar

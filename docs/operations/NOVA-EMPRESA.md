@@ -27,7 +27,7 @@ Copie `tools\ops\empresa-exemplo.json` e ajuste (o arquivo aceita comentários `
 | `organization` | nome da organização e da unidade (matriz) |
 | `queue` | a fila de atendimento humano (a regra que manda toda conversa a ela é criada junto) |
 | `ai` | `providerId`, `modelId`, `instructions`, `handoffNotice`, `faq` (até 50 perguntas) e `apiKeyEnv` (a chave BYOK) |
-| `whatsApp` | `mode`: `simulated` (conta sintética, para a Meta simulada) ou `real` (veja a seção 5) |
+| `whatsApp` | `mode`: `simulated` (conta sintética, para a Meta simulada) ou `real` (veja a seção 5); `templates`: os **modelos de mensagem já aprovados na Meta** que o atendente pode enviar fora da janela de 24 horas, cada um como a Graph API o devolve (só **associa** os modelos à conta; repetir atualiza; o que o MVP não suporta é recusado com o motivo: `docs/operations/MODELOS-DE-MENSAGEM.md`) |
 | `attendants` | lista de atendentes (e-mail, nome, `passwordEnv`), todos colocados na fila |
 
 ## 3. Conferir e executar
