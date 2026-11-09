@@ -240,6 +240,58 @@ public static class ContactCenterEndpoints
         itens.MapPost("/{id:guid}/reply-template", async (Guid id, ReplyWithTemplateRequest pedido, QueueItemService servico, CancellationToken ct) =>
             ReplyResult(await servico.ReplyWithTemplateAsync(id, pedido.RequestId, pedido.TemplateId, pedido.Parameters, ct)));
 
+        // Responder com um ARQUIVO (ADR 0031): imagem, áudio ou documento, com legenda quando o tipo a aceita. Formulário multipart com o requestId, o arquivo e a legenda; o Conversations valida e guarda. O
+        // mesmo caminho da resposta de texto: só o responsável, janela de 24 horas aberta, requestId como chave de efeito, e a mensagem vai pelo outbox e pelo Sender de sempre.
+        itens.MapPost("/{id:guid}/reply-media", async (Guid id, HttpContext http, QueueItemService servico, CancellationToken ct) =>
+        {
+            if (!http.Request.HasFormContentType)
+            {
+                throw new ContactCenterValidationException("Envie o arquivo como formulário (multipart/form-data).");
+            }
+
+            // O pedido de envio é limitado ANTES de ler: nada maior que o teto é aceito nem escrito em disco.
+            if (http.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } limite)
+            {
+                limite.MaxRequestBodySize = MaxReplyMediaRequestBytes + (1024 * 1024);
+            }
+
+            IFormCollection formulario;
+            try
+            {
+                formulario = await http.Request.ReadFormAsync(ct);
+            }
+            catch (Exception ex) when (ex is InvalidDataException or IOException or Microsoft.AspNetCore.Http.BadHttpRequestException)
+            {
+                return Results.Problem(title: "Arquivo grande demais", detail: "O arquivo passa do tamanho máximo aceito para envio.", statusCode: StatusCodes.Status413PayloadTooLarge);
+            }
+
+            if (!Guid.TryParse(formulario["requestId"], out var requestId) || requestId == Guid.Empty)
+            {
+                throw new ContactCenterValidationException("O pedido de envio precisa de um identificador (requestId).");
+            }
+
+            if (formulario.Files.Count != 1 || formulario.Files[0] is not { Length: > 0 } arquivo)
+            {
+                throw new ContactCenterValidationException("Envie exatamente um arquivo, que não esteja vazio.");
+            }
+
+            if (arquivo.Length > MaxReplyMediaRequestBytes)
+            {
+                return Results.Problem(title: "Arquivo grande demais", detail: "O arquivo passa do tamanho máximo aceito para envio.", statusCode: StatusCodes.Status413PayloadTooLarge);
+            }
+
+            var conteudo = new byte[arquivo.Length];
+            await using (var fluxo = arquivo.OpenReadStream())
+            {
+                await fluxo.ReadExactlyAsync(conteudo, ct);
+            }
+
+            var legenda = formulario["caption"].ToString();
+            var resultado = await servico.ReplyWithMediaAsync(
+                id, requestId, new OutboundAttachment(arquivo.FileName, arquivo.ContentType, conteudo, string.IsNullOrWhiteSpace(legenda) ? null : legenda), ct);
+            return MediaReplyResult(resultado);
+        });
+
         itens.MapPost("/{id:guid}/close", async (Guid id, CloseItemRequest pedido, QueueItemService servico, CancellationToken ct) =>
         {
             var resultado = await servico.CloseAsync(id, pedido.RequestId, pedido.ReasonCode, ct);
@@ -266,6 +318,40 @@ public static class ContactCenterEndpoints
         RegisterHumanReplyOutcome.SessionNotFound => Results.NotFound(),
         _ => Results.Problem(title: "O atendimento mudou", detail: $"A resposta não foi enviada ({resultado.Outcome}). Releia a conversa e tente de novo.", statusCode: StatusCodes.Status409Conflict),
     };
+
+    /// <summary>
+    /// O teto do PEDIDO de envio de arquivo (o formulário inteiro): nada maior é lido. O limite de cada tipo (imagem, áudio, documento) é do Conversations (<c>Conversations:Attachments</c>, padrão 5, 16 e 20 MB) e a
+    /// recusa por tamanho volta como <c>MediaRejected</c>/<c>too-large</c>. Subir o limite de documento acima deste teto exige subir este também.
+    /// </summary>
+    public const long MaxReplyMediaRequestBytes = 25L * 1024 * 1024;
+
+    // A recusa do arquivo (o motivo é um código fixo do Conversations) vira 422 com o motivo e uma mensagem clara; as demais saídas são as da resposta de texto.
+    private static IResult MediaReplyResult(RegisterHumanReplyResult resultado)
+    {
+        if (resultado.Outcome != RegisterHumanReplyOutcome.ContentRejected || resultado.RejectionCode is not { } motivo)
+        {
+            return ReplyResult(resultado);
+        }
+
+        var mensagem = motivo switch
+        {
+            "empty" => "O arquivo está vazio.",
+            "too-large" => "O arquivo é maior que o limite para este tipo (no padrão: imagem 5 MB, áudio 16 MB e documento 20 MB).",
+            "type-not-allowed" => "Este tipo de arquivo não pode ser enviado. Use imagem (JPEG ou PNG), áudio (AAC, AMR, MP3, M4A ou Ogg Opus) ou documento (PDF, TXT, Word, Excel ou PowerPoint).",
+            "content-mismatch" => "O conteúdo do arquivo não corresponde ao tipo ou à extensão informados.",
+            "audio-codec-unsupported" => "O áudio Ogg precisa usar a codificação Opus, em mono.",
+            "caption-not-supported" => "Áudio não aceita legenda.",
+            "caption-too-long" => "A legenda passa de 1024 caracteres.",
+            "malware" => "O arquivo foi bloqueado pela verificação de segurança.",
+            _ => "O arquivo não é aceito.",
+        };
+
+        return Results.Problem(
+            title: "Arquivo recusado",
+            detail: mensagem,
+            statusCode: StatusCodes.Status422UnprocessableEntity,
+            extensions: new Dictionary<string, object?> { ["code"] = "MediaRejected", ["reason"] = motivo });
+    }
 
     // 202 enquanto o Conversations não confirmou: a intenção está registrada e repetir o pedido (mesmo requestId) a conclui.
     private static IResult Resultado(QueueItemOperationResult resultado) =>

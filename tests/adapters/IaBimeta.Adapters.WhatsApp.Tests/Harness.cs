@@ -7,7 +7,7 @@ using IaBimeta.Channels.Contracts.Providers;
 namespace IaBimeta.Adapters.WhatsApp.Testing;
 
 /// <summary>O que o servidor simulado recebeu de UMA requisição (o conteúdo é lido na hora: o adaptador o descarta depois).</summary>
-internal sealed record Captured(HttpMethod Method, Uri Uri, string? Authorization, string Accept, string? ContentType, string Body)
+internal sealed record Captured(HttpMethod Method, Uri Uri, string? Authorization, string Accept, string? ContentType, string Body, byte[]? Raw = null)
 {
     public JsonNode Json => JsonNode.Parse(Body)!;
 }
@@ -39,7 +39,8 @@ internal sealed class FakeHandler : HttpMessageHandler
             request.Headers.Authorization?.ToString(),
             string.Join(",", request.Headers.Accept.Select(a => a.MediaType)),
             request.Content?.Headers.ContentType?.ToString(),
-            request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(cancellationToken));
+            request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(cancellationToken),
+            request.Content is null ? null : await request.Content.ReadAsByteArrayAsync(cancellationToken));
         lock (_gate)
         {
             _requests.Add(capturada);

@@ -48,6 +48,7 @@ public sealed class OutboundMessageRequestedHandler : EventHandlerBase<OutboundM
     public const int MaxSendAttempts = 3;
 
     private readonly IOutboundDispatchQueries _dispatch;
+    private readonly IOutboundAttachmentReader _files;
     private readonly IConversationIngestion _ingestion;
     private readonly IChannelRepository _repository;
     private readonly ISecretProtector _protector;
@@ -60,6 +61,7 @@ public sealed class OutboundMessageRequestedHandler : EventHandlerBase<OutboundM
 
     public OutboundMessageRequestedHandler(
         IOutboundDispatchQueries dispatch,
+        IOutboundAttachmentReader files,
         IConversationIngestion ingestion,
         IChannelRepository repository,
         ISecretProtector protector,
@@ -72,6 +74,7 @@ public sealed class OutboundMessageRequestedHandler : EventHandlerBase<OutboundM
     {
         _audit = audit;
         _dispatch = dispatch;
+        _files = files;
         _ingestion = ingestion;
         _repository = repository;
         _protector = protector;
@@ -135,9 +138,16 @@ public sealed class OutboundMessageRequestedHandler : EventHandlerBase<OutboundM
         }
 
         var visao = await _dispatch.GetAsync(payload.MessageId, cancellationToken);
-        if (visao is null || string.IsNullOrWhiteSpace(visao.Text))
+        if (visao is null)
         {
             return await FailAsync(mensagem, "message-not-found", cancellationToken);
+        }
+
+        // A mensagem de ARQUIVO (ADR 0031) vai pelo mesmo caminho: sem o arquivo (o prazo de guarda venceu) ela falha de forma visível, sem gastar ficha, tentativa nem chamada; a de texto precisa do texto.
+        var arquivo = visao.Kind == MessageKind.Text ? null : visao.Attachment;
+        if (visao.Kind == MessageKind.Text ? string.IsNullOrWhiteSpace(visao.Text) : arquivo is null)
+        {
+            return await FailAsync(mensagem, visao.Kind == MessageKind.Text ? "message-not-found" : "attachment-unavailable", cancellationToken);
         }
 
         // Só o que o Conversations liberou e ainda não saiu: uma mensagem já enviada (ou com falha) não é enviada de novo.
@@ -180,6 +190,17 @@ public sealed class OutboundMessageRequestedHandler : EventHandlerBase<OutboundM
             return await FailAsync(mensagem, "account-credentials-missing", cancellationToken);
         }
 
+        // O conteúdo do arquivo (ADR 0031), lido do armazenamento privado do Conversations ANTES de gastar ficha: arquivo que sumiu entre a leitura da mensagem e agora falha de forma visível, sem chamada.
+        byte[]? conteudoDoArquivo = null;
+        if (arquivo is not null)
+        {
+            conteudoDoArquivo = await ReadFileAsync(payload.MessageId, arquivo.SizeBytes, cancellationToken);
+            if (conteudoDoArquivo is null)
+            {
+                return await FailAsync(mensagem, "attachment-unavailable", cancellationToken);
+            }
+        }
+
         // SND-6 e SND-2, ANTES de registrar a tentativa e de qualquer chamada ao provedor: conta pausada não envia (a mensagem falha de forma visível, sem gastar tentativa do relay), e o balde da conta limita a vazão.
         // A espera curta é feita aqui mesmo (a ordem da lane e as tentativas do relay ficam intactas); uma espera longa devolve a entrega ao relay.
         var tempoLimite = _clock.GetUtcNow() + _sending.MaxLocalWait;
@@ -219,9 +240,14 @@ public sealed class OutboundMessageRequestedHandler : EventHandlerBase<OutboundM
         await _store.SaveAsync(cancellationToken);
 
         // (2) A chamada ao provedor, sem transação aberta. O identificador da nossa mensagem vai como dado opaco: o provedor o devolve nos status.
-        var resultado = plano is null
+        var resultado = arquivo is not null
+            ? await adaptador.SendMediaAsync(
+                new ProviderMediaSendRequest(
+                    token, instancia.PhoneNumberId, visao.ContactExternalRef, ProviderKindOf(arquivo.Kind), arquivo.MimeType, arquivo.FileName, conteudoDoArquivo!, arquivo.Caption, payload.MessageId.ToString("N")),
+                cancellationToken)
+            : plano is null
             ? await adaptador.SendTextAsync(
-                new ProviderSendRequest(token, instancia.PhoneNumberId, visao.ContactExternalRef, visao.Text, payload.MessageId.ToString("N")), cancellationToken)
+                new ProviderSendRequest(token, instancia.PhoneNumberId, visao.ContactExternalRef, visao.Text!, payload.MessageId.ToString("N")), cancellationToken)
             : await adaptador.SendTemplateAsync(
                 new ProviderTemplateSendRequest(
                     token, instancia.PhoneNumberId, visao.ContactExternalRef, plano.Template!.Name, plano.Template.Language, plano.Parameters, payload.MessageId.ToString("N")),
@@ -262,7 +288,8 @@ public sealed class OutboundMessageRequestedHandler : EventHandlerBase<OutboundM
             }
 
             case ProviderSendOutcome.RejectedTransient:
-                mensagem.MarkFailed("rate-limited", depois);
+                // A falha da SUBIDA do arquivo (ADR 0031) esgotou as tentativas: o motivo diz que foi o envio do arquivo (nada saiu), não o limite de taxa.
+                mensagem.MarkFailed(resultado.ErrorCode is { } codigoDaSubida && codigoDaSubida.StartsWith("upload-", StringComparison.Ordinal) ? codigoDaSubida : "rate-limited", depois);
                 ChannelsMetrics.OutboundFailed.Add(1);
                 if (resultado.RateLimitScope == ProviderRateLimitScope.Account)
                 {
@@ -313,6 +340,27 @@ public sealed class OutboundMessageRequestedHandler : EventHandlerBase<OutboundM
         }
 
         return await NotifyAsync(mensagem, cancellationToken);
+    }
+
+    private static ProviderMessageKind ProviderKindOf(MessageKind kind) => kind switch
+    {
+        MessageKind.Image => ProviderMessageKind.Image,
+        MessageKind.Audio => ProviderMessageKind.Audio,
+        _ => ProviderMessageKind.Document,
+    };
+
+    /// <summary>O conteúdo do arquivo, ou nulo se já não existe ou não tem o tamanho que a mensagem declara (nunca se envia um arquivo diferente do que o atendente viu).</summary>
+    private async Task<byte[]?> ReadFileAsync(Guid messageId, long expectedSize, CancellationToken cancellationToken)
+    {
+        await using var fluxo = await _files.OpenAsync(messageId, cancellationToken);
+        if (fluxo is null)
+        {
+            return null;
+        }
+
+        using var memoria = new MemoryStream(expectedSize is > 0 and <= int.MaxValue ? (int)expectedSize : 0);
+        await fluxo.CopyToAsync(memoria, cancellationToken);
+        return memoria.Length == expectedSize ? memoria.ToArray() : null;
     }
 
     /// <summary>O modelo de um envio, os parâmetros na ordem do modelo ou o motivo de não poder enviar.</summary>

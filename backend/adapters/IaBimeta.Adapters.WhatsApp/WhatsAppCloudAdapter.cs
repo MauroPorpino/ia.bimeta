@@ -174,6 +174,58 @@ public sealed class WhatsAppCloudAdapter : IChannelProviderAdapter, IDisposable
         return DispatchAsync(WhatsAppSendRequestFactory.CreateTemplate(request, _versionedBase, out var recusa), recusa, cancellationToken);
     }
 
+    /// <summary>
+    /// O envio de um ARQUIVO (ADR 0031) em duas etapas, as duas com o token SÓ no cabeçalho do pedido: (1) a SUBIDA (<c>POST .../media</c>, multipart) e (2) a MENSAGEM que usa o identificador devolvido (<c>POST .../messages</c>,
+    /// pelo mesmo ponto de envio do texto e do modelo). A subida não envia nada ao cliente, então qualquer falha dela (inclusive tempo esgotado e rede) é recusa transitória ou definitiva, nunca <see cref="ProviderSendOutcome.Unknown"/>:
+    /// só a etapa da mensagem pode deixar dúvida, e a dúvida dela nunca é reenviada. O pedido é conferido por inteiro antes de qualquer chamada.
+    /// </summary>
+    public async Task<ProviderSendResult> SendMediaAsync(ProviderMediaSendRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (WhatsAppSendRequestFactory.ValidateMediaSend(request) is { } recusa)
+        {
+            return recusa;
+        }
+
+        string idDoArquivo;
+        using (var subida = WhatsAppSendRequestFactory.CreateMediaUpload(request, _versionedBase))
+        using (var limite = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+        {
+            limite.CancelAfter(_mediaTimeout);
+            HttpResponseMessage? resposta = null;
+            try
+            {
+                resposta = await SendMediaStepAsync(subida, limite.Token);
+                var corpo = await ReadBoundedAsync(resposta.Content, _maxResponseBytes, limite.Token);
+                var (id, falha) = WhatsAppSendResponseReader.ReadUpload((int)resposta.StatusCode, corpo, RetryAfter(resposta));
+                if (id is null)
+                {
+                    return falha!;
+                }
+
+                idDoArquivo = id;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (OperationCanceledException)
+            {
+                return new ProviderSendResult(ProviderSendOutcome.RejectedTransient, null, "upload-timeout");
+            }
+            catch (Exception ex) when (ex is HttpRequestException or IOException)
+            {
+                return new ProviderSendResult(ProviderSendOutcome.RejectedTransient, null, "upload-network-error");
+            }
+            finally
+            {
+                resposta?.Dispose();
+            }
+        }
+
+        return await DispatchAsync(WhatsAppSendRequestFactory.CreateMediaMessage(request, idDoArquivo, _versionedBase), null, cancellationToken);
+    }
+
     private async Task<ProviderSendResult> DispatchAsync(HttpRequestMessage? mensagemPronta, ProviderSendResult? recusa, CancellationToken cancellationToken)
     {
         using var mensagem = mensagemPronta;
@@ -345,7 +397,7 @@ public sealed class WhatsAppCloudAdapter : IChannelProviderAdapter, IDisposable
         }
     }
 
-    /// <summary>O ÚNICO ponto de chamada HTTP da mídia (as duas etapas passam por aqui).</summary>
+    /// <summary>O ÚNICO ponto de chamada HTTP da mídia (as duas etapas do download e a subida do arquivo enviado passam por aqui).</summary>
     private Task<HttpResponseMessage> SendMediaStepAsync(HttpRequestMessage mensagem, CancellationToken cancellationToken) =>
         _http.SendAsync(mensagem, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
 

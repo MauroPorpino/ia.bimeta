@@ -116,6 +116,18 @@ public sealed record ProviderTemplateParameter(string Component, int Index, stri
 public sealed record ProviderTemplateSendRequest(
     string AccessToken, string ExternalAccountId, string To, string TemplateName, string Language, IReadOnlyList<ProviderTemplateParameter> Parameters, string? OpaqueCallbackData);
 
+/// <summary>
+/// O pedido de envio de um ARQUIVO (imagem, áudio ou documento; ADR 0031), que o atendente já enviou ao Conversations (validado e guardado lá). O adaptador sobe o arquivo ao provedor e envia a mensagem que o usa; as
+/// duas etapas são dele, o desfecho vai num só <see cref="ProviderSendResult"/>. Mesmas regras de segredo e de efeito do envio de texto: o token vai só no cabeçalho de cada chamada.
+/// </summary>
+/// <param name="Kind"><see cref="ProviderMessageKind.Image"/>, <see cref="ProviderMessageKind.Audio"/> ou <see cref="ProviderMessageKind.Document"/>.</param>
+/// <param name="MimeType">O tipo VERIFICADO do conteúdo (o Conversations o detectou; o adaptador não adivinha).</param>
+/// <param name="FileName">O nome saneado do arquivo (o provedor só o mostra no documento).</param>
+/// <param name="Content">O conteúdo inteiro do arquivo.</param>
+/// <param name="Caption">A legenda, se houver (imagem e documento; o áudio não tem).</param>
+public sealed record ProviderMediaSendRequest(
+    string AccessToken, string ExternalAccountId, string To, ProviderMessageKind Kind, string MimeType, string FileName, byte[] Content, string? Caption, string? OpaqueCallbackData);
+
 /// <summary>A quem o limite de taxa do provedor se aplica (só vale em <see cref="ProviderSendOutcome.RejectedTransient"/> de limite de taxa).</summary>
 public enum ProviderRateLimitScope
 {
@@ -203,6 +215,13 @@ public interface IChannelProviderAdapter
     /// do próprio modelo (inexistente neste idioma, parâmetros que não conferem, pausado ou desativado) é recusa definitiva, com o código do provedor.
     /// </summary>
     Task<ProviderSendResult> SendTemplateAsync(ProviderTemplateSendRequest request, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Envia um ARQUIVO (ADR 0031) em duas etapas: sobe o conteúdo ao provedor e envia a mensagem que o usa. Mesmas regras do envio de texto (não repete a chamada por conta própria, não lança por falha do provedor,
+    /// o desfecho vai em <see cref="ProviderSendResult"/>), com uma diferença que o Channels usa: uma falha da SUBIDA nunca é ambígua (nenhuma mensagem saiu; o desfecho é recusa, transitória ou definitiva, e o erro
+    /// de conta), de modo que só a falha da etapa da MENSAGEM pode ser <see cref="ProviderSendOutcome.Unknown"/> (e nunca é reenviada). Os códigos de erro da subida começam por <c>upload-</c>.
+    /// </summary>
+    Task<ProviderSendResult> SendMediaAsync(ProviderMediaSendRequest request, CancellationToken cancellationToken);
 
     /// <summary>
     /// Por quanto tempo depois da última mensagem do cliente o provedor aceita resposta LIVRE (no WhatsApp, 24 horas); fora dela só modelo aprovado. Nulo: o provedor não tem janela.

@@ -62,6 +62,52 @@ internal static class WhatsAppSendResponseReader
         }
     }
 
+    /// <summary>
+    /// A resposta da SUBIDA de um arquivo (ADR 0031): o identificador que a Cloud API devolve (<c>{"id": "..."}</c>), ou o resultado de falha. Subir um arquivo não envia mensagem nenhuma, então a falha da subida NUNCA é
+    /// ambígua: o que o envio de texto trataria como dúvida (tempo, rede, 5xx, corpo ilegível, sucesso sem identificador) aqui é recusa TRANSITÓRIA (nada saiu: pode repetir). As recusas do provedor mantêm o desfecho
+    /// do envio (limite de taxa, erro de conta, recusa definitiva); os códigos que não são da conta ganham o prefixo <c>upload-</c>, para o atendente e o diagnóstico saberem em que etapa falhou.
+    /// </summary>
+    public static (string? MediaId, ProviderSendResult? Failure) ReadUpload(int status, byte[]? body, TimeSpan? retryAfter)
+    {
+        try
+        {
+            if (status is >= 200 and < 300)
+            {
+                if (body is not null)
+                {
+                    try
+                    {
+                        using var documento = JsonDocument.Parse(body);
+                        if (documento.RootElement.ValueKind == JsonValueKind.Object
+                            && documento.RootElement.TryGetProperty("id", out var id)
+                            && id.ValueKind == JsonValueKind.String
+                            && WhatsAppSendRequestFactory.IsValidMediaId(id.GetString()))
+                        {
+                            return (id.GetString(), null);
+                        }
+                    }
+                    catch (JsonException)
+                    {
+                    }
+                }
+
+                return (null, new ProviderSendResult(ProviderSendOutcome.RejectedTransient, null, "upload-invalid-response"));
+            }
+
+            var recusa = ReadHttpError(status, body, retryAfter);
+            return (null, recusa.Outcome switch
+            {
+                ProviderSendOutcome.Unknown => new ProviderSendResult(ProviderSendOutcome.RejectedTransient, null, "upload-" + (recusa.ErrorCode ?? "unknown")),
+                ProviderSendOutcome.AccountError => recusa,
+                _ => recusa with { ErrorCode = "upload-" + (recusa.ErrorCode ?? "rejected") },
+            });
+        }
+        catch (InvalidOperationException)
+        {
+            return (null, new ProviderSendResult(ProviderSendOutcome.RejectedTransient, null, "upload-invalid-response"));
+        }
+    }
+
     // Sucesso (HTTP 2xx)
 
     private static ProviderSendResult ReadSuccess(byte[]? body)

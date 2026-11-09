@@ -45,6 +45,25 @@ internal sealed record CapturaGraph(string Credencial, string Caminho, string Co
 
     /// <summary>Os componentes do modelo (cabeçalho, corpo, botões) com os parâmetros, como a Meta os recebeu; nulo se o modelo não tem parâmetros.</summary>
     public JsonArray? Componentes => Json["template"]?["components"]?.AsArray();
+
+    /// <summary>O objeto da mensagem de arquivo (<c>image</c>, <c>audio</c> ou <c>document</c>, ADR 0031): o identificador do arquivo subido, a legenda e o nome; nulo se a mensagem não é de arquivo.</summary>
+    public JsonNode? Arquivo => Tipo is "image" or "audio" or "document" ? Json[Tipo] : null;
+
+    public string? IdDoArquivo => Arquivo?["id"]?.GetValue<string>();
+
+    public string? Legenda => Arquivo?["caption"]?.GetValue<string>();
+
+    public string? NomeDoDocumento => Arquivo?["filename"]?.GetValue<string>();
+}
+
+/// <summary>
+/// Uma SUBIDA de arquivo que a "Meta" recebeu (ADR 0031): <c>POST /{versão}/{phone_number_id}/media</c>, formulário multipart com <c>messaging_product</c>, <c>type</c> e <c>file</c>. Guarda o token do cabeçalho, os
+/// campos, o nome e o tipo da parte do arquivo e os bytes, e o identificador que devolveu (<see cref="Id"/>).
+/// </summary>
+internal sealed record SubidaDaMeta(string Credencial, string Caminho, string? Produto, string? Tipo, string? NomeDoArquivo, string? TipoDoArquivo, byte[] Conteudo, DateTimeOffset Quando)
+{
+    /// <summary>O identificador que a "Meta" devolveu para este arquivo (nulo se a subida foi recusada).</summary>
+    public string? Id { get; set; }
 }
 
 /// <summary>
@@ -143,6 +162,8 @@ internal sealed class ServidorGraphLoopback : IAsyncDisposable
     private readonly WebApplication _app;
     private readonly ConcurrentQueue<CapturaGraph> _capturas = new();
     private readonly ConcurrentQueue<CapturaGraph> _leituras = new();
+    private readonly ConcurrentQueue<SubidaDaMeta> _subidas = new();
+    private int _contadorDeSubidas;
     private readonly ConcurrentDictionary<string, MidiaDaMeta> _midias = new(StringComparer.Ordinal);
     private int _contador;
 
@@ -176,6 +197,18 @@ internal sealed class ServidorGraphLoopback : IAsyncDisposable
     /// <summary>O que responder à leitura do número (a sonda). Por padrão, o número existe e o token é aceito.</summary>
     public Func<CapturaGraph, (int Status, string Corpo)> RoteiroDeLeitura { get; set; }
 
+    /// <summary>As SUBIDAS de arquivo (<c>POST .../media</c>, ADR 0031) que chegaram. Uma subida nunca é um envio: só a mensagem que a usa aparece em <see cref="Capturas"/>.</summary>
+    public IReadOnlyList<SubidaDaMeta> Subidas => _subidas.ToList();
+
+    /// <summary>O que responder a cada subida: o status HTTP e o corpo. Por padrão, aceita e devolve um identificador novo (<c>{"id": "..."}</c>, a forma documentada).</summary>
+    public Func<SubidaDaMeta, (int Status, string Corpo)>? RoteiroDaSubida { get; set; }
+
+    /// <summary>A espera (em segundos) que a "Meta" manda no <c>Retry-After</c> das subidas recusadas (4xx e 5xx): permite provar a espera entre as tentativas sem demorar.</summary>
+    public int? EsperaDaSubida { get; set; }
+
+    /// <summary>Roda ANTES de responder a cada subida (já capturada): serve para segurar a chamada. O cancelamento é o da conexão.</summary>
+    public Func<SubidaDaMeta, CancellationToken, Task>? AntesDaSubida { get; set; }
+
     public static async Task<ServidorGraphLoopback> IniciarAsync()
     {
         var builder = WebApplication.CreateSlimBuilder();
@@ -184,6 +217,7 @@ internal sealed class ServidorGraphLoopback : IAsyncDisposable
         app.Urls.Add("http://127.0.0.1:0");
         var servidor = new ServidorGraphLoopback(app);
         app.MapPost("/{versao}/{numero}/messages", servidor.AtenderAsync);
+        app.MapPost("/{versao}/{numero}/media", servidor.AtenderSubidaAsync);
         app.MapGet("/media-content/{id}", servidor.AtenderConteudoDeMidiaAsync);
         app.MapGet("/{versao}/{numero}", servidor.AtenderLeituraAsync);
         await app.StartAsync();
@@ -236,6 +270,47 @@ internal sealed class ServidorGraphLoopback : IAsyncDisposable
         else
         {
             (status, resposta) = Roteiro(captura);
+        }
+
+        http.Response.StatusCode = status;
+        http.Response.ContentType = "application/json";
+        await http.Response.WriteAsync(resposta, http.RequestAborted);
+    }
+
+    /// <summary>A subida de um arquivo (ADR 0031): lê o formulário como a Meta o recebe, captura, e responde pelo roteiro (padrão: aceita com um identificador novo).</summary>
+    private async Task AtenderSubidaAsync(HttpContext http)
+    {
+        var formulario = await http.Request.ReadFormAsync(http.RequestAborted);
+        var arquivo = formulario.Files.GetFile("file");
+        byte[] bytes = [];
+        if (arquivo is not null)
+        {
+            await using var fluxo = arquivo.OpenReadStream();
+            using var memoria = new MemoryStream();
+            await fluxo.CopyToAsync(memoria, http.RequestAborted);
+            bytes = memoria.ToArray();
+        }
+
+        var subida = new SubidaDaMeta(
+            CredencialDe(http), http.Request.Path.Value ?? string.Empty, formulario["messaging_product"], formulario["type"], arquivo?.FileName, arquivo?.ContentType, bytes, DateTimeOffset.UtcNow);
+        _subidas.Enqueue(subida);
+
+        if (AntesDaSubida is { } antes)
+        {
+            await antes(subida, http.RequestAborted);
+        }
+
+        var (status, resposta) = RoteiroDaSubida is { } roteiro
+            ? roteiro(subida)
+            : (200, new JsonObject { ["id"] = $"UPLOAD{Interlocked.Increment(ref _contadorDeSubidas):D4}" }.ToJsonString());
+        if (status is >= 200 and < 300 && JsonNode.Parse(resposta)?["id"]?.GetValue<string>() is { } id)
+        {
+            subida.Id = id;
+        }
+
+        if (status >= 400 && EsperaDaSubida is { } segundos)
+        {
+            http.Response.Headers["Retry-After"] = segundos.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
 
         http.Response.StatusCode = status;
@@ -622,6 +697,37 @@ internal sealed class EnsaioDeWhatsApp : IAsyncDisposable
     {
         using var pedido = Ia.Api.RequisicaoDe(token, metodo, caminho, corpo is null ? null : new StringContent(corpo.ToJsonString(), Encoding.UTF8, "application/json"));
         using var resposta = await Ia.Api.Client.SendAsync(pedido);
+        var texto = await resposta.Content.ReadAsStringAsync();
+        JsonNode? json = null;
+        if (!string.IsNullOrWhiteSpace(texto) && resposta.Content.Headers.ContentType?.MediaType is "application/json" or "application/problem+json")
+        {
+            json = JsonNode.Parse(texto);
+        }
+
+        return (resposta.StatusCode, json);
+    }
+
+    /// <summary>Responde com um ARQUIVO (ADR 0031) como a interface faz: formulário multipart com o <c>requestId</c>, o arquivo (nome e tipo informados pelo navegador) e a legenda. Devolve o status e o JSON.</summary>
+    public async Task<(HttpStatusCode Status, JsonNode? Corpo)> EnviarArquivoAsync(
+        string token, string itemId, byte[] conteudo, string nome, string? tipo, string? legenda = null, Guid? pedido = null)
+    {
+        using var formulario = new MultipartFormDataContent();
+        formulario.Add(new StringContent((pedido ?? Guid.NewGuid()).ToString()), "requestId");
+        if (legenda is not null)
+        {
+            formulario.Add(new StringContent(legenda, Encoding.UTF8), "caption");
+        }
+
+        var arquivo = new ByteArrayContent(conteudo);
+        if (tipo is not null)
+        {
+            arquivo.Headers.ContentType = new MediaTypeHeaderValue(tipo);
+        }
+
+        formulario.Add(arquivo, "file", nome);
+
+        using var requisicao = Ia.Api.RequisicaoDe(token, HttpMethod.Post, $"/contact-center/items/{itemId}/reply-media", formulario);
+        using var resposta = await Ia.Api.Client.SendAsync(requisicao);
         var texto = await resposta.Content.ReadAsStringAsync();
         JsonNode? json = null;
         if (!string.IsNullOrWhiteSpace(texto) && resposta.Content.Headers.ContentType?.MediaType is "application/json" or "application/problem+json")

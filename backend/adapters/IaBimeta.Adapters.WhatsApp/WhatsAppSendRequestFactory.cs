@@ -87,18 +87,149 @@ internal static class WhatsAppSendRequestFactory
         return BuildSend(corpo, request.ExternalAccountId, request.AccessToken, versionedBase);
     }
 
-    /// <summary>O ÚNICO lugar que monta o <c>POST {base}{versão}/{phone_number_id}/messages</c> (texto livre e modelo): o token vai só no cabeçalho deste pedido.</summary>
-    private static HttpRequestMessage BuildSend(JsonObject corpo, string accountId, string accessToken, Uri versionedBase)
+    /// <summary>O pedido de envio de uma mensagem em JSON (<c>POST {base}{versão}/{phone_number_id}/messages</c>: texto livre, modelo e a mensagem que usa um arquivo já subido).</summary>
+    private static HttpRequestMessage BuildSend(JsonObject corpo, string accountId, string accessToken, Uri versionedBase) =>
+        BuildPost(new Uri(versionedBase, $"{accountId}/messages"), new StringContent(corpo.ToJsonString(), Encoding.UTF8, "application/json"), accessToken);
+
+    /// <summary>O ÚNICO lugar que monta um POST (o envio da mensagem e a subida do arquivo, ADR 0031): o token vai só no cabeçalho deste pedido.</summary>
+    private static HttpRequestMessage BuildPost(Uri endereco, HttpContent conteudo, string accessToken)
     {
-        var endereco = new Uri(versionedBase, $"{accountId}/messages");
-        var mensagem = new HttpRequestMessage(HttpMethod.Post, endereco)
-        {
-            Content = new StringContent(corpo.ToJsonString(), Encoding.UTF8, "application/json"),
-        };
+        var mensagem = new HttpRequestMessage(HttpMethod.Post, endereco) { Content = conteudo };
         mensagem.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         mensagem.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
         return mensagem;
     }
+
+    /// <summary>O teto do arquivo enviado: o maior limite da Cloud API (documento, 100 MB). O limite de cada tipo é do Conversations, que o aplica antes; aqui é só a última defesa.</summary>
+    internal const long MaxMediaUploadBytes = 100L * 1024 * 1024;
+
+    private static readonly Regex MimePattern = new("^[a-z0-9][a-z0-9.+-]*/[a-z0-9][a-z0-9.+-]*$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private const int MaxMediaCaptionCharacters = 1024;
+
+    /// <summary>
+    /// O que o adaptador prova errado no pedido de arquivo ANTES de chamar o provedor (nada é subido nem enviado, e nenhum valor é repetido): token, número, destinatário, tipo de mídia, tipo do conteúdo, tamanho,
+    /// nome, legenda (áudio não tem) e dado opaco. Nulo se o pedido está em ordem.
+    /// </summary>
+    public static ProviderSendResult? ValidateMediaSend(ProviderMediaSendRequest request)
+    {
+        if (!IsHeaderSafeToken(request.AccessToken))
+        {
+            return Refuse(ProviderSendOutcome.AccountError, "credential-invalid-format");
+        }
+
+        if (request.ExternalAccountId is null || !AccountIdPattern.IsMatch(request.ExternalAccountId))
+        {
+            return Refuse(ProviderSendOutcome.AccountError, "invalid-account-id");
+        }
+
+        if (request.To is null || !RecipientPattern.IsMatch(request.To))
+        {
+            return Refuse(ProviderSendOutcome.RejectedPermanent, "invalid-recipient");
+        }
+
+        if (request.Kind is not (ProviderMessageKind.Image or ProviderMessageKind.Audio or ProviderMessageKind.Document))
+        {
+            return Refuse(ProviderSendOutcome.RejectedPermanent, "media-kind-invalid");
+        }
+
+        if (request.MimeType is null || !MimePattern.IsMatch(request.MimeType) || request.MimeType.Length > 127)
+        {
+            return Refuse(ProviderSendOutcome.RejectedPermanent, "media-type-invalid");
+        }
+
+        if (request.Content is not { Length: > 0 } conteudo || conteudo.Length > MaxMediaUploadBytes)
+        {
+            return Refuse(ProviderSendOutcome.RejectedPermanent, "media-size-invalid");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.FileName) || request.FileName.Length > 255 || request.FileName.Any(char.IsControl))
+        {
+            return Refuse(ProviderSendOutcome.RejectedPermanent, "media-name-invalid");
+        }
+
+        if (request.Caption is not null && (request.Kind == ProviderMessageKind.Audio || CountCharacters(request.Caption) > MaxMediaCaptionCharacters))
+        {
+            return Refuse(ProviderSendOutcome.RejectedPermanent, request.Kind == ProviderMessageKind.Audio ? "caption-not-supported" : "caption-too-long");
+        }
+
+        if (request.OpaqueCallbackData is { Length: > MaxCallbackDataCharacters })
+        {
+            return Refuse(ProviderSendOutcome.RejectedPermanent, "callback-data-too-long");
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// A subida do arquivo (<c>POST {base}{versão}/{phone_number_id}/media</c>, formulário com <c>messaging_product</c>, <c>type</c> e <c>file</c>; consulta da documentação de 09/11/2026). O pedido já passou por
+    /// <see cref="ValidateMediaSend"/>. O nome do arquivo na subida é sempre ASCII e genérico (o nome que o cliente vê vai na mensagem do documento), para nunca depender da codificação de cabeçalho.
+    /// </summary>
+    public static HttpRequestMessage CreateMediaUpload(ProviderMediaSendRequest request, Uri versionedBase)
+    {
+        var formulario = new MultipartFormDataContent();
+        formulario.Add(new StringContent("whatsapp"), "messaging_product");
+        formulario.Add(new StringContent(request.MimeType), "type");
+        var arquivo = new ByteArrayContent(request.Content);
+        arquivo.Headers.ContentType = new MediaTypeHeaderValue(request.MimeType);
+        formulario.Add(arquivo, "file", "upload" + UploadExtension(request.MimeType));
+        return BuildPost(new Uri(versionedBase, $"{request.ExternalAccountId}/media"), formulario, request.AccessToken);
+    }
+
+    /// <summary>A mensagem que usa o arquivo já subido: <c>image</c>/<c>document</c> com <c>id</c> e legenda (o documento leva também o nome) e <c>audio</c> só com o <c>id</c>.</summary>
+    public static HttpRequestMessage CreateMediaMessage(ProviderMediaSendRequest request, string mediaId, Uri versionedBase)
+    {
+        var (tipo, objeto) = request.Kind switch
+        {
+            ProviderMessageKind.Image => ("image", new JsonObject { ["id"] = mediaId }),
+            ProviderMessageKind.Audio => ("audio", new JsonObject { ["id"] = mediaId }),
+            _ => ("document", new JsonObject { ["id"] = mediaId, ["filename"] = Safe(request.FileName) }),
+        };
+
+        if (!string.IsNullOrWhiteSpace(request.Caption))
+        {
+            objeto["caption"] = Safe(request.Caption);
+        }
+
+        var corpo = new JsonObject
+        {
+            ["messaging_product"] = "whatsapp",
+            ["recipient_type"] = "individual",
+            ["to"] = request.To,
+            ["type"] = tipo,
+            [tipo] = objeto,
+        };
+
+        if (!string.IsNullOrEmpty(request.OpaqueCallbackData))
+        {
+            corpo["biz_opaque_callback_data"] = Safe(request.OpaqueCallbackData);
+        }
+
+        return BuildSend(corpo, request.ExternalAccountId, request.AccessToken, versionedBase);
+    }
+
+    private static string UploadExtension(string mimeType) => mimeType switch
+    {
+        "image/jpeg" => ".jpg",
+        "image/png" => ".png",
+        "audio/aac" => ".aac",
+        "audio/amr" => ".amr",
+        "audio/mpeg" => ".mp3",
+        "audio/mp4" => ".m4a",
+        "audio/ogg" => ".ogg",
+        "application/pdf" => ".pdf",
+        "text/plain" => ".txt",
+        "application/msword" => ".doc",
+        "application/vnd.ms-excel" => ".xls",
+        "application/vnd.ms-powerpoint" => ".ppt",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => ".docx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => ".xlsx",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation" => ".pptx",
+        _ => ".bin",
+    };
+
+    /// <summary>O identificador do arquivo subido, como a Cloud API o devolve, é conferido (mesma regra do identificador da mídia recebida) antes de entrar na mensagem.</summary>
+    internal static bool IsValidMediaId(string? id) => id is not null && MediaIdPattern.IsMatch(id);
 
     /// <summary>O nome do modelo: o que a Meta aceita (letras minúsculas, números e sublinhado). Entra no corpo JSON, não na URL, mas o formato é o do cadastro.</summary>
     private static readonly Regex TemplateNamePattern = new("^[a-z0-9_]{1,512}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);

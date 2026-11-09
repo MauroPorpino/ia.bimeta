@@ -736,7 +736,7 @@ public sealed class QueueItemService
             throw new ContactCenterValidationException("A resposta não pode ser vazia.");
         }
 
-        return ReplyCoreAsync(itemId, requestId, text, templateId: null, parameters: null, cancellationToken);
+        return ReplyCoreAsync(itemId, requestId, text, templateId: null, parameters: null, attachment: null, cancellationToken);
     }
 
     /// <summary>
@@ -755,7 +755,24 @@ public sealed class QueueItemService
             throw new ContactCenterValidationException("Escolha o modelo de mensagem.");
         }
 
-        return ReplyCoreAsync(itemId, requestId, text: null, templateId, parameters ?? new Dictionary<string, string>(), cancellationToken);
+        return ReplyCoreAsync(itemId, requestId, text: null, templateId, parameters ?? new Dictionary<string, string>(), attachment: null, cancellationToken);
+    }
+
+    /// <summary>
+    /// A resposta do atendente com um ARQUIVO (imagem, áudio ou documento; ADR 0031): o MESMO caminho da resposta de texto (mesma autorização, mesma base lida AGORA, <paramref name="requestId"/> como chave de efeito,
+    /// mesma gravação atômica da mensagem e do evento de envio no Conversations, mesmo outbox e mesmo Sender). Arquivo é mensagem livre, então vale só com a janela de resposta do provedor aberta; fora dela, só modelo.
+    /// O Conversations valida e guarda o arquivo (o tipo REAL pelo conteúdo, o tamanho, o nome e a legenda): a recusa volta em <see cref="RegisterHumanReplyResult.RejectionCode"/>.
+    /// </summary>
+    /// <exception cref="ContactCenterRuleException">A janela de resposta livre do provedor está fechada (<see cref="ContactCenterRule.ReplyWindowClosed"/>).</exception>
+    public Task<RegisterHumanReplyResult> ReplyWithMediaAsync(Guid itemId, Guid requestId, OutboundAttachment attachment, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(attachment);
+        if (attachment.Content is not { Length: > 0 })
+        {
+            throw new ContactCenterValidationException("O arquivo está vazio.");
+        }
+
+        return ReplyCoreAsync(itemId, requestId, text: null, templateId: null, parameters: null, attachment, cancellationToken);
     }
 
     /// <summary>
@@ -794,7 +811,7 @@ public sealed class QueueItemService
     }
 
     private async Task<RegisterHumanReplyResult> ReplyCoreAsync(
-        Guid itemId, Guid requestId, string? text, Guid? templateId, IReadOnlyDictionary<string, string>? parameters, CancellationToken cancellationToken)
+        Guid itemId, Guid requestId, string? text, Guid? templateId, IReadOnlyDictionary<string, string>? parameters, OutboundAttachment? attachment, CancellationToken cancellationToken)
     {
         var contexto = _context.GetRequired();
         RequireId(requestId);
@@ -823,7 +840,7 @@ public sealed class QueueItemService
         }
 
         // O conteúdo, decidido ANTES de gravar qualquer coisa: texto livre só com a janela do provedor aberta; modelo só aprovado, da conta do número e com os parâmetros válidos.
-        var conteudo = await BuildReplyContentAsync(sessao, text, templateId, parameters, cancellationToken);
+        var conteudo = await BuildReplyContentAsync(sessao, text, templateId, parameters, attachment, cancellationToken);
 
         var precondicao = new ReplyPrecondition(sessao.HandlingPeriod, sessao.PlacementEpoch, ResponderMatch.Exact, autor);
         var resultado = await _conversations.RegisterHumanReplyAsync(
@@ -846,7 +863,7 @@ public sealed class QueueItemService
     }
 
     private async Task<ReplyContent> BuildReplyContentAsync(
-        SessionView sessao, string? text, Guid? templateId, IReadOnlyDictionary<string, string>? parameters, CancellationToken cancellationToken)
+        SessionView sessao, string? text, Guid? templateId, IReadOnlyDictionary<string, string>? parameters, OutboundAttachment? attachment, CancellationToken cancellationToken)
     {
         if (templateId is not { } modelo)
         {
@@ -859,7 +876,8 @@ public sealed class QueueItemService
                     $"A janela de {vista.WindowHours:0.##} horas para responder livremente a este cliente está fechada. Envie um modelo de mensagem aprovado.");
             }
 
-            return new ReplyContent(text!);
+            // O arquivo vai sem texto: a legenda mora nele (o texto da mensagem fica vazio e nunca é lido pela IA).
+            return attachment is not null ? new ReplyContent(string.Empty, Attachment: attachment) : new ReplyContent(text!);
         }
 
         var preparo = await _channelReply.PrepareTemplateAsync(sessao.ChannelInstanceId, modelo, parameters ?? new Dictionary<string, string>(), cancellationToken);
