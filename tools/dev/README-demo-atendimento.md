@@ -7,7 +7,7 @@ Mostra, na sua máquina, o fluxo completo do MVP: **cliente no WhatsApp → Rece
 | Peça | O que é |
 |---|---|
 | `Start-OpenAiSimulada.ps1` (5199) | responde a Responses API. Se o cliente pede um atendente, ou fala de preço, **transfere**; senão, **responde** com um texto simulado |
-| `Start-WhatsAppSimulado.ps1` (5198) | a Graph API da Meta: imprime cada mensagem que sairia pelo WhatsApp (é o "celular do cliente") |
+| `Start-WhatsAppSimulado.ps1` (5198) | a Graph API da Meta: imprime cada mensagem que sairia pelo WhatsApp (é o "celular do cliente"), inclusive a subida e a mensagem de **arquivo** que o atendente envia (`[IMAGE]`, `[AUDIO]`, `[DOCUMENT]`; `docs/operations/ENVIO-DE-ARQUIVOS.md`) |
 | Api (5155) e Worker | os de verdade, com o perfil `simulador-ia` (tenant `demo-ia`, IA e canal de demonstração preparados) |
 | `frontend/` (5173) | a interface do atendente |
 | `Send-MensagemWhatsApp.ps1` | faz o papel da Meta: envia ao Receiver um webhook **assinado** (HMAC-SHA256 com o App Secret) |
