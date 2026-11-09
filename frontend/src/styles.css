@@ -888,6 +888,82 @@ label {
   }
 }
 
+/* Envio de arquivo pelo atendente (ADR 0031): o botão de anexar, o cartão do arquivo escolhido e a orientação de um arquivo que não chegou */
+.envio-arquivo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.3rem 1rem 0.6rem;
+  background: var(--superficie);
+  min-width: 0;
+}
+
+.envio-arquivo-barra {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.2rem 0.75rem;
+  min-width: 0;
+}
+
+.btn-anexar {
+  display: inline-block;
+  color: var(--texto);
+}
+
+.btn-anexar.desativado {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* O campo de arquivo fica escondido (só o rótulo aparece como botão); o foco do teclado aparece no botão. */
+.envio-arquivo-barra:focus-within .btn-anexar {
+  outline: 2px solid var(--foco);
+  outline-offset: 2px;
+}
+
+.arquivo-escolhido {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--borda);
+  border-radius: 8px;
+  background: var(--superficie-2);
+  min-width: 0;
+}
+
+.arquivo-escolhido-dados {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.legenda-arquivo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.legenda-arquivo textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.entrega-orientacao {
+  clear: both;
+  margin-top: 0.15rem;
+  font-size: 0.75em;
+  color: var(--texto-suave);
+  text-align: right;
+}
+
+@media (max-width: 760px) {
+  .envio-arquivo {
+    padding: 0.3rem 0.6rem 0.5rem;
+  }
+}
+
 /* Áreas do sistema e "Conhecimento" do administrador (ADR 0030): lacunas do FAQ, revisão e rascunho da definição do agente */
 .topo {
   flex-wrap: wrap;

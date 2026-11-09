@@ -174,11 +174,18 @@ export function problema(status: number, title: string, detail?: string, code?: 
   return json({ title, detail, status, code }, status);
 }
 
+/** O corpo JSON de um pedido (nulo se não há corpo ou se ele é um formulário multipart: nesse caso veja `formulario`). */
+function corpoJson(corpo: BodyInit | null | undefined): Record<string, unknown> | null {
+  return typeof corpo === 'string' && corpo !== '' ? (JSON.parse(corpo) as Record<string, unknown>) : null;
+}
+
 export interface Requisicao {
   metodo: string;
   caminho: string;
   consulta: URLSearchParams;
   corpo: Record<string, unknown> | null;
+  /** O corpo multipart/form-data (envio de arquivo), quando o pedido o usa. */
+  formulario?: FormData | null;
   cabecalhos: Headers;
 }
 
@@ -204,25 +211,36 @@ export function criarFetch(rotas: Record<string, Manipulador | Response>): Mock<
       metodo,
       caminho,
       consulta: url.searchParams,
-      corpo: init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null,
+      corpo: corpoJson(init?.body),
+      formulario: init?.body instanceof FormData ? init.body : null,
       cabecalhos: new Headers(init?.headers),
     });
   });
 }
 
-/** Chamadas feitas a uma rota ("MÉTODO /caminho"), com o corpo já lido. */
+/** Chamadas feitas a uma rota ("MÉTODO /caminho"), com o corpo JSON já lido (nulo se o corpo é um formulário multipart: veja `formulariosDe`). */
 export function chamadasDe(fetchSimulado: Mock<typeof fetch>, rota: string): Array<{ corpo: Record<string, unknown> | null; consulta: URLSearchParams }> {
   return fetchSimulado.mock.calls
     .map(([entrada, init]) => {
       const url = new URL(String(entrada), 'http://localhost');
       return {
         rota: `${(init?.method ?? 'GET').toUpperCase()} ${url.pathname.replace(/^\/api/, '')}`,
-        corpo: init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null,
+        corpo: corpoJson(init?.body),
         consulta: url.searchParams,
       };
     })
     .filter((c) => c.rota === rota)
     .map(({ corpo, consulta }) => ({ corpo, consulta }));
+}
+
+/** Os formulários multipart/form-data enviados a uma rota ("MÉTODO /caminho"), com os cabeçalhos do pedido (envio de arquivo). */
+export function formulariosDe(fetchSimulado: Mock<typeof fetch>, rota: string): Array<{ formulario: FormData; cabecalhos: Headers }> {
+  return fetchSimulado.mock.calls
+    .filter(([entrada, init]) => {
+      const url = new URL(String(entrada), 'http://localhost');
+      return `${(init?.method ?? 'GET').toUpperCase()} ${url.pathname.replace(/^\/api/, '')}` === rota && init?.body instanceof FormData;
+    })
+    .map(([, init]) => ({ formulario: init!.body as FormData, cabecalhos: new Headers(init?.headers) }));
 }
 
 export const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

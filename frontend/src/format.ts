@@ -73,6 +73,7 @@ export const ROTULO_ENTREGA: Record<DeliveryState, string> = {
 };
 
 export const SEM_TEXTO_MIDIA = 'mídia recebida (arquivo não disponível)';
+export const SEM_TEXTO_MIDIA_ENVIADA = 'mídia enviada (arquivo não disponível)';
 
 /** O tamanho de um arquivo para a tela: "812 B", "48 KB", "1,2 MB" (base 1024, uma casa quando fizer diferença). */
 export function formatarTamanho(bytes: number | null | undefined): string {
@@ -112,6 +113,9 @@ export function motivoDoAnexo(status: 'Unavailable' | 'Rejected', codigo: string
       return 'O arquivo chegou vazio.';
     case 'malware':
       return 'O arquivo foi bloqueado pela verificação de segurança.';
+    case 'retention':
+      // Arquivo ENVIADO pelo atendente (ADR 0031): o servidor o apaga depois do prazo de guarda.
+      return 'O arquivo foi apagado do servidor depois do prazo de guarda; o nome e a legenda continuam aqui.';
     default:
       return status === 'Rejected' ? 'O arquivo foi recusado pela política de segurança e não pode ser aberto.' : 'O arquivo não está disponível.';
   }
@@ -131,7 +135,7 @@ export function corpoDaMensagem(m: Message): { texto: string; semConteudo: boole
   if (m.kind === 'Text') {
     return { texto: '(mensagem sem texto)', semConteudo: true };
   }
-  return { texto: SEM_TEXTO_MIDIA, semConteudo: true };
+  return { texto: m.direction === 'Outbound' ? SEM_TEXTO_MIDIA_ENVIADA : SEM_TEXTO_MIDIA, semConteudo: true };
 }
 
 export function situacaoDoItem(item: QueueItem, usuarioId: string | undefined): string {

@@ -61,6 +61,8 @@ export interface ProblemDetails {
   code?: string;
   /** 422 `TemplateParametersInvalid`: todos os problemas dos parâmetros do modelo, por chave (`*` = do conjunto). */
   errors?: TemplateParameterError[];
+  /** 422 `MediaRejected`: o motivo curto da recusa do arquivo do atendente (ver `MediaRejectionReason`); o texto em português vem em `detail`. */
+  reason?: string;
 }
 
 // ---------------------------------------------------------------- ContactCenter
@@ -163,7 +165,27 @@ export interface ActionResult {
   outcome?: OperationOutcome;
   item?: QueueItem;
   messageId?: string;
+  /** A posição da mensagem no histórico (resposta de texto, de modelo e de arquivo). */
+  messageSeq?: number;
 }
+
+// ---------------------------------------------------------------- Envio de arquivo pelo atendente (ADR 0031)
+
+/**
+ * Por que o servidor recusou o arquivo do atendente (422 `MediaRejected`, campo `reason`): vazio, grande demais, tipo fora da lista, conteúdo que não corresponde ao
+ * tipo ou à extensão, codec de áudio não suportado (Ogg precisa ser Opus em mono), legenda não aceita (áudio), legenda longa demais, bloqueio da verificação de
+ * segurança ou formato de pedido inválido. O servidor é a autoridade: descobre o tipo REAL pelo conteúdo.
+ */
+export type MediaRejectionReason =
+  | 'empty'
+  | 'too-large'
+  | 'type-not-allowed'
+  | 'content-mismatch'
+  | 'audio-codec-unsupported'
+  | 'caption-not-supported'
+  | 'caption-too-long'
+  | 'malware'
+  | 'invalid-shape';
 
 // ---------------------------------------------------------------- Resposta por modelo de mensagem (templates, ADR 0027)
 
@@ -368,13 +390,19 @@ export interface Attachment {
   mimeType: string | null;
   fileName: string | null;
   sizeBytes: number | null;
-  /** O motivo quando o arquivo não está disponível (`expired`, `download-failed`, `too-large`, `type-not-allowed`, `content-mismatch`, `hash-mismatch`, `empty`...). */
+  /**
+   * O motivo quando o arquivo não está disponível (`expired`, `download-failed`, `too-large`, `type-not-allowed`, `content-mismatch`, `hash-mismatch`, `empty`...).
+   * Num arquivo ENVIADO pelo atendente (ADR 0031) o único motivo é `retention`: o prazo de guarda passou (nome e legenda continuam; `mimeType` e `sizeBytes` vêm nulos).
+   */
   failureCode: string | null;
-  /** A legenda que o cliente escreveu junto, já saneada. */
+  /** A legenda que o cliente (ou o atendente, nas mensagens de saída) escreveu junto, já saneada. */
   caption: string | null;
 }
 
-/** Uma mensagem do histórico (MessageView). `text` é nulo para mídia ou conteúdo ainda não interpretado. */
+/**
+ * Uma mensagem do histórico (MessageView). `text` é nulo para mídia ou conteúdo ainda não interpretado. Numa mensagem de arquivo do ATENDENTE
+ * (`direction: 'Outbound'`, `author: 'Human'`, `kind` Image/Audio/Document) o `text` é nulo e a legenda mora em `attachment.caption`.
+ */
 export interface Message {
   id: string;
   sessionId: string;

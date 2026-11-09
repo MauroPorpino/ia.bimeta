@@ -9,6 +9,8 @@ interface Props {
   tipo: MessageKind;
   /** Baixa o arquivo (com a sessão do atendente) como Blob. Sem isto, o anexo só mostra o estado. */
   obter?: () => Promise<Blob>;
+  /** O arquivo foi ENVIADO pelo atendente ao cliente (ADR 0031), não recebido dele: só muda os textos de apoio ("enviado" em vez de "recebido"). */
+  enviada?: boolean;
 }
 
 const ROTULO_DO_TIPO: Partial<Record<MessageKind, string>> = {
@@ -45,7 +47,7 @@ async function comVagaDeMiniatura<T>(trabalho: () => Promise<T>): Promise<T> {
  * documento para baixar, ou o motivo de o arquivo não estar disponível. O conteúdo vem pela rota autenticada do atendimento (nunca há URL pública) e é exibido
  * como Blob local, que a tela libera ao sair.
  */
-export function AnexoDaMensagem({ anexo, tipo, obter }: Props) {
+export function AnexoDaMensagem({ anexo, tipo, obter, enviada = false }: Props) {
   const rotulo = ROTULO_DO_TIPO[tipo] ?? 'arquivo';
   const tipoDoArquivo = anexo.mimeType ?? '';
 
@@ -62,9 +64,11 @@ export function AnexoDaMensagem({ anexo, tipo, obter }: Props) {
           <strong>{anexo.status === 'Rejected' ? 'Arquivo bloqueado.' : 'Arquivo indisponível.'}</strong> {motivoDoAnexo(anexo.status, anexo.failureCode)}
         </p>
       )}
+      {/* Depois do prazo de guarda o arquivo some, mas o nome continua (e a legenda, abaixo). */}
+      {anexo.status === 'Unavailable' && anexo.fileName && <p className="anexo-detalhe anexo-nome-indisponivel">{anexo.fileName}</p>}
 
-      {anexo.status === 'Available' && tipoDoArquivo.startsWith('image/') && <Imagem anexo={anexo} obter={obter} />}
-      {anexo.status === 'Available' && tipoDoArquivo.startsWith('audio/') && <Audio anexo={anexo} obter={obter} />}
+      {anexo.status === 'Available' && tipoDoArquivo.startsWith('image/') && <Imagem anexo={anexo} obter={obter} enviada={enviada} />}
+      {anexo.status === 'Available' && tipoDoArquivo.startsWith('audio/') && <Audio anexo={anexo} obter={obter} enviada={enviada} />}
       {anexo.status === 'Available' && !tipoDoArquivo.startsWith('image/') && !tipoDoArquivo.startsWith('audio/') && <Documento anexo={anexo} obter={obter} />}
 
       {anexo.caption && <p className="anexo-legenda">{anexo.caption}</p>}
@@ -135,10 +139,10 @@ function useArquivoLocal(anexo: Attachment, obter: Props['obter'], automatico: b
   return { url, carregando, erro, carregar };
 }
 
-function Imagem({ anexo, obter }: { anexo: Attachment; obter: Props['obter'] }) {
+function Imagem({ anexo, obter, enviada }: { anexo: Attachment; obter: Props['obter']; enviada: boolean }) {
   const { url, carregando, erro, carregar } = useArquivoLocal(anexo, obter, true, true);
   const [ampliada, setAmpliada] = useState(false);
-  const descricao = anexo.caption ?? anexo.fileName ?? 'Imagem recebida do cliente';
+  const descricao = anexo.caption ?? anexo.fileName ?? (enviada ? 'Imagem enviada ao cliente' : 'Imagem recebida do cliente');
 
   if (erro) {
     return (
@@ -153,7 +157,7 @@ function Imagem({ anexo, obter }: { anexo: Attachment; obter: Props['obter'] }) 
   if (!url) {
     return (
       <p className="anexo-estado anexo-pendente" role="status">
-        {carregando ? 'Carregando imagem...' : 'Imagem recebida.'}
+        {carregando ? 'Carregando imagem...' : enviada ? 'Imagem enviada.' : 'Imagem recebida.'}
       </p>
     );
   }
@@ -176,10 +180,10 @@ function Imagem({ anexo, obter }: { anexo: Attachment; obter: Props['obter'] }) 
   );
 }
 
-function Audio({ anexo, obter }: { anexo: Attachment; obter: Props['obter'] }) {
+function Audio({ anexo, obter, enviada }: { anexo: Attachment; obter: Props['obter']; enviada: boolean }) {
   // O áudio só é baixado quando o atendente pede (um histórico com muitos áudios não os baixa todos), e toca no player nativo.
   const { url, carregando, erro, carregar } = useArquivoLocal(anexo, obter, false);
-  const descricao = `Áudio recebido${anexo.sizeBytes !== null ? ` (${formatarTamanho(anexo.sizeBytes)})` : ''}`;
+  const descricao = `Áudio ${enviada ? 'enviado' : 'recebido'}${anexo.sizeBytes !== null ? ` (${formatarTamanho(anexo.sizeBytes)})` : ''}`;
 
   if (url) {
     return (

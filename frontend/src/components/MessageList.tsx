@@ -192,7 +192,7 @@ export function MessageList({
                 {/* Mídia com arquivo: o próprio anexo diz o estado ("recebendo", o arquivo, ou o motivo); o aviso genérico de "sem conteúdo" só vale para mídia SEM arquivo registrado. */}
                 {(!m.attachment || !corpo.semConteudo) && <p className={corpo.semConteudo ? 'mensagem-texto sem-conteudo' : 'mensagem-texto'}>{corpo.texto}</p>}
                 {m.attachment && (
-                  <AnexoDaMensagem anexo={m.attachment} tipo={m.kind} obter={obterAnexo ? () => obterAnexo(m.id) : undefined} />
+                  <AnexoDaMensagem anexo={m.attachment} tipo={m.kind} obter={obterAnexo ? () => obterAnexo(m.id) : undefined} enviada={saida} />
                 )}
                 {saida && m.deliveryState && (
                   <p
@@ -201,6 +201,12 @@ export function MessageList({
                     title={incerto ? 'O envio terminou sem confirmação do provedor; a mensagem não é reenviada automaticamente.' : undefined}
                   >
                     {ROTULO_ENTREGA[m.deliveryState]}
+                  </p>
+                )}
+                {/* Um arquivo que não chegou nunca é reenviado pelo sistema: quem decide é o atendente, que envia o arquivo de novo (um pedido novo). */}
+                {saida && m.attachment && (falhou || incerto) && (
+                  <p className="entrega-orientacao">
+                    {incerto ? 'Sem confirmação de entrega: se o cliente disser que não recebeu, envie o arquivo de novo.' : 'Envie o arquivo de novo.'}
                   </p>
                 )}
               </li>

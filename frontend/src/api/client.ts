@@ -1,3 +1,4 @@
+import { chaveDoArquivo } from '../arquivos';
 import { encerrarSessaoLocal, obterToken } from './session';
 import type {
   ActionResult,
@@ -44,8 +45,18 @@ export class ApiError extends Error {
   readonly semCorpo: boolean;
   /** Os problemas de parâmetro de um modelo de mensagem (422 `TemplateParametersInvalid`); vazio nos demais erros. */
   readonly erros: TemplateParameterError[];
+  /** O motivo curto de uma recusa de arquivo (422 `MediaRejected`: `too-large`, `type-not-allowed`, `content-mismatch`...); nulo nos demais erros. */
+  readonly motivo: string | null;
 
-  constructor(status: number, title: string, detail: string | null = null, code: string | null = null, semCorpo = false, erros: TemplateParameterError[] = []) {
+  constructor(
+    status: number,
+    title: string,
+    detail: string | null = null,
+    code: string | null = null,
+    semCorpo = false,
+    erros: TemplateParameterError[] = [],
+    motivo: string | null = null,
+  ) {
     super(detail ?? title);
     this.name = 'ApiError';
     this.status = status;
@@ -54,6 +65,7 @@ export class ApiError extends Error {
     this.code = code;
     this.semCorpo = semCorpo;
     this.erros = erros;
+    this.motivo = motivo;
   }
 }
 
@@ -118,8 +130,9 @@ export interface MessagesParams {
   cursor?: string;
 }
 
-// Respostas que provam que a operação NÃO produziu efeito: o próximo pedido pode usar outro requestId.
-const REJEICOES_DEFINITIVAS = new Set([400, 403, 404, 422]);
+// Respostas que provam que a operação NÃO produziu efeito: o próximo pedido pode usar outro requestId. O 413 (arquivo grande demais para o pedido) é
+// recusado antes de o servidor processar qualquer coisa.
+const REJEICOES_DEFINITIVAS = new Set([400, 403, 404, 413, 422]);
 
 /** O erro prova que a operação não teve efeito (o pedido pode ser refeito com outro requestId); qualquer outro é resultado incerto. */
 export function ehRejeicaoDefinitiva(erro: unknown): boolean {
@@ -136,7 +149,7 @@ export function createApi(opcoes: ApiOptions = {}) {
   async function requisitar<T>(
     metodo: string,
     caminho: string,
-    opts: { corpo?: unknown; consulta?: Record<string, string | number | boolean | undefined>; semSessao?: boolean } = {},
+    opts: { corpo?: unknown; formulario?: FormData; consulta?: Record<string, string | number | boolean | undefined>; semSessao?: boolean } = {},
   ): Promise<T> {
     const parametros = new URLSearchParams();
     for (const [nome, valor] of Object.entries(opts.consulta ?? {})) {
@@ -152,8 +165,11 @@ export function createApi(opcoes: ApiOptions = {}) {
     if (token && !opts.semSessao) {
       cabecalhos.Authorization = `Bearer ${token}`;
     }
-    let corpo: string | undefined;
-    if (opts.corpo !== undefined) {
+    let corpo: string | FormData | undefined;
+    if (opts.formulario !== undefined) {
+      // multipart/form-data: o Content-Type NÃO é definido aqui, porque só o navegador sabe o boundary que separa os campos.
+      corpo = opts.formulario;
+    } else if (opts.corpo !== undefined) {
       cabecalhos['Content-Type'] = 'application/json';
       corpo = JSON.stringify(opts.corpo);
     }
@@ -236,7 +252,7 @@ export function createApi(opcoes: ApiOptions = {}) {
     const erros = Array.isArray(problema?.errors)
       ? problema.errors.filter((e): e is TemplateParameterError => !!e && typeof e.key === 'string' && typeof e.message === 'string')
       : [];
-    return new ApiError(status, titulo, detalhe, typeof problema?.code === 'string' ? problema.code : null, problema === null, erros);
+    return new ApiError(status, titulo, detalhe, typeof problema?.code === 'string' ? problema.code : null, problema === null, erros, typeof problema?.reason === 'string' ? problema.reason : null);
   }
 
   /**
@@ -333,6 +349,22 @@ export function createApi(opcoes: ApiOptions = {}) {
     responderComModelo: (itemId: string, templateId: string, parametros: Record<string, string>) =>
       acao<ActionResult>(`reply-template|${itemId}|${templateId}|${JSON.stringify(Object.entries(parametros).sort(([a], [b]) => a.localeCompare(b)))}`, (requestId) =>
         requisitar<ActionResult>('POST', `${rotaItem(itemId)}/reply-template`, { corpo: { requestId, templateId, parameters: parametros } satisfies TemplateReplyRequest }),
+      ),
+    // ---- Arquivo do atendente (ADR 0031): imagem, documento ou áudio, no mesmo caminho da resposta de texto. Corpo multipart (`requestId`, `file` e `caption` só com legenda).
+    // O requestId vale por (conversa, nome, tamanho, data de modificação, legenda): o MESMO arquivo repetido (rede que caiu) o reaproveita e o servidor reconhece o pedido.
+    responderComArquivo: (itemId: string, arquivo: File, legenda: string | null, requestIdSugerido?: string) =>
+      acao<ActionResult>(
+        `reply-media|${itemId}|${chaveDoArquivo(arquivo, legenda)}`,
+        (requestId) => {
+          const formulario = new FormData();
+          formulario.append('requestId', requestId);
+          formulario.append('file', arquivo, arquivo.name);
+          if (legenda) {
+            formulario.append('caption', legenda);
+          }
+          return requisitar<ActionResult>('POST', `${rotaItem(itemId)}/reply-media`, { formulario });
+        },
+        requestIdSugerido,
       ),
     encerrar: (itemId: string, reasonCode = 'resolved') =>
       acao<ActionResult>(`close|${itemId}|${reasonCode}`, (requestId) =>

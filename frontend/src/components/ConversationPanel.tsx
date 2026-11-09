@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { ApiError, descreverErro, ehFalhaDeConexao, ehRejeicaoDefinitiva, novoGuid, type ApiClient } from '../api/client';
 import type { CurrentUser, Message, QueueItem, ReplyOptions, ReplyTemplate, SendingAlert, TemplateParameterError } from '../api/types';
+import { chaveDoArquivo, temArquivoSemEnvio, textoDaRecusaDoArquivo } from '../arquivos';
 import { CacheDeConversas, aplicarPaginaAnterior, aplicarPaginaRecente } from '../cache';
 import { janelaDeResposta, rotuloSemNome, situacaoDoItem, tempoDecorrido } from '../format';
 import { usePolling } from '../hooks';
 import { alertaDoNumero } from './AlertasDeEnvio';
+import { EnvioDeArquivo } from './EnvioDeArquivo';
 import { MessageList } from './MessageList';
 import { ModeloDeMensagem } from './ModeloDeMensagem';
 
@@ -103,6 +105,10 @@ export function ConversationPanel({
   const [agora, setAgora] = useState(() => Date.now());
   const [mostrandoModelos, setMostrandoModelos] = useState(false);
   const [errosDoModelo, setErrosDoModelo] = useState<TemplateParameterError[]>([]);
+  // Envio de arquivo (ADR 0031): o motivo da última recusa, que o cartão do arquivo mostra ao lado dele (não na faixa de erro vermelha).
+  const [recusaDoArquivo, setRecusaDoArquivo] = useState<string | null>(null);
+  // O requestId do envio de arquivo cujo resultado ficou incerto (queda de rede, 5xx, ainda não confirmado). Um File não se guarda no navegador: só vive neste painel.
+  const pendenteDoArquivo = useRef<{ chave: string; requestId: string } | null>(null);
   // O estado `ocupado` só muda no próximo render: este ref fecha a janela de um segundo clique no mesmo instante.
   const emAndamento = useRef(false);
   const buscandoAnteriores = useRef(false);
@@ -338,6 +344,44 @@ export function ConversationPanel({
     return ok;
   }
 
+  /** Erros do envio de arquivo que o cartão explica ao lado do arquivo (recusa do servidor, arquivo grande demais para o pedido); os demais seguem o caminho da resposta de texto (a janela fechou) ou a faixa de erro. */
+  function tratarErroDeArquivo(erro: unknown): boolean {
+    if (erro instanceof ApiError) {
+      if (erro.status === 422 && erro.code === 'MediaRejected') {
+        setRecusaDoArquivo(textoDaRecusaDoArquivo(erro.motivo, erro.detail));
+        return true;
+      }
+      if (erro.status === 413) {
+        setRecusaDoArquivo('O arquivo é grande demais para ser enviado. Escolha um arquivo menor.');
+        return true;
+      }
+    }
+    return tratarErroDeResposta(erro);
+  }
+
+  async function enviarArquivo(arquivo: File, legenda: string | null): Promise<boolean> {
+    if (!assumidoPorMim || !janela.aberta) {
+      return false;
+    }
+    setRecusaDoArquivo(null);
+    // O envio que ficou sem resultado (queda da conexão, 5xx, ainda não confirmado) deixou o requestId guardado: o MESMO arquivo com a MESMA legenda o reaproveita, e o
+    // servidor reconhece o pedido em vez de mandar o arquivo duas vezes. Outro arquivo ou outra legenda é outro pedido.
+    const chave = chaveDoArquivo(arquivo, legenda);
+    const guardado = pendenteDoArquivo.current;
+    const requestId = guardado && guardado.chave === chave ? guardado.requestId : novoGuid();
+    pendenteDoArquivo.current = { chave, requestId };
+    return executar(
+      'reply',
+      () => api.responderComArquivo(itemId, arquivo, legenda, requestId),
+      (situacao) => {
+        if (situacao !== 'incerta') {
+          pendenteDoArquivo.current = null;
+        }
+      },
+      tratarErroDeArquivo,
+    );
+  }
+
   async function enviar(evento?: FormEvent) {
     evento?.preventDefault();
     const enviado = texto.trim();
@@ -409,6 +453,7 @@ export function ConversationPanel({
           {item && item.deliveryFailures > 0 && (
             <p className="aviso-falha" role="alert">
               {item.deliveryFailures === 1 ? 'Uma mensagem não foi enviada ao cliente.' : `${item.deliveryFailures} mensagens não foram enviadas ao cliente.`} Responda de novo.
+              {temArquivoSemEnvio(mensagens) && ' Se for um arquivo, envie o arquivo de novo.'}
             </p>
           )}
         </div>
@@ -546,6 +591,11 @@ export function ConversationPanel({
             {ocupado === 'reply' ? 'Enviando...' : 'Responder'}
           </button>
         </form>
+      )}
+
+      {/* Arquivo é mensagem livre: só com a janela de resposta aberta. É outra ação, à parte do texto do campo acima (que nunca vai junto nem se perde). */}
+      {assumidoPorMim && janela.aberta && (
+        <EnvioDeArquivo ocupado={ocupado !== null} recusa={recusaDoArquivo} aoEnviar={enviarArquivo} aoEditar={() => setRecusaDoArquivo(null)} />
       )}
 
       {assumidoPorMim && janela.aberta && modelos.length > 0 && (
