@@ -47,6 +47,8 @@ public sealed class AgentsOptionsTests
         ("ReconcileSessionsPerTenant acima de 100", o => o.ReconcileSessionsPerTenant = 101),
         ("ReconcileTenantBatchSize zero", o => o.ReconcileTenantBatchSize = 0),
         ("ReconcileTenantBatchSize acima de 1000", o => o.ReconcileTenantBatchSize = 1001),
+        ("KnowledgeGapMaxPerTenant zero", o => o.KnowledgeGapMaxPerTenant = 0),
+        ("KnowledgeGapMaxPerTenant acima de 1000000", o => o.KnowledgeGapMaxPerTenant = 1_000_001),
     };
 
     private static readonly (string Nome, Action<AgentsOptions> Ajuste)[] Limites =
@@ -131,7 +133,7 @@ public sealed class AgentsOptionsTests
             nameof(AgentsOptions.ImageExtraWait), nameof(AgentsOptions.DocumentExtraWait), nameof(AgentsOptions.VideoAndOtherExtraWait), nameof(AgentsOptions.CleanShutdownRetry),
             nameof(AgentsOptions.ReconcileMinimumAge), nameof(AgentsOptions.MaxSupersedesPerBurst), nameof(AgentsOptions.MaxTurnAttempts), nameof(AgentsOptions.MaxInputMessages),
             nameof(AgentsOptions.MaxOutputTokens), nameof(AgentsOptions.MaxConcurrentTurnsPerTenant), nameof(AgentsOptions.ExecutorBatchSize), nameof(AgentsOptions.ExecutorParallelism),
-            nameof(AgentsOptions.ReconcileSessionsPerTenant), nameof(AgentsOptions.ReconcileTenantBatchSize),
+            nameof(AgentsOptions.ReconcileSessionsPerTenant), nameof(AgentsOptions.ReconcileTenantBatchSize), nameof(AgentsOptions.KnowledgeGapMaxPerTenant),
         };
         var propriedadesNumericas = typeof(AgentsOptions).GetProperties()
             .Where(p => p.PropertyType == typeof(TimeSpan) || p.PropertyType == typeof(int))

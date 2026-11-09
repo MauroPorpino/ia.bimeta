@@ -60,6 +60,7 @@ public sealed class TurnRunner
     private readonly IAiGateway _gateway;
     private readonly IHandoffRequests _handoff;
     private readonly IAgentDefinitionReader _definitions;
+    private readonly IKnowledgeGapRecorder _gaps;
     private readonly AgentsOptions _options;
     private readonly TimeProvider _clock;
 
@@ -69,6 +70,7 @@ public sealed class TurnRunner
         IAiGateway gateway,
         IHandoffRequests handoff,
         IAgentDefinitionReader definitions,
+        IKnowledgeGapRecorder gaps,
         AgentsOptions options,
         TimeProvider clock)
     {
@@ -77,6 +79,7 @@ public sealed class TurnRunner
         _gateway = gateway;
         _handoff = handoff;
         _definitions = definitions;
+        _gaps = gaps;
         _options = options;
         _clock = clock;
     }
@@ -241,8 +244,10 @@ public sealed class TurnRunner
     }
 
     /// <summary>
-    /// A resposta direta do FAQ (ADR 0029). Só responde quando TODAS as condições valem: a função está ligada, o grupo é UMA mensagem de texto pronta, o idioma efetivo da conversa é o do FAQ e exatamente uma entrada,
-    /// com <c>AutoReply</c>, tem a pergunta ou um alias IGUAL à mensagem (<see cref="FaqMatcher"/>). Qualquer dúvida devolve nulo e o turno segue ao modelo, que já tem o FAQ no prompt. A resposta sai pelo mesmo
+    /// A resposta direta do FAQ (ADR 0029) e o registro de lacunas (ADR 0030). A mensagem só é ELEGÍVEL quando o grupo é UMA mensagem de texto pronta, no idioma do FAQ; as demais (várias mensagens, mídia, outro
+    /// idioma) vão ao modelo sem passar por aqui, e NÃO viram lacuna (não são uma pergunta que o FAQ pudesse responder). Elegível, a busca (<see cref="FaqMatcher"/>) decide: exatamente uma entrada, com
+    /// <c>AutoReply</c>, igual à mensagem e a função ligada responde direto; qualquer dúvida devolve nulo e o turno segue ao modelo, que já tem o FAQ no prompt. O que NÃO foi respondido direto por não haver
+    /// correspondência, haver mais de uma ou a entrada não ter <c>AutoReply</c> é registrado como lacuna (só referências e um hash, melhor esforço, nunca o texto). A resposta sai pelo mesmo
     /// <c>RegisterAiReply</c> do aviso e da resposta de áudio (<see cref="ReplyKind.Informative"/>, sem identificador de chamada ao modelo): as cercas do Conversations (turno ativo, época, <c>StateVersion</c>, cerca de
     /// entrada e idempotência por <c>TurnId</c>) valem como sempre, e uma resposta defasada é recusada. O texto vem da definição PUBLICADA do tenant do turno e a mensagem, da sessão autorizada: não há cache nem
     /// estado compartilhado entre tenants ou sessões.
@@ -250,7 +255,7 @@ public sealed class TurnRunner
     private async Task<TurnRunResult?> TryAnswerFromFaqAsync(
         AiTurn turno, long lane, TurnGrant concessao, TurnSnapshot snapshot, IReadOnlyList<SnapshotMessage> grupo, AgentDefinitionContent definicao, CancellationToken ct)
     {
-        if (!_options.FaqDirectAnswerEnabled || grupo.Count != 1)
+        if (grupo.Count != 1)
         {
             return null;
         }
@@ -267,13 +272,49 @@ public sealed class TurnRunner
         }
 
         var achado = FaqMatcher.Match(definicao.Faq, mensagem.Text);
-        if (achado.Kind != FaqMatchKind.Direct)
+        if (achado.Kind == FaqMatchKind.Direct)
         {
-            return null;
+            if (!_options.FaqDirectAnswerEnabled)
+            {
+                return null; // a pergunta está no FAQ: não é lacuna, só a resposta direta está desligada
+            }
+
+            var registro = await RegisterAsync(turno, concessao, snapshot, ReplyKind.Informative, achado.Entry!.Answer, Array.Empty<Guid>(), ct);
+            return await AfterRegisterAsync(turno, lane, concessao, snapshot, registro, AiTurnEndReasons.FaqHit, TurnRunOutcome.FaqReply, definicao, ct);
         }
 
-        var registro = await RegisterAsync(turno, concessao, snapshot, ReplyKind.Informative, achado.Entry!.Answer, Array.Empty<Guid>(), ct);
-        return await AfterRegisterAsync(turno, lane, concessao, snapshot, registro, AiTurnEndReasons.FaqHit, TurnRunOutcome.FaqReply, definicao, ct);
+        await RecordGapAsync(turno, snapshot, mensagem, achado.Kind, ct);
+        return null;
+    }
+
+    /// <summary>
+    /// Registra a ocorrência da lacuna, só com referências (o texto vai ao registrador normalizado e em memória, para o hash). MELHOR ESFORÇO: nenhuma falha do registro (banco, tabela, chave) derruba nem atrasa o
+    /// turno; só o cancelamento do próprio turno passa.
+    /// </summary>
+    private async Task RecordGapAsync(AiTurn turno, TurnSnapshot snapshot, SnapshotMessage mensagem, FaqMatchKind achado, CancellationToken ct)
+    {
+        var normalizada = FaqMatcher.Normalize(mensagem.Text);
+        if (normalizada.Length == 0)
+        {
+            return; // só símbolos ou emoji: nada a revisar
+        }
+
+        var tipo = achado switch
+        {
+            FaqMatchKind.Ambiguous => KnowledgeGapKind.Ambiguous,
+            FaqMatchKind.NotAutoReply => KnowledgeGapKind.NotAutoReply,
+            _ => KnowledgeGapKind.NoMatch,
+        };
+
+        try
+        {
+            await _gaps.RecordAsync(
+                new KnowledgeGapCandidate(turno.TenantId, turno.Id, turno.SessionId, snapshot.ConversationId, mensagem.MessageId, normalizada, tipo, _clock.GetUtcNow()), ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Só a revisão futura perde esta ocorrência: o atendimento segue.
+        }
     }
 
     // O registro da resposta e o que cada recusa significa (CONVERSATION-LIFECYCLE.md §6.1, T5, T7 e T7b).

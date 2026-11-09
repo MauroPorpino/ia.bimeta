@@ -52,6 +52,8 @@ internal static class RetentionInventory
         ["contact_center.agent_presences"] = (DataClass.Personal, "presença dos atendentes (colaboradores)"),
         ["channels.outbound_messages"] = (DataClass.Personal, "despacho das respostas (identificadores do provedor)"),
         ["agents.ai_turns"] = (DataClass.Personal, "turnos de IA ligados ao atendimento"),
+        ["agents.knowledge_gaps"] = (DataClass.Personal, "lacunas do FAQ (ADR 0030): hash com segredo do tenant de uma pergunta de cliente, contagem de datas e a decisão do administrador; nenhum texto de cliente"),
+        ["agents.knowledge_gap_occurrences"] = (DataClass.Personal, "ocorrências das lacunas (ADR 0030): só REFERÊNCIAS ao atendimento, à conversa e à mensagem (o texto fica no Conversations); a referência a mensagem removida é tratada na revisão"),
         ["identity.users"] = (DataClass.Personal, "cadastro dos colaboradores (e-mail, nome, hash de senha)"),
         ["identity.user_organization_grants"] = (DataClass.Personal, "papéis dos colaboradores"),
 

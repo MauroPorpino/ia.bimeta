@@ -124,3 +124,64 @@ internal sealed class AgentDefinitionVersionConfiguration : IEntityTypeConfigura
         builder.HasIndex(v => v.TenantId, OnePublishedIndex).IsUnique().HasFilter("status = 2");
     }
 }
+
+internal sealed class KnowledgeGapConfiguration : IEntityTypeConfiguration<KnowledgeGap>
+{
+    /// <summary>Uma lacuna por pergunta (hash) e por tenant: é o que torna o agrupamento atômico (<c>ON CONFLICT</c>) entre turnos concorrentes.</summary>
+    public const string UniqueHashIndex = "ux_knowledge_gaps_tenant_id_question_hash";
+
+    public void Configure(EntityTypeBuilder<KnowledgeGap> builder)
+    {
+        builder.ToTable("knowledge_gaps", table =>
+        {
+            table.HasCheckConstraint("ck_knowledge_gaps_kind", "kind IN (1, 2, 3)");
+            table.HasCheckConstraint("ck_knowledge_gaps_status", "status IN (1, 2, 3)");
+            table.HasCheckConstraint("ck_knowledge_gaps_hash", "octet_length(question_hash) = 32");
+            table.HasCheckConstraint("ck_knowledge_gaps_revision", "revision >= 1");
+
+            // Aberta se, e somente se, ainda não foi decidida; a versão do rascunho só existe em quem foi enviada a ele.
+            table.HasCheckConstraint("ck_knowledge_gaps_decided", "(status = 1) = (decided_at IS NULL)");
+            table.HasCheckConstraint("ck_knowledge_gaps_promoted_version", "promoted_version IS NULL OR (status = 3 AND promoted_version >= 1)");
+        });
+
+        // TEN-3: a chave composta começa por tenant_id. O filtro global por tenant é aplicado no DbContext.
+        builder.HasKey(g => new { g.TenantId, g.Id });
+        builder.Property(g => g.TenantId).HasColumnName("tenant_id").HasConversion(new TenantIdConverter()).ValueGeneratedNever();
+        builder.Property(g => g.Id).HasColumnName("id").ValueGeneratedNever();
+        builder.Property(g => g.QuestionHash).HasColumnName("question_hash").HasColumnType("bytea");
+        builder.Property(g => g.Kind).HasColumnName("kind").HasConversion<short>();
+        builder.Property(g => g.Status).HasColumnName("status").HasConversion<short>();
+        builder.Property(g => g.FirstSeenAt).HasColumnName("first_seen_at");
+        builder.Property(g => g.LastSeenAt).HasColumnName("last_seen_at");
+        builder.Property(g => g.DecidedAt).HasColumnName("decided_at");
+        builder.Property(g => g.DecidedBy).HasColumnName("decided_by");
+        builder.Property(g => g.PromotedVersion).HasColumnName("promoted_version");
+        builder.Property(g => g.Revision).HasColumnName("revision").IsConcurrencyToken();
+
+        builder.HasIndex(g => new { g.TenantId, g.QuestionHash }).IsUnique().HasDatabaseName(UniqueHashIndex);
+
+        // A lista da revisão: por situação, das mais recentes.
+        builder.HasIndex(g => new { g.TenantId, g.Status, g.LastSeenAt }).HasDatabaseName("ix_knowledge_gaps_tenant_id_status_last_seen_at");
+    }
+}
+
+internal sealed class KnowledgeGapOccurrenceConfiguration : IEntityTypeConfiguration<KnowledgeGapOccurrence>
+{
+    public void Configure(EntityTypeBuilder<KnowledgeGapOccurrence> builder)
+    {
+        builder.ToTable("knowledge_gap_occurrences");
+
+        // A chave é (tenant, turno): um turno conta UMA vez (a idempotência do registro). A referência à mensagem é um identificador opaco do Conversations: nenhuma chave estrangeira para outro esquema (DAD-2).
+        builder.HasKey(o => new { o.TenantId, o.TurnId });
+        builder.Property(o => o.TenantId).HasColumnName("tenant_id").HasConversion(new TenantIdConverter()).ValueGeneratedNever();
+        builder.Property(o => o.TurnId).HasColumnName("turn_id").ValueGeneratedNever();
+        builder.Property(o => o.GapId).HasColumnName("gap_id");
+        builder.Property(o => o.SessionId).HasColumnName("session_id");
+        builder.Property(o => o.ConversationId).HasColumnName("conversation_id");
+        builder.Property(o => o.MessageId).HasColumnName("message_id");
+        builder.Property(o => o.OccurredAt).HasColumnName("occurred_at");
+
+        builder.HasOne<KnowledgeGap>().WithMany().HasForeignKey(o => new { o.TenantId, o.GapId }).OnDelete(DeleteBehavior.Cascade);
+        builder.HasIndex(o => new { o.TenantId, o.GapId, o.OccurredAt }).HasDatabaseName("ix_knowledge_gap_occurrences_tenant_id_gap_id_occurred_at");
+    }
+}

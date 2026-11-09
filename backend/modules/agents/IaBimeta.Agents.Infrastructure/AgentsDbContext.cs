@@ -33,6 +33,10 @@ public sealed class AgentsDbContext : DbContext
 
     public DbSet<AgentDefinitionVersion> DefinitionVersions => Set<AgentDefinitionVersion>();
 
+    public DbSet<KnowledgeGap> KnowledgeGaps => Set<KnowledgeGap>();
+
+    public DbSet<KnowledgeGapOccurrence> KnowledgeGapOccurrences => Set<KnowledgeGapOccurrence>();
+
     // O EF reavalia esta propriedade a cada execução de consulta (membro do DbContext no filtro global).
     private TenantId TenantAtual => _contexto.GetRequired().TenantId;
 
@@ -46,12 +50,16 @@ public sealed class AgentsDbContext : DbContext
 
         modelBuilder.ApplyConfiguration(new AiTurnConfiguration());
         modelBuilder.ApplyConfiguration(new AgentDefinitionVersionConfiguration());
+        modelBuilder.ApplyConfiguration(new KnowledgeGapConfiguration());
+        modelBuilder.ApplyConfiguration(new KnowledgeGapOccurrenceConfiguration());
 
         // Inbox do consumidor (BOUNDARIES.md §12.1): a idempotência por EventId do que este módulo consome do Conversations.
         modelBuilder.ConfigureInbox();
 
         modelBuilder.Entity<AiTurn>().HasQueryFilter(e => e.TenantId == TenantAtual);
         modelBuilder.Entity<AgentDefinitionVersion>().HasQueryFilter(e => e.TenantId == TenantAtual);
+        modelBuilder.Entity<KnowledgeGap>().HasQueryFilter(e => e.TenantId == TenantAtual);
+        modelBuilder.Entity<KnowledgeGapOccurrence>().HasQueryFilter(e => e.TenantId == TenantAtual);
     }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)

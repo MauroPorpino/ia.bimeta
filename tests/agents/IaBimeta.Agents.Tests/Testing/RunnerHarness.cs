@@ -23,7 +23,8 @@ internal sealed class RunnerHarness
         Gateway = new ScriptedGateway();
         Handoff = new FakeHandoff();
         Definitions = new FakeDefinitions();
-        Runner = new TurnRunner(Store, Turns, Gateway, Handoff, Definitions, Options, Clock);
+        Gaps = new FakeGapRecorder();
+        Runner = new TurnRunner(Store, Turns, Gateway, Handoff, Definitions, Gaps, Options, Clock);
     }
 
     public AgentsOptions Options { get; }
@@ -39,6 +40,8 @@ internal sealed class RunnerHarness
     public FakeHandoff Handoff { get; }
 
     public FakeDefinitions Definitions { get; }
+
+    public FakeGapRecorder Gaps { get; }
 
     public TurnRunner Runner { get; }
 

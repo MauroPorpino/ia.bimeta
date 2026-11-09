@@ -47,6 +47,24 @@ public sealed class AgentsOptions
     /// </summary>
     public bool FaqDirectAnswerEnabled { get; set; } = true;
 
+    /// <summary>
+    /// Liga o REGISTRO DE LACUNAS do FAQ (ADR 0030): a pergunta de cliente que não teve resposta direta e vale uma revisão vira uma ocorrência (só referências e um hash, nunca o texto). Independe da resposta direta:
+    /// um tenant que ainda não ligou nenhum <c>AutoReply</c> também descobre o que os clientes perguntam. Desligado, nada é gravado. Sem <see cref="KnowledgeGapHashKey"/> o registro também não roda.
+    /// </summary>
+    public bool KnowledgeGapsEnabled { get; set; } = true;
+
+    /// <summary>
+    /// A chave MESTRA (Base64, pelo menos 32 bytes) de onde sai a chave do hash de cada tenant (<see cref="KnowledgeGapHasher"/>). Vem da configuração do ambiente, nunca de arquivo versionado, e NUNCA vai a log nem
+    /// a resposta. Ausente: o registro de lacunas fica desligado (o turno não falha por isso). Inválida ou curta: o host não parte.
+    /// </summary>
+    public string? KnowledgeGapHashKey { get; set; }
+
+    /// <summary>
+    /// Quantas lacunas (perguntas distintas) um tenant guarda. Atingido o teto, as perguntas NOVAS não abrem lacuna (as que já existem continuam contando): um cliente que manda mil textos diferentes não enche
+    /// o banco. A revisão (descartar ou enviar ao rascunho) e, depois, a retenção é que liberam espaço.
+    /// </summary>
+    public int KnowledgeGapMaxPerTenant { get; set; } = 5000;
+
     /// <summary>A espera por capacidade: o limite de chamadas simultâneas do tenant no AiGateway está cheio, e o turno volta depois sem gastar tentativa.</summary>
     public TimeSpan CapacityRetry { get; set; } = TimeSpan.FromSeconds(3);
 
@@ -124,10 +142,21 @@ public sealed class AgentsOptions
             || ExecutorBatchSize is < 1 or > 1000
             || ExecutorParallelism is < 1 or > 64
             || ReconcileSessionsPerTenant is < 1 or > 100
-            || ReconcileTenantBatchSize is < 1 or > 1000)
+            || ReconcileTenantBatchSize is < 1 or > 1000
+            || KnowledgeGapMaxPerTenant is < 1 or > 1_000_000)
         {
             throw new InvalidOperationException(
                 "A configuração do Agents é inválida (tempos, tentativas, mensagens, tetos, capacidade ou lotes); o tempo do turno precisa passar o da chamada ao modelo.");
+        }
+
+        try
+        {
+            _ = KnowledgeGapHasher.FromBase64(KnowledgeGapHashKey);
+        }
+        catch (FormatException)
+        {
+            // O valor da chave nunca entra na mensagem.
+            throw new InvalidOperationException("Agents:Options:KnowledgeGapHashKey deve ser Base64 de pelo menos 32 bytes (ou ficar vazia para desligar o registro de lacunas).");
         }
     }
 }

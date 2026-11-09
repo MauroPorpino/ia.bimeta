@@ -40,6 +40,12 @@ public static class AgentsInfrastructureExtensions
         services.AddScoped<TurnRunner>();
         services.AddScoped<AgentDefinitionService>();
 
+        // As lacunas do FAQ (ADR 0030): o registro (melhor esforço, só referências e um hash com segredo do tenant) e a revisão do administrador. Sem Agents:Options:KnowledgeGapHashKey o registro fica desligado.
+        services.AddSingleton(new KnowledgeGapHasherHolder(KnowledgeGapHasher.FromBase64(opcoes.KnowledgeGapHashKey)));
+        services.AddScoped<IKnowledgeGapStore, KnowledgeGapStore>();
+        services.AddScoped<IKnowledgeGapRecorder, KnowledgeGapRecorder>();
+        services.AddScoped<KnowledgeGapService>();
+
         // Consumo durável do estado de atendimento do Conversations: o inbox do módulo e os handlers (que só gravam o AiTurn).
         services.AddInboxGate<AgentsDbContext>();
         services.AddEventHandler<InboundMessageRegisteredHandler>();

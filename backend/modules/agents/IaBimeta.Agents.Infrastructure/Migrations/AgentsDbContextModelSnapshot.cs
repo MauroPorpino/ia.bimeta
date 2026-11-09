@@ -241,6 +241,117 @@ namespace IaBimeta.Agents.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("IaBimeta.Agents.Domain.KnowledgeGap", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset?>("DecidedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("decided_at");
+
+                    b.Property<Guid?>("DecidedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("decided_by");
+
+                    b.Property<DateTimeOffset>("FirstSeenAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("first_seen_at");
+
+                    b.Property<short>("Kind")
+                        .HasColumnType("smallint")
+                        .HasColumnName("kind");
+
+                    b.Property<DateTimeOffset>("LastSeenAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_seen_at");
+
+                    b.Property<int?>("PromotedVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("promoted_version");
+
+                    b.Property<byte[]>("QuestionHash")
+                        .IsRequired()
+                        .HasColumnType("bytea")
+                        .HasColumnName("question_hash");
+
+                    b.Property<int>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("revision");
+
+                    b.Property<short>("Status")
+                        .HasColumnType("smallint")
+                        .HasColumnName("status");
+
+                    b.HasKey("TenantId", "Id");
+
+                    b.HasIndex("TenantId", "QuestionHash")
+                        .IsUnique()
+                        .HasDatabaseName("ux_knowledge_gaps_tenant_id_question_hash");
+
+                    b.HasIndex("TenantId", "Status", "LastSeenAt")
+                        .HasDatabaseName("ix_knowledge_gaps_tenant_id_status_last_seen_at");
+
+                    b.ToTable("knowledge_gaps", "agents", t =>
+                        {
+                            t.HasCheckConstraint("ck_knowledge_gaps_decided", "(status = 1) = (decided_at IS NULL)");
+
+                            t.HasCheckConstraint("ck_knowledge_gaps_hash", "octet_length(question_hash) = 32");
+
+                            t.HasCheckConstraint("ck_knowledge_gaps_kind", "kind IN (1, 2, 3)");
+
+                            t.HasCheckConstraint("ck_knowledge_gaps_promoted_version", "promoted_version IS NULL OR (status = 3 AND promoted_version >= 1)");
+
+                            t.HasCheckConstraint("ck_knowledge_gaps_revision", "revision >= 1");
+
+                            t.HasCheckConstraint("ck_knowledge_gaps_status", "status IN (1, 2, 3)");
+                        });
+                });
+
+            modelBuilder.Entity("IaBimeta.Agents.Domain.KnowledgeGapOccurrence", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid>("TurnId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("turn_id");
+
+                    b.Property<Guid>("ConversationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("conversation_id");
+
+                    b.Property<Guid>("GapId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("gap_id");
+
+                    b.Property<Guid>("MessageId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("message_id");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("occurred_at");
+
+                    b.Property<Guid>("SessionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("session_id");
+
+                    b.HasKey("TenantId", "TurnId");
+
+                    b.HasIndex("TenantId", "GapId", "OccurredAt")
+                        .HasDatabaseName("ix_knowledge_gap_occurrences_tenant_id_gap_id_occurred_at");
+
+                    b.ToTable("knowledge_gap_occurrences", "agents");
+                });
+
             modelBuilder.Entity("IaBimeta.Messaging.InboxMessage", b =>
                 {
                     b.Property<Guid>("TenantId")
@@ -263,6 +374,15 @@ namespace IaBimeta.Agents.Infrastructure.Migrations
                     b.HasKey("TenantId", "Consumer", "EventId");
 
                     b.ToTable("inbox_message", "agents");
+                });
+
+            modelBuilder.Entity("IaBimeta.Agents.Domain.KnowledgeGapOccurrence", b =>
+                {
+                    b.HasOne("IaBimeta.Agents.Domain.KnowledgeGap", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "GapId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 #pragma warning restore 612, 618
         }

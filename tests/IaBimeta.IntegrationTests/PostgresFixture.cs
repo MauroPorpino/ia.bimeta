@@ -48,6 +48,9 @@ public sealed class PostgresFixture : IAsyncLifetime
     /// <summary>A chave de cifra das credenciais nos testes: aleatória a cada execução, sintética, nunca gravada em arquivo.</summary>
     public static readonly string ChaveDeCifraDeTeste = Convert.ToBase64String(RandomNumberGenerator.GetBytes(ChannelSecretOptions.KeySizeBytes));
 
+    /// <summary>A chave MESTRA do hash das lacunas do FAQ (ADR 0030) dos testes: sintética e aleatória a cada execução, nunca uma chave real.</summary>
+    public static readonly string ChaveDeLacunasDeTeste = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+
     public const string IdDaChaveDeTeste = "teste-1";
 
     /// <summary>A chave mestra das credenciais de IA nos testes: PRÓPRIA do AiGateway (diferente da dos canais), aleatória a cada execução, sintética, nunca gravada em arquivo.</summary>
@@ -200,7 +203,7 @@ public sealed class PostgresFixture : IAsyncLifetime
 
             // O adaptador REAL da OpenAI (C4), com o servidor HTTP simulado no lugar da rede: o pedido, o uso, os erros e o tempo limite são os do adaptador de produção.
             colecao.AddSingleton<IAiProvider>(_ => new IaBimeta.Adapters.Ai.OpenAI.OpenAiProvider(new HttpClient(ServidorOpenAi) { Timeout = Timeout.InfiniteTimeSpan }, new IaBimeta.Adapters.Ai.OpenAI.OpenAiOptions()));
-            colecao.AddAgents(_ => ConnectionString);
+            colecao.AddAgents(_ => ConnectionString, opcoes => opcoes.KnowledgeGapHashKey = ChaveDeLacunasDeTeste);
         }
 
         return colecao.BuildServiceProvider(validateScopes: true);

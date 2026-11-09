@@ -290,6 +290,23 @@ internal sealed class FakeHandoff : IHandoffRequests
     }
 }
 
+/// <summary>O registrador de lacunas dos testes: guarda o que o turno lhe entregou e pode falhar de propósito (o turno nunca pode depender dele).</summary>
+internal sealed class FakeGapRecorder : IKnowledgeGapRecorder
+{
+    public List<KnowledgeGapCandidate> Candidates { get; } = new();
+
+    public Func<KnowledgeGapCandidate, Task>? Behavior { get; set; }
+
+    public async Task RecordAsync(KnowledgeGapCandidate candidate, CancellationToken cancellationToken)
+    {
+        Candidates.Add(candidate);
+        if (Behavior is not null)
+        {
+            await Behavior(candidate);
+        }
+    }
+}
+
 internal sealed class FakeDefinitions : IAgentDefinitionReader
 {
     public AgentDefinitionContent? Published { get; set; } = Definitions.Default();
