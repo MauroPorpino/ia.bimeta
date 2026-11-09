@@ -42,7 +42,7 @@ public sealed record SessionView(
 /// <summary>
 /// Visão de uma mensagem para quem lê o histórico (usuário autorizado). O texto de conteúdo que ainda não está pronto é
 /// nulo: ninguém lê conteúdo que não foi interpretado. <c>TemplateName</c> é o nome do modelo de mensagem do provedor quando a mensagem foi enviada por um modelo (o texto é o que o cliente leu, já com os
-/// parâmetros); nulo nas demais.
+/// parâmetros); nulo nas demais. <c>Attachment</c> é o arquivo de uma mensagem de mídia (áudio, imagem, documento) com o estado dele; nunca traz caminho, URL nem identificador do provedor.
 /// </summary>
 public sealed record MessageView(
     Guid Id,
@@ -67,7 +67,8 @@ public sealed record MessageView(
     ChannelInstanceId ChannelInstanceId,
     Locale? Locale = null,
     MessageLocaleOrigin? LocaleOrigin = null,
-    string? TemplateName = null);
+    string? TemplateName = null,
+    AttachmentView? Attachment = null);
 
 /// <summary>
 /// Um encaminhamento da sessão entre unidades (e setores): de onde, para onde, quem pediu, por quê e quando. O rastro é só

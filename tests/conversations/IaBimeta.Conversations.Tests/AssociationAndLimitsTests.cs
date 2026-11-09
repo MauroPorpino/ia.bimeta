@@ -135,16 +135,17 @@ public class AssociationAndLimitsTests
     }
 
     [Fact]
-    public void O_modo_de_associacao_e_o_ultimo_parametro_da_ingestao_e_opcional_com_o_padrao_do_contato()
+    public void O_modo_de_associacao_e_opcional_com_o_padrao_do_contato_e_so_a_midia_vem_depois_dele()
     {
         var parametros = typeof(IngestInboundMessageCommand).GetConstructors().Single().GetParameters();
-        var ultimo = parametros[^1];
+        var ultimo = parametros[^2];
 
         Assert.Equal(nameof(IngestInboundMessageCommand.AssociationMode), ultimo.Name);
         Assert.True(ultimo.HasDefaultValue);
         Assert.Equal(AssociationMode.Contact, ultimo.DefaultValue);
 
-        // Tudo que vem depois dos nove obrigatórios é opcional: nenhum chamador anterior quebra.
+        // A mídia (ADR 0028) é o último parâmetro, também opcional. Tudo que vem depois dos nove obrigatórios é opcional: nenhum chamador anterior quebra.
+        Assert.Equal(nameof(IngestInboundMessageCommand.Attachment), parametros[^1].Name);
         Assert.All(parametros.Skip(9), p => Assert.True(p.HasDefaultValue, $"{p.Name} precisa ser opcional."));
     }
 }

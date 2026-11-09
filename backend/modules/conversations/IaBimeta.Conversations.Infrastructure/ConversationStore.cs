@@ -113,6 +113,11 @@ internal sealed class ConversationStore : IConversationStore
     {
         var mensagens = _db.Messages.AsNoTracking().Where(m => m.SessionId == sessionId);
 
+        if (filter.MessageId is { } soEsta)
+        {
+            mensagens = mensagens.Where(m => m.Id == soEsta);
+        }
+
         // O limite do período vale na própria consulta, ANTES da paginação: a ordem de exibição (OccurredAt) e a de ingestão (MessageSeq) não
         // são a mesma, então um corte feito depois de paginar omitiria mensagens válidas ou deixaria entrar as de fora.
         if (filter.ThroughMessageSeq is { } ate)
@@ -143,6 +148,14 @@ internal sealed class ConversationStore : IConversationStore
 
     public Task<Message?> FindMessageAsync(Guid sessionId, Guid messageId, CancellationToken cancellationToken) =>
         _db.Messages.AsNoTracking().FirstOrDefaultAsync(m => m.SessionId == sessionId && m.Id == messageId, cancellationToken);
+
+    public async Task<IReadOnlyDictionary<Guid, MessageAttachment>> ListAttachmentsAsync(IReadOnlyCollection<Guid> messageIds, CancellationToken cancellationToken) =>
+        messageIds.Count == 0
+            ? new Dictionary<Guid, MessageAttachment>()
+            : await _db.Attachments.AsNoTracking().Where(a => messageIds.Contains(a.MessageId)).ToDictionaryAsync(a => a.MessageId, cancellationToken);
+
+    public Task<MessageAttachment?> FindAttachmentAsync(Guid messageId, CancellationToken cancellationToken) =>
+        _db.Attachments.AsNoTracking().FirstOrDefaultAsync(a => a.MessageId == messageId, cancellationToken);
 
     public async Task<IReadOnlyList<MessageTranslation>> ListTranslationsAsync(Guid messageId, CancellationToken cancellationToken) =>
         await _db.Translations.AsNoTracking()
@@ -355,6 +368,11 @@ internal sealed class ConversationUnitOfWork : IConversationUnitOfWork
     public void Add(SessionTransfer transfer) => _db.Transfers.Add(transfer);
 
     public void Add(MessageTranslation translation) => _db.Translations.Add(translation);
+
+    public void Add(MessageAttachment attachment) => _db.Attachments.Add(attachment);
+
+    public Task<MessageAttachment?> FindAttachmentForUpdateAsync(Guid messageId, CancellationToken cancellationToken) =>
+        _db.Attachments.FirstOrDefaultAsync(a => a.MessageId == messageId, cancellationToken);
 
     public Task CommitAsync(CancellationToken cancellationToken) => CommitAsync(Array.Empty<EventEnvelope>(), cancellationToken);
 

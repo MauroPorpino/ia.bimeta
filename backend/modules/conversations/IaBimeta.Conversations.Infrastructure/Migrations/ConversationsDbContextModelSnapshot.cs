@@ -335,6 +335,106 @@ namespace IaBimeta.Conversations.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("IaBimeta.Conversations.Domain.MessageAttachment", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Caption")
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)")
+                        .HasColumnName("caption");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("DeclaredMimeType")
+                        .HasMaxLength(127)
+                        .HasColumnType("character varying(127)")
+                        .HasColumnName("declared_mime_type");
+
+                    b.Property<string>("FailureCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("failure_code");
+
+                    b.Property<string>("FileName")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("file_name");
+
+                    b.Property<short>("Kind")
+                        .HasColumnType("smallint")
+                        .HasColumnName("kind");
+
+                    b.Property<Guid>("MessageId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("message_id");
+
+                    b.Property<string>("MimeType")
+                        .HasMaxLength(127)
+                        .HasColumnType("character varying(127)")
+                        .HasColumnName("mime_type");
+
+                    b.Property<string>("ProviderMediaId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("provider_media_id");
+
+                    b.Property<Guid>("SessionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("session_id");
+
+                    b.Property<string>("Sha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("sha256");
+
+                    b.Property<long?>("SizeBytes")
+                        .HasColumnType("bigint")
+                        .HasColumnName("size_bytes");
+
+                    b.Property<short>("Status")
+                        .HasColumnType("smallint")
+                        .HasColumnName("status");
+
+                    b.Property<string>("StorageKey")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("storage_key");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("TenantId", "Id");
+
+                    b.HasIndex("TenantId", "MessageId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_message_attachments_tenant_id_message_id");
+
+                    b.HasIndex("TenantId", "SessionId")
+                        .HasDatabaseName("ix_message_attachments_tenant_id_session_id");
+
+                    b.ToTable("message_attachments", "conversations", t =>
+                        {
+                            t.HasCheckConstraint("ck_message_attachments_available", "(status = 2 AND storage_key IS NOT NULL AND mime_type IS NOT NULL AND size_bytes IS NOT NULL AND size_bytes >= 1 AND sha256 IS NOT NULL AND failure_code IS NULL) OR (status <> 2 AND storage_key IS NULL AND mime_type IS NULL AND size_bytes IS NULL AND sha256 IS NULL)");
+
+                            t.HasCheckConstraint("ck_message_attachments_failure", "(status IN (3, 4) AND failure_code IS NOT NULL) OR (status IN (1, 2) AND failure_code IS NULL)");
+
+                            t.HasCheckConstraint("ck_message_attachments_kind", "kind IN (2, 3, 4)");
+
+                            t.HasCheckConstraint("ck_message_attachments_status", "status IN (1, 2, 3, 4)");
+                        });
+                });
+
             modelBuilder.Entity("IaBimeta.Conversations.Domain.MessageTranslation", b =>
                 {
                     b.Property<Guid>("TenantId")
@@ -746,6 +846,15 @@ namespace IaBimeta.Conversations.Infrastructure.Migrations
                     b.HasOne("IaBimeta.Conversations.Domain.ServiceSession", null)
                         .WithMany()
                         .HasForeignKey("TenantId", "SessionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("IaBimeta.Conversations.Domain.MessageAttachment", b =>
+                {
+                    b.HasOne("IaBimeta.Conversations.Domain.Message", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "MessageId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

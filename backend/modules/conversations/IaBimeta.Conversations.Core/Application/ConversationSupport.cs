@@ -128,7 +128,7 @@ internal static class ConversationMapping
         new(t.Id, t.MessageId, t.TargetLocale, t.SourceLocale, t.Text, t.Provenance, t.CreatedAt);
 
     /// <summary>Visão para leitura humana: o texto de conteúdo que não está pronto fica nulo.</summary>
-    public static MessageView ToView(this Message m) => new(
+    public static MessageView ToView(this Message m, MessageAttachment? anexo = null) => new(
         m.Id,
         m.SessionId,
         m.ConversationId,
@@ -151,7 +151,12 @@ internal static class ConversationMapping
         m.ChannelInstanceId,
         m.Locale,
         m.LocaleOrigin,
-        m.ChannelDataValues is { } dados && dados.TryGetValue(ChannelDataKeys.TemplateName, out var modelo) ? modelo : null);
+        m.ChannelDataValues is { } dados && dados.TryGetValue(ChannelDataKeys.TemplateName, out var modelo) ? modelo : null,
+        anexo?.ToView());
+
+    /// <summary>O arquivo como o histórico o mostra: o tipo verificado e o tamanho só com o arquivo disponível; nunca o caminho, o identificador do provedor nem URL.</summary>
+    public static AttachmentView ToView(this MessageAttachment a) =>
+        new(a.Id, a.Status, a.MimeType, a.FileName, a.SizeBytes, a.FailureCode, a.Caption);
 
     /// <summary>
     /// Visão para o modelo de IA: conteúdo indisponível nunca entra (I9). Sem texto, sem marcador que o modelo possa tratar

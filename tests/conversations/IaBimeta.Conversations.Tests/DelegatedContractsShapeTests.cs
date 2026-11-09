@@ -152,9 +152,11 @@ public class DelegatedContractsShapeTests
     {
         var evento = Parametros(typeof(IngestInboundMessageCommand));
 
-        // A1 acrescentou ChannelData; A2 acrescentou, depois dele, o modo de associação. Os dois são opcionais e vêm no fim.
-        Assert.Equal(("ChannelData", "ChannelData"), evento[^2]);
-        Assert.Equal(("AssociationMode", "AssociationMode"), evento[^1]);
+        // A1 acrescentou ChannelData; A2, depois dele, o modo de associação; o ADR 0028, depois, a mídia (Attachment). Os três são opcionais e vêm no fim.
+        Assert.Equal(("ChannelData", "ChannelData"), evento[^3]);
+        Assert.Equal(("AssociationMode", "AssociationMode"), evento[^2]);
+        Assert.Equal(("InboundAttachment", "Attachment"), evento[^1]);
+        Assert.Contains("Attachment", ComPadrao(typeof(IngestInboundMessageCommand)));
         Assert.Contains("ChannelData", ComPadrao(typeof(IngestInboundMessageCommand)));
         Assert.Contains("AssociationMode", ComPadrao(typeof(IngestInboundMessageCommand)));
         Assert.Equal(

@@ -48,4 +48,5 @@ public sealed record ListSessionsQuery(int Take, string? Cursor, SessionStatus? 
 /// ANTES da paginação, então as páginas e os cursores continuam consistentes (a ordem de exibição é por <c>OccurredAt</c>, e a de
 /// ingestão não é a mesma: nenhuma mensagem válida é omitida e nenhuma de fora aparece).
 /// </param>
-public sealed record GetHistoryQuery(Guid SessionId, int Take, string? Cursor, HistoryOrder Order, long? ThroughMessageSeq = null);
+/// <param name="MessageId">Se informado, só essa mensagem (dentro dos mesmos limites): é como o ContactCenter confere, com as regras do histórico, se o atendente pode abrir o arquivo de UMA mensagem.</param>
+public sealed record GetHistoryQuery(Guid SessionId, int Take, string? Cursor, HistoryOrder Order, long? ThroughMessageSeq = null, Guid? MessageId = null);

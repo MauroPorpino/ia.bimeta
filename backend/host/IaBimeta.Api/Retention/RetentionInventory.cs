@@ -40,6 +40,7 @@ internal static class RetentionInventory
         // Pessoais ou conteúdo de cliente (somente relatório)
         ["conversations.messages"] = (DataClass.Personal, "conteúdo das mensagens do cliente e das respostas"),
         ["conversations.message_translations"] = (DataClass.Personal, "traduções do conteúdo das mensagens"),
+        ["conversations.message_attachments"] = (DataClass.Personal, "metadados dos arquivos do cliente (nome, tipo, tamanho, hash); os bytes ficam no armazenamento privado de anexos, FORA do banco e do backup do banco (ADR 0028)"),
         ["conversations.contacts"] = (DataClass.Personal, "identificadores do contato (telefone, nome)"),
         ["conversations.conversations"] = (DataClass.Personal, "conversas do contato"),
         ["conversations.service_sessions"] = (DataClass.Personal, "atendimentos (numeração nunca reemitida: ADR 0012)"),

@@ -1,6 +1,7 @@
 using IaBimeta.Conversations.Application;
 using IaBimeta.Conversations.Contracts.Commands;
 using IaBimeta.Conversations.Contracts.Queries;
+using IaBimeta.Conversations.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -15,7 +16,7 @@ public static class ConversationsInfrastructureExtensions
     /// (<c>IAuditWriter</c>) e um <c>IEventPublisher</c> (na etapa 3, o dublê em memória; o outbox durável nasce na etapa 4).
     /// A string de conexão é lida só quando o DbContext é usado.
     /// </summary>
-    public static IServiceCollection AddConversations(this IServiceCollection services, Func<IServiceProvider, string> connectionString)
+    public static IServiceCollection AddConversations(this IServiceCollection services, Func<IServiceProvider, string> connectionString, Action<AttachmentOptions>? configureAttachments = null)
     {
         ArgumentNullException.ThrowIfNull(connectionString);
 
@@ -46,6 +47,18 @@ public static class ConversationsInfrastructureExtensions
         services.AddScoped<IOutboundDispatchQueries>(provider => provider.GetRequiredService<OutboundDispatchQueryService>());
         services.AddScoped<OutboundDeliveryQueryService>();
         services.AddScoped<IOutboundDeliveryQueries>(provider => provider.GetRequiredService<OutboundDeliveryQueryService>());
+        // Os arquivos de mídia (ADR 0028): armazenamento privado (a pasta de Conversations:Attachments:RootPath; trocar por S3 ou Azure Blob é trocar IAttachmentContentStore) e o ponto de ligação de um
+        // mecanismo de varredura (sem nenhum, NotScanned). Api e Worker precisam apontar para a MESMA pasta: o Worker guarda e o Api serve.
+        var anexos = new AttachmentOptions();
+        configureAttachments?.Invoke(anexos);
+        anexos.Validate();
+        services.AddSingleton(anexos);
+        services.TryAddSingleton<IAttachmentContentStore, FileSystemAttachmentContentStore>();
+        services.TryAddSingleton<IAttachmentScanner, NullAttachmentScanner>();
+        services.AddScoped<AttachmentService>();
+        services.AddScoped<IAttachmentCommands>(provider => provider.GetRequiredService<AttachmentService>());
+        services.AddScoped<IAttachmentQueries>(provider => provider.GetRequiredService<AttachmentService>());
+
         services.AddScoped<ConversationQueryService>();
         services.AddScoped<IConversationQueries>(provider => provider.GetRequiredService<ConversationQueryService>());
 

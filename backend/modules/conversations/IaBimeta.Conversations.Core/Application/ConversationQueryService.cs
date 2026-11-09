@@ -74,10 +74,11 @@ public sealed class ConversationQueryService : IConversationQueries
             throw new ConversationsValidationException("O limite de sequência do histórico é inválido.");
         }
 
-        var mensagens = await _store.ListMessagesAsync(query.SessionId, new MessagePageFilter(query.Order, depois, take + 1, query.ThroughMessageSeq), cancellationToken);
+        var mensagens = await _store.ListMessagesAsync(query.SessionId, new MessagePageFilter(query.Order, depois, take + 1, query.ThroughMessageSeq, query.MessageId), cancellationToken);
         var pagina = mensagens.Take(take).ToList();
         var proximo = mensagens.Count > take ? CursorCodec.Encode(new MessageCursor(pagina[^1].OccurredAt, pagina[^1].MessageSeq)) : null;
-        return new Page<MessageView>(pagina.Select(m => m.ToView()).ToList(), proximo);
+        var anexos = await _store.ListAttachmentsAsync(pagina.Where(m => m.Kind is MessageKind.Audio or MessageKind.Image or MessageKind.Document).Select(m => m.Id).ToList(), cancellationToken);
+        return new Page<MessageView>(pagina.Select(m => m.ToView(anexos.GetValueOrDefault(m.Id))).ToList(), proximo);
     }
 
     public async Task<IReadOnlyList<MessageTranslationView>?> GetMessageTranslationsAsync(Guid sessionId, Guid messageId, CancellationToken cancellationToken = default)

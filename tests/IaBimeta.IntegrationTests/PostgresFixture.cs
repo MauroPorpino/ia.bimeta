@@ -92,6 +92,9 @@ public sealed class PostgresFixture : IAsyncLifetime
 
     public string ConnectionString { get; } = TestDatabase.ConnectionString;
 
+    /// <summary>A pasta de arquivos de mídia desta execução (ADR 0028): temporária e própria, nunca a do usuário. Apagada ao final.</summary>
+    public string PastaDeAnexos { get; } = Path.Combine(Path.GetTempPath(), "iabimeta-anexos-teste-" + Guid.NewGuid().ToString("N"));
+
     /// <summary>
     /// Três provedores, a mesma composição do host. No padrão, a autorização de unidade por canal é um dublê que aceita tudo (os
     /// testes de conversas não registram canais). No de "canais reais", é a implementação do host sobre o Channels: aceita só o
@@ -150,7 +153,7 @@ public sealed class PostgresFixture : IAsyncLifetime
             colecao.AddEventHandler<ManipuladorDeTeste>();
         }
 
-        colecao.AddConversations(_ => ConnectionString);
+        colecao.AddConversations(_ => ConnectionString, anexos => anexos.RootPath = PastaDeAnexos);
 
         // Como no host: o ContactCenter chama o Conversations pela porta que age com o contexto de sistema do mesmo tenant.
         colecao.AddScoped<IConversationGateway, ElevatedConversationGateway>();
@@ -323,6 +326,18 @@ public sealed class PostgresFixture : IAsyncLifetime
         if (_servicosComAgentes is not null)
         {
             await _servicosComAgentes.DisposeAsync();
+        }
+
+        try
+        {
+            if (Directory.Exists(PastaDeAnexos))
+            {
+                Directory.Delete(PastaDeAnexos, recursive: true);
+            }
+        }
+        catch (IOException)
+        {
+            // Pasta temporária de teste: se algo a segura, o sistema a limpa depois.
         }
     }
 

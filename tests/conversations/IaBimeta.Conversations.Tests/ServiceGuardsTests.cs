@@ -33,6 +33,10 @@ public class ServiceGuardsTests
 
         public Task<Message?> FindMessageAsync(Guid sessionId, Guid messageId, CancellationToken cancellationToken) => throw Tocado();
 
+        public Task<IReadOnlyDictionary<Guid, MessageAttachment>> ListAttachmentsAsync(IReadOnlyCollection<Guid> messageIds, CancellationToken cancellationToken) => throw Tocado();
+
+        public Task<MessageAttachment?> FindAttachmentAsync(Guid messageId, CancellationToken cancellationToken) => throw Tocado();
+
         public Task<IReadOnlyList<MessageTranslation>> ListTranslationsAsync(Guid messageId, CancellationToken cancellationToken) => throw Tocado();
 
         public Task<IReadOnlyList<SessionTransfer>> ListTransfersAsync(Guid sessionId, CancellationToken cancellationToken) => throw Tocado();
@@ -503,6 +507,7 @@ public class ServiceGuardsTests
         // STL-5: nenhuma opção, de tenant ou de ambiente, altera a regra. O módulo nem expõe classe de opções.
         var tipos = typeof(TurnService).Assembly.GetTypes().Select(t => t.Name).ToList();
 
-        Assert.DoesNotContain(tipos, n => n.EndsWith("Options", StringComparison.Ordinal) || n.Contains("Stale", StringComparison.OrdinalIgnoreCase));
+        // A ÚNICA classe de opções é a dos arquivos de mídia (ADR 0028: pasta privada, tamanhos e tipos permitidos), sem relação com o aceite de resposta defasada.
+        Assert.DoesNotContain(tipos, n => (n.EndsWith("Options", StringComparison.Ordinal) && n != "AttachmentOptions") || n.Contains("Stale", StringComparison.OrdinalIgnoreCase));
     }
 }

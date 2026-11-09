@@ -83,6 +83,17 @@ public sealed class InboundMessageService : IConversationIngestion
             throw new ConversationsValidationException("O momento da mensagem no provedor é obrigatório.");
         }
 
+        // A mídia (ADR 0028): só áudio, imagem e documento têm arquivo; a forma é conferida ANTES de qualquer acesso ao armazenamento.
+        if (command.Attachment is { } midia)
+        {
+            if (command.Kind is not (MessageKind.Audio or MessageKind.Image or MessageKind.Document))
+            {
+                throw new ConversationsValidationException("Só áudio, imagem e documento têm arquivo.");
+            }
+
+            _ = MessageAttachment.CreatePending(contexto.TenantId, Guid.NewGuid(), Guid.NewGuid(), command.Kind, midia, DateTimeOffset.UnixEpoch);
+        }
+
         // Metadados do canal (A3): validados na forma ANTES de qualquer acesso ao armazenamento, e guardados com a mensagem (versão e pares, sem interpretá-los). Uma duplicata
         // não os regrava: a primeira gravação vale, e a repetição devolve a mensagem que já existe.
         if (command.ChannelData is { } dadosDoCanal)
@@ -193,6 +204,12 @@ public sealed class InboundMessageService : IConversationIngestion
                 contexto.TenantId, sessao.Id, conversa.Id, command.ChannelInstanceId, registro, evento, command.ProviderTimestamp, command.Kind, command.Text, agora, command.MessageLocale,
                 command.ChannelData);
             trabalho.Add(mensagem);
+            if (command.Attachment is { } arquivo)
+            {
+                // O registro do arquivo nasce Pending na MESMA transação da mensagem: o atendente já vê "processando" e o Channels busca o arquivo depois.
+                trabalho.Add(MessageAttachment.CreatePending(contexto.TenantId, mensagem.Id, sessao.Id, mensagem.Kind, arquivo, agora));
+            }
+
             await trabalho.CommitAsync(
                 new[]
                 {

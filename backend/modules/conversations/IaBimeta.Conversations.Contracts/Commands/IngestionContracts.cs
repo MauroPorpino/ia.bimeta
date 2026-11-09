@@ -71,6 +71,10 @@ public interface IConversationIngestion
 /// e o comportamento não muda. Um valor que não seja <see cref="AssociationMode.Contact"/> (inclusive um número fora do enum) é RECUSADO antes de qualquer acesso ao
 /// armazenamento: nunca é rebaixado para <see cref="AssociationMode.Contact"/>.
 /// </param>
+/// <param name="Attachment">
+/// A mídia da mensagem (áudio, imagem ou documento), se houver: o identificador no provedor e o que o cliente declarou. Cria o registro do arquivo como <see cref="AttachmentStatus.Pending"/> na mesma transação da
+/// mensagem (ADR 0028); o arquivo é buscado depois pelo Channels. Para os demais tipos de mensagem é recusado. Omitido, não muda nada.
+/// </param>
 public sealed record IngestInboundMessageCommand(
     ChannelInstanceId ChannelInstanceId,
     string ContactExternalRef,
@@ -87,7 +91,8 @@ public sealed record IngestInboundMessageCommand(
     Locale? ChannelDefaultLocale = null,
     HandlingMode InitialHandlingMode = HandlingMode.AiAutonomous,
     ChannelData? ChannelData = null,
-    AssociationMode AssociationMode = AssociationMode.Contact);
+    AssociationMode AssociationMode = AssociationMode.Contact,
+    InboundAttachment? Attachment = null);
 
 public enum IngestOutcome
 {

@@ -37,6 +37,9 @@ public sealed class ConversationsDbContext : DbContext
 
     public DbSet<SessionTransfer> Transfers => Set<SessionTransfer>();
 
+    /// <summary>O arquivo de cada mensagem de mídia (ADR 0028).</summary>
+    public DbSet<MessageAttachment> Attachments => Set<MessageAttachment>();
+
     /// <summary>O tenant do contexto (falha fechada sem contexto). Também usado nas instruções SQL diretas da unidade de trabalho.</summary>
     internal Guid CurrentTenantValue => TenantAtual.Value;
 
@@ -54,6 +57,7 @@ public sealed class ConversationsDbContext : DbContext
         modelBuilder.ApplyConfiguration(new HandlingTransitionConfiguration());
         modelBuilder.ApplyConfiguration(new MessageTranslationConfiguration());
         modelBuilder.ApplyConfiguration(new SessionTransferConfiguration());
+        modelBuilder.ApplyConfiguration(new MessageAttachmentConfiguration());
 
         // Outbox de eventos duráveis do módulo (BOUNDARIES.md §12.1): gravado na mesma transação da mudança de estado.
         modelBuilder.ConfigureOutbox();
@@ -65,6 +69,7 @@ public sealed class ConversationsDbContext : DbContext
         modelBuilder.Entity<HandlingTransition>().HasQueryFilter(e => e.TenantId == TenantAtual);
         modelBuilder.Entity<MessageTranslation>().HasQueryFilter(e => e.TenantId == TenantAtual);
         modelBuilder.Entity<SessionTransfer>().HasQueryFilter(e => e.TenantId == TenantAtual);
+        modelBuilder.Entity<MessageAttachment>().HasQueryFilter(e => e.TenantId == TenantAtual);
     }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
