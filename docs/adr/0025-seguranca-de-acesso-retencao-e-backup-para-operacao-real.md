@@ -1,6 +1,6 @@
 # ADR 0025 — Segurança de acesso, retenção de dados e backup para operar com empresas reais
 
-- **Status:** **Proposto para ratificação.** Implementado em 06/11/2026 sob a autorização do decisor ("segurança de acesso e preparação operacional"), depois da ratificação do ADR 0024. Nenhuma chamada real à Meta ou à OpenAI; nenhuma infraestrutura externa.
+- **Status:** **Aceito para o MVP (ratificado pelo decisor; status sincronizado em 09/11/2026).** Implementado em 06/11/2026 sob a autorização do decisor ("segurança de acesso e preparação operacional"), depois da ratificação do ADR 0024. Nenhuma chamada real à Meta ou à OpenAI; nenhuma infraestrutura externa.
 - **Data:** 06/11/2026
 - **Decisor:** Mauro Porpino
 - **Referências:** ADR 0011 (DP-06, retenção inicial), 0012 (numeração nunca reemitida), 0018, 0020, 0024, `docs/operations/SENHAS-E-SESSOES.md`, `RETENCAO-DE-DADOS.md`, `BACKUP-E-RESTAURACAO.md`

@@ -1,6 +1,6 @@
 # ADR 0021 — Estado do despacho com comparação e troca, e ingresso público do webhook (homologação com a Meta)
 
-- **Status:** **Proposto para ratificação.** Implementado em 06/11/2026 sob a autorização do decisor, que pediu a correção pontual de concorrência apontada no ADR 0020 e a preparação prática para a homologação com a Meta. Nenhuma chamada real à Meta ou à OpenAI.
+- **Status:** **Aceito para o MVP (ratificado pelo decisor; status sincronizado em 09/11/2026).** Implementado em 06/11/2026 sob a autorização do decisor, que pediu a correção pontual de concorrência apontada no ADR 0020 e a preparação prática para a homologação com a Meta. Nenhuma chamada real à Meta ou à OpenAI.
 - **Data:** 06/11/2026
 - **Decisor:** Mauro Porpino
 - **Referências:** ADR 0011 (E, EFX-3), 0019 e 0020; `docs/operations/HOMOLOGACAO-META.md`

@@ -1,6 +1,6 @@
 # ADR 0027 — Modelos de mensagem (templates) do WhatsApp para iniciar ou retomar conversa fora da janela de 24 horas
 
-- **Status:** **Proposto para ratificação.** Implementado em 09/11/2026 sob a autorização do decisor ("suporte mínimo a templates oficiais do WhatsApp Cloud API"), depois da ratificação do ADR 0026. Nenhuma chamada real à Meta ou à OpenAI; nenhum banco existente foi apagado (a migração só **cria** uma tabela; backup do banco de teste feito antes); `main` intocada; sem push.
+- **Status:** **Aceito para o MVP (ratificado pelo decisor em 09/11/2026).** Implementado em 09/11/2026 sob a autorização do decisor ("suporte mínimo a templates oficiais do WhatsApp Cloud API"), depois da ratificação do ADR 0026. Nenhuma chamada real à Meta ou à OpenAI; nenhum banco existente foi apagado (a migração só **cria** uma tabela; backup do banco de teste feito antes); `main` intocada; sem push.
 - **Data:** 09/11/2026
 - **Decisor:** Mauro Porpino
 - **Referências:** ADR 0005 e `BOUNDARIES.md` (matriz de dependências), 0007 (reenvio delegado), 0008 (ligação mediada pelo host), 0011 (item A.2.6 e DP-04: porta do host para as capacidades do canal; A.2.8 a A.2.10: erros e janela de 24 horas), 0014 (resposta humana), 0018 a 0020 (Sender, vazão, pausa e `SendUnknown`), `docs/operations/MODELOS-DE-MENSAGEM.md`

@@ -1,6 +1,6 @@
 # ADR 0026 — Automação operacional, supervisão e recuperação do ambiente de homologação
 
-- **Status:** **Proposto para ratificação.** Implementado em 06/11/2026 sob a autorização do decisor ("automação operacional e recuperação do ambiente de homologação"), depois da ratificação do ADR 0025. Nenhuma chamada real à Meta ou à OpenAI; nenhum banco existente foi alterado ou apagado; nenhuma tarefa foi registrada no Agendador da máquina.
+- **Status:** **Aceito para o MVP (ratificado pelo decisor; status sincronizado em 09/11/2026).** Implementado em 06/11/2026 sob a autorização do decisor ("automação operacional e recuperação do ambiente de homologação"), depois da ratificação do ADR 0025. Nenhuma chamada real à Meta ou à OpenAI; nenhum banco existente foi alterado ou apagado; nenhuma tarefa foi registrada no Agendador da máquina.
 - **Data:** 06/11/2026
 - **Decisor:** Mauro Porpino
 - **Referências:** ADR 0006 e 0007 (processamento assíncrono e turnos), 0011 (DP-06), 0020 (confiabilidade do envio), 0025 (senhas, retenção, backup), `docs/operations/OPERACAO-E-SUPERVISAO.md`, `BACKUP-E-RESTAURACAO.md`, `RETENCAO-DE-DADOS.md`

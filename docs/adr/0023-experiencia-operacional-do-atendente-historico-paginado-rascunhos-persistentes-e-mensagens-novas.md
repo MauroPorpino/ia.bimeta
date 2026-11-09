@@ -1,6 +1,6 @@
 # ADR 0023 — Experiência operacional do atendente: histórico paginado, rascunhos persistentes e mensagens novas
 
-- **Status:** **Proposto para ratificação.** Implementado em 06/11/2026 sob a autorização do decisor ("finalizar a experiência operacional do atendente no React", em um único pacote), depois da ratificação dos ADRs 0021 e 0022. Nenhuma chamada real à Meta ou à OpenAI.
+- **Status:** **Aceito para o MVP (ratificado pelo decisor; status sincronizado em 09/11/2026).** Implementado em 06/11/2026 sob a autorização do decisor ("finalizar a experiência operacional do atendente no React", em um único pacote), depois da ratificação dos ADRs 0021 e 0022. Nenhuma chamada real à Meta ou à OpenAI.
 - **Data:** 06/11/2026
 - **Decisor:** Mauro Porpino
 - **Referências:** ADR 0022 (memória por conversa, concorrência, conexão), 0018 (ações do atendente, idempotência por `requestId`)

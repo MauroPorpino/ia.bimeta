@@ -1,6 +1,6 @@
 # ADR 0028 — Mídia do WhatsApp (imagem, áudio e documento): recebimento, armazenamento privado e visualização pelo atendente
 
-- **Status:** **Proposto para ratificação.** Implementado em 09/11/2026 sob a autorização do decisor ("suporte mínimo a mensagens multimídia do WhatsApp: imagens, áudios e documentos"), depois da ratificação do ADR 0027. Nenhuma chamada real à Meta ou à OpenAI; nenhum banco existente foi apagado (a migração só **cria** uma tabela; backup do banco de teste feito antes); `main` intocada; sem push.
+- **Status:** **Aceito para o MVP (ratificado pelo decisor em 09/11/2026).** Implementado em 09/11/2026 sob a autorização do decisor ("suporte mínimo a mensagens multimídia do WhatsApp: imagens, áudios e documentos"), depois da ratificação do ADR 0027. Nenhuma chamada real à Meta ou à OpenAI; nenhum banco existente foi apagado (a migração só **cria** uma tabela; backup do banco de teste feito antes); `main` intocada; sem push.
 - **Data:** 09/11/2026
 - **Decisor:** Mauro Porpino
 - **Referências:** ADR 0005 e `BOUNDARIES.md`, 0006 (Receiver, Inbox e o `expires_at`), 0007 e `CONVERSATION-LIFECYCLE.md` §10 (conteúdo pendente), 0008 e 0009 (ligações mediadas pelo host), 0010 (fronteira histórica do atendimento), 0011 (Channels, DP-04), 0017 e 0018 (Agents e fluxo do MVP), 0020 (relay: mortos tratados), 0022 e 0023 (interface do atendente), 0025 (retenção e backup), `docs/operations/MIDIA-DO-WHATSAPP.md`

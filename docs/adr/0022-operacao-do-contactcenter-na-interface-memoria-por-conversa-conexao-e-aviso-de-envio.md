@@ -1,6 +1,6 @@
 # ADR 0022 — Operação do ContactCenter na interface: memória por conversa, concorrência entre atendentes, conexão e aviso de envio
 
-- **Status:** **Proposto para ratificação.** Implementado em 06/11/2026 sob a autorização do decisor ("consolidar a operação funcional do ContactCenter no frontend React"), com autonomia para decisões técnicas rotineiras. Nenhuma chamada real à Meta ou à OpenAI.
+- **Status:** **Aceito para o MVP (ratificado pelo decisor; status sincronizado em 09/11/2026).** Implementado em 06/11/2026 sob a autorização do decisor ("consolidar a operação funcional do ContactCenter no frontend React"), com autonomia para decisões técnicas rotineiras. Nenhuma chamada real à Meta ou à OpenAI.
 - **Data:** 06/11/2026
 - **Decisor:** Mauro Porpino
 - **Referências:** ADR 0018 (fluxo do MVP e ações do atendente), 0019 (pausa de conta, SND-6) e 0020 (sinal de falha na fila, SND-7); `docs/architecture/BOUNDARIES.md` (módulos, matriz de dependências)

@@ -1,6 +1,6 @@
 # ADR 0024 — Comando `provision`: colocar uma empresa (tenant) em funcionamento
 
-- **Status:** **Proposto para ratificação.** Implementado em 06/11/2026 sob a autorização do decisor ("consolidação do MVP e preparação para homologação"), depois da ratificação dos ADRs 0022 e 0023. Nenhuma chamada real à Meta ou à OpenAI.
+- **Status:** **Aceito para o MVP (ratificado pelo decisor; status sincronizado em 09/11/2026).** Implementado em 06/11/2026 sob a autorização do decisor ("consolidação do MVP e preparação para homologação"), depois da ratificação dos ADRs 0022 e 0023. Nenhuma chamada real à Meta ou à OpenAI.
 - **Data:** 06/11/2026
 - **Decisor:** Mauro Porpino
 - **Referências:** ADR 0017 (IA 6a, BYOK), 0018, 0019 (conta de WhatsApp: credenciais, prontidão), `docs/operations/NOVA-EMPRESA.md`
