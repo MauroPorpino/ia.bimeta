@@ -675,3 +675,82 @@ label {
 .texto-guardado .acoes {
   margin-top: 0.4rem;
 }
+
+/* Resposta por modelo de mensagem aprovado (ADR 0027): janela de 24 horas fechada, escolha do modelo e campos */
+.janela-fechada {
+  margin: 0;
+  padding: 0.55rem 1rem;
+  background: var(--aviso-fundo);
+  color: var(--aviso-texto);
+  border-top: 1px solid var(--borda);
+}
+
+.janela-fechada p {
+  margin: 0.2rem 0 0;
+}
+
+.modelo-mensagem {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.6rem 1rem;
+  background: var(--superficie);
+  border-top: 1px solid var(--borda);
+}
+
+.modelo-mensagem .campo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.modelo-mensagem label {
+  font-weight: 600;
+  font-size: 0.9em;
+}
+
+.modelo-campos {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  border: 1px solid var(--borda);
+  border-radius: 8px;
+  padding: 0.5rem 0.7rem;
+}
+
+.modelo-campos legend {
+  padding: 0 0.3rem;
+  font-size: 0.85em;
+  color: var(--texto-suave);
+}
+
+.modelo-previa {
+  margin: 0;
+  padding: 0.5rem 0.8rem;
+  border-left: 4px solid var(--primaria);
+  background: var(--balao-humano);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.erro-campo {
+  margin: 0;
+  color: var(--erro-texto);
+  font-size: 0.85em;
+}
+
+.modelos-alternar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.3rem 1rem 0.6rem;
+  background: var(--superficie);
+}
+
+.etiqueta-modelo {
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  background: var(--superficie-2);
+  border: 1px solid var(--borda);
+  font-size: 0.95em;
+}

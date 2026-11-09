@@ -18,9 +18,12 @@ import type {
   QueueItemOperationResult,
   QueueItemStatus,
   RedeemPasswordResetRequest,
+  ReplyOptions,
   ReplyRequest,
   SendingAlert,
   ServiceQueue,
+  TemplateParameterError,
+  TemplateReplyRequest,
 } from './types';
 
 /** Erro de rede ou resposta de erro da API. `status` 0 = a requisição nem chegou ao servidor. */
@@ -32,8 +35,10 @@ export class ApiError extends Error {
   readonly code: string | null;
   /** A resposta de erro veio SEM o corpo de problema da API (vazia ou que não é JSON): quem respondeu foi um proxy, não a API. */
   readonly semCorpo: boolean;
+  /** Os problemas de parâmetro de um modelo de mensagem (422 `TemplateParametersInvalid`); vazio nos demais erros. */
+  readonly erros: TemplateParameterError[];
 
-  constructor(status: number, title: string, detail: string | null = null, code: string | null = null, semCorpo = false) {
+  constructor(status: number, title: string, detail: string | null = null, code: string | null = null, semCorpo = false, erros: TemplateParameterError[] = []) {
     super(detail ?? title);
     this.name = 'ApiError';
     this.status = status;
@@ -41,6 +46,7 @@ export class ApiError extends Error {
     this.detail = detail;
     this.code = code;
     this.semCorpo = semCorpo;
+    this.erros = erros;
   }
 }
 
@@ -183,7 +189,10 @@ export function createApi(opcoes: ApiOptions = {}) {
     const status = resposta.status;
     const titulo = problema?.title ?? tituloPadrao(status);
     const detalhe = problema?.detail ?? (problema ? null : detalhePadrao(status));
-    return new ApiError(status, titulo, detalhe, typeof problema?.code === 'string' ? problema.code : null, problema === null);
+    const erros = Array.isArray(problema?.errors)
+      ? problema.errors.filter((e): e is TemplateParameterError => !!e && typeof e.key === 'string' && typeof e.message === 'string')
+      : [];
+    return new ApiError(status, titulo, detalhe, typeof problema?.code === 'string' ? problema.code : null, problema === null, erros);
   }
 
   /**
@@ -256,6 +265,14 @@ export function createApi(opcoes: ApiOptions = {}) {
         `reply|${itemId}|${texto}`,
         (requestId) => requisitar<ActionResult>('POST', `${rotaItem(itemId)}/reply`, { corpo: { requestId, text: texto } satisfies ReplyRequest }),
         requestIdSugerido,
+      ),
+    // ---- Resposta por modelo de mensagem aprovado (ADR 0027): a janela de 24 horas, os modelos do número e o envio.
+    // As opções são aviso secundário (quem chama não mostra erro delas): sem elas, a tela segue como antes (texto livre).
+    obterOpcoesDeResposta: (itemId: string) => requisitar<ReplyOptions>('GET', `${rotaItem(itemId)}/reply-options`),
+    // O requestId vale por (conversa, modelo, parâmetros): a MESMA ação repetida (rede que caiu) o reaproveita e o servidor reconhece o pedido.
+    responderComModelo: (itemId: string, templateId: string, parametros: Record<string, string>) =>
+      acao<ActionResult>(`reply-template|${itemId}|${templateId}|${JSON.stringify(Object.entries(parametros).sort(([a], [b]) => a.localeCompare(b)))}`, (requestId) =>
+        requisitar<ActionResult>('POST', `${rotaItem(itemId)}/reply-template`, { corpo: { requestId, templateId, parameters: parametros } satisfies TemplateReplyRequest }),
       ),
     encerrar: (itemId: string, reasonCode = 'resolved') =>
       acao<ActionResult>(`close|${itemId}|${reasonCode}`, (requestId) =>

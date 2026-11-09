@@ -178,6 +178,11 @@ export function MessageList({
               >
                 <div className="mensagem-cabecalho">
                   <span className="mensagem-autor">{autor}</span>
+                  {m.templateName && (
+                    <span className="etiqueta-modelo" title="Enviada por modelo de mensagem aprovado (o texto é o que o cliente leu)">
+                      Modelo: {m.templateName}
+                    </span>
+                  )}
                   <time dateTime={m.occurredAt}>{horaCurta(m.occurredAt)}</time>
                 </div>
                 <p className={corpo.semConteudo ? 'mensagem-texto sem-conteudo' : 'mensagem-texto'}>{corpo.texto}</p>

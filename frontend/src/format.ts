@@ -1,4 +1,4 @@
-import type { AgentStatus, DeliveryState, Message, MessageAuthor, QueueItem } from './api/types';
+import type { AgentStatus, DeliveryState, Message, MessageAuthor, QueueItem, ReplyOptions } from './api/types';
 
 /** "agora", "há 5 min", "há 2 h 10 min", "há 3 d". Datas inválidas ou no futuro viram "agora". */
 export function tempoDecorrido(desdeIso: string | null | undefined, agora: number = Date.now()): string {
@@ -23,6 +23,20 @@ export function tempoDecorrido(desdeIso: string | null | undefined, agora: numbe
     return resto === 0 ? `há ${horas} h` : `há ${horas} h ${resto} min`;
   }
   return `há ${Math.floor(horas / 24)} d`;
+}
+
+/**
+ * A janela de resposta LIVRE do provedor (24 horas no WhatsApp, contada da última mensagem do cliente) vista pela tela. Sem as opções
+ * (a consulta falhou ou o canal não as conhece), ou sem janela no provedor, fica aberta: quem decide é o servidor, que recusa o texto
+ * livre fora dela. Com a janela, o relógio da tela fecha-a quando o prazo passa, sem esperar a próxima releitura.
+ */
+export function janelaDeResposta(opcoes: ReplyOptions | null, agora: number): { aberta: boolean; fechaEm: string | null; horas: number | null } {
+  if (!opcoes || opcoes.windowHours === null) {
+    return { aberta: true, fechaEm: null, horas: null };
+  }
+  const fecha = opcoes.windowClosesAt ? Date.parse(opcoes.windowClosesAt) : Number.NaN;
+  const aberta = !Number.isNaN(fecha) && agora < fecha;
+  return { aberta, fechaEm: opcoes.windowClosesAt, horas: opcoes.windowHours };
 }
 
 export function horaCurta(iso: string): string {

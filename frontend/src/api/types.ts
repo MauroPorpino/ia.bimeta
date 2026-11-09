@@ -57,6 +57,8 @@ export interface ProblemDetails {
   detail?: string;
   status?: number;
   code?: string;
+  /** 422 `TemplateParametersInvalid`: todos os problemas dos parâmetros do modelo, por chave (`*` = do conjunto). */
+  errors?: TemplateParameterError[];
 }
 
 // ---------------------------------------------------------------- ContactCenter
@@ -161,6 +163,57 @@ export interface ActionResult {
   messageId?: string;
 }
 
+// ---------------------------------------------------------------- Resposta por modelo de mensagem (templates, ADR 0027)
+
+/** Um parâmetro do modelo para o formulário: `key` é o que volta no envio (`body.1`, `body.nome`, `header.1`, `button.0`). */
+export interface ReplyTemplateParameter {
+  key: string;
+  component: 'header' | 'body' | 'button';
+  label: string;
+  /** O exemplo que o administrador cadastrou na aprovação do modelo. */
+  example: string | null;
+  maxLength: number;
+}
+
+/** Um modelo aprovado que o número pode enviar. `bodyText` traz os marcadores (`{{1}}` ou `{{nome}}`) como a Meta o aprovou. */
+export interface ReplyTemplate {
+  id: string;
+  name: string;
+  language: string;
+  category: string;
+  headerText: string | null;
+  bodyText: string;
+  footerText: string | null;
+  parameters: ReplyTemplateParameter[];
+}
+
+/**
+ * GET /contact-center/items/{id}/reply-options: se o texto livre ainda é aceito (a janela de 24 horas do provedor, contada da
+ * última mensagem do CLIENTE) e os modelos aprovados do número. `windowHours` nulo = o provedor não tem janela.
+ */
+export interface ReplyOptions {
+  freeTextAllowed: boolean;
+  windowOpen: boolean;
+  windowHours: number | null;
+  lastInboundAt: string | null;
+  windowClosesAt: string | null;
+  templates: ReplyTemplate[];
+}
+
+/** Corpo de POST /contact-center/items/{id}/reply-template. `parameters` por chave de parâmetro. */
+export interface TemplateReplyRequest {
+  requestId: string;
+  templateId: string;
+  parameters: Record<string, string>;
+}
+
+/** Um problema de parâmetro do modelo (a mensagem nunca repete o valor digitado). */
+export interface TemplateParameterError {
+  key: string;
+  code: string;
+  message: string;
+}
+
 // ---------------------------------------------------------------- Channels
 
 /**
@@ -223,6 +276,8 @@ export interface Message {
   channelInstanceId: string;
   locale?: string | null;
   localeOrigin?: string | null;
+  /** O nome do modelo de mensagem aprovado, quando a mensagem saiu por modelo (o `text` é o que o cliente leu, já com os parâmetros). */
+  templateName?: string | null;
 }
 
 /** Página de resultados; `nextCursor` é opaco e nulo na última página. */

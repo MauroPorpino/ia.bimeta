@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { ApiError, descreverErro, ehFalhaDeConexao, ehRejeicaoDefinitiva, novoGuid, type ApiClient } from '../api/client';
-import type { CurrentUser, Message, QueueItem, SendingAlert } from '../api/types';
+import type { CurrentUser, Message, QueueItem, ReplyOptions, ReplyTemplate, SendingAlert, TemplateParameterError } from '../api/types';
 import { CacheDeConversas, aplicarPaginaAnterior, aplicarPaginaRecente } from '../cache';
-import { rotuloSemNome, situacaoDoItem } from '../format';
+import { janelaDeResposta, rotuloSemNome, situacaoDoItem, tempoDecorrido } from '../format';
 import { usePolling } from '../hooks';
 import { alertaDoNumero } from './AlertasDeEnvio';
 import { MessageList } from './MessageList';
+import { ModeloDeMensagem } from './ModeloDeMensagem';
 
 interface Props {
   api: ApiClient;
@@ -37,6 +38,8 @@ interface Props {
 const TAMANHO_DA_PAGINA = 100;
 /** Cada pedido de mensagens anteriores traz esta quantidade. */
 const TAMANHO_DA_PAGINA_ANTIGA = 50;
+/** A janela de resposta e os modelos mudam devagar (a janela só reabre quando o cliente escreve, e isso já dispara uma releitura). */
+const INTERVALO_DAS_OPCOES_MS = 30_000;
 
 type Acao = 'claim' | 'release' | 'return-to-ai' | 'reply' | 'close';
 
@@ -94,6 +97,12 @@ export function ConversationPanel({
   const [confirmandoEncerrar, setConfirmandoEncerrar] = useState(false);
   const [nota, setNota] = useState<string | null>(null);
   const [copiado, setCopiado] = useState(false);
+  // Resposta por modelo de mensagem aprovado (ADR 0027): a janela de 24 horas, os modelos do número e os erros de parâmetro do último envio.
+  const [opcoes, setOpcoes] = useState<ReplyOptions | null>(null);
+  const [versaoDasOpcoes, setVersaoDasOpcoes] = useState(0);
+  const [agora, setAgora] = useState(() => Date.now());
+  const [mostrandoModelos, setMostrandoModelos] = useState(false);
+  const [errosDoModelo, setErrosDoModelo] = useState<TemplateParameterError[]>([]);
   // O estado `ocupado` só muda no próximo render: este ref fecha a janela de um segundo clique no mesmo instante.
   const emAndamento = useRef(false);
   const buscandoAnteriores = useRef(false);
@@ -197,6 +206,8 @@ export function ConversationPanel({
     acao: Acao,
     chamar: () => Promise<{ outcome?: string; item?: QueueItem } | undefined>,
     aoTerminar?: (situacao: Situacao) => void,
+    /** Trata um erro que a própria tela explica (devolve verdadeiro): então não vai para a faixa de erro vermelha. */
+    tratarErro?: (erro: unknown) => boolean,
   ): Promise<boolean> {
     if (emAndamento.current) {
       return false;
@@ -228,7 +239,7 @@ export function ConversationPanel({
       // Um conflito que a nota abaixo explica não é falha: sem faixa de erro vermelha. Só quem de fato perdeu a corrida ao assumir ouve
       // "outro atendente assumiu"; os outros conflitos (a conversa ainda entrando na fila, operação em andamento, encerrada) têm texto próprio.
       const explicadoPelaNota = conflito && (erro.code === 'AlreadyAssigned' || erro.code === 'OperationInProgress' || erro.code === 'ItemClosed');
-      if (explicadoPelaNota) {
+      if (explicadoPelaNota || tratarErro?.(erro) === true) {
         onErroDeAcao(null);
       } else {
         onErroDeAcao(descreverErro(erro), ehFalhaDeConexao(erro));
@@ -261,10 +272,76 @@ export function ConversationPanel({
   // continua guardado e visível, nunca some junto com o campo.
   const mostrarTextoGuardado = temTextoGuardado && !assumidoPorMim && (item !== null || indisponivel);
 
+  // A janela de resposta livre do provedor (24 horas no WhatsApp, contada da última mensagem do CLIENTE). Sem as opções (a consulta falhou ou o canal não as
+  // conhece), a tela segue como antes e o servidor continua decidindo.
+  const janela = janelaDeResposta(opcoes, agora);
+  const modelos = opcoes?.templates ?? [];
+  const ultimaEntrada = mensagens.reduce((maior, m) => (m.direction === 'Inbound' && m.messageSeq > maior ? m.messageSeq : maior), 0);
+
+  // As opções são relidas quando o cliente escreve (a janela reabre), quando o servidor recusa por causa dela e a cada 30 s. Aviso secundário: sem elas, a tela não mostra erro.
+  usePolling(
+    async (ativo) => {
+      if (!assumidoPorMim) {
+        return;
+      }
+      try {
+        const lidas = await api.obterOpcoesDeResposta(itemId);
+        if (ativo()) {
+          setOpcoes(lidas);
+          setAgora(Date.now());
+        }
+      } catch {
+        // mantém o que já se sabia
+      }
+    },
+    INTERVALO_DAS_OPCOES_MS,
+    `${itemId}|${assumidoPorMim}|${ultimaEntrada}|${versaoDasOpcoes}|${pulso}`,
+  );
+
+  // A janela fecha com o passar do tempo, sem esperar a próxima releitura.
+  useEffect(() => {
+    const relogio = setInterval(() => setAgora(Date.now()), 30_000);
+    return () => clearInterval(relogio);
+  }, []);
+
+  /** Erros que a tela explica ao lado do campo (ou numa nota), sem a faixa de erro vermelha: a janela fechou, o modelo saiu do ar ou os parâmetros são inválidos. */
+  function tratarErroDeResposta(erro: unknown): boolean {
+    if (!(erro instanceof ApiError) || erro.status !== 422) {
+      return false;
+    }
+    switch (erro.code) {
+      case 'ReplyWindowClosed':
+        setNota('A janela de resposta livre deste cliente fechou. Envie um modelo de mensagem aprovado.');
+        setVersaoDasOpcoes((v) => v + 1);
+        return true;
+      case 'ReplyTemplateUnavailable':
+        setNota('O modelo escolhido não está mais disponível para este número. A lista foi atualizada: escolha outro.');
+        setVersaoDasOpcoes((v) => v + 1);
+        return true;
+      case 'TemplateParametersInvalid':
+        setErrosDoModelo(erro.erros.length > 0 ? erro.erros : [{ key: '*', code: 'invalid', message: erro.detail ?? 'Os campos do modelo são inválidos.' }]);
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  async function enviarModelo(modelo: ReplyTemplate, parametros: Record<string, string>): Promise<boolean> {
+    if (!assumidoPorMim) {
+      return false;
+    }
+    setErrosDoModelo([]);
+    const ok = await executar('reply', () => api.responderComModelo(itemId, modelo.id, parametros), undefined, tratarErroDeResposta);
+    if (ok && montado.current) {
+      setMostrandoModelos(false);
+    }
+    return ok;
+  }
+
   async function enviar(evento?: FormEvent) {
     evento?.preventDefault();
     const enviado = texto.trim();
-    if (!enviado || !assumidoPorMim) {
+    if (!enviado || !assumidoPorMim || !janela.aberta) {
       return;
     }
     // O envio que ficou sem resultado (queda da conexão, página recarregada no meio) deixou o requestId guardado: o MESMO
@@ -280,6 +357,7 @@ export function ConversationPanel({
           memoria.gravarPendente(itemId, null);
         }
       },
+      tratarErroDeResposta,
     );
     if (ok && memoria.lerRascunho(itemId).trim() === enviado) {
       // Só limpa depois do sucesso, e só se o atendente não editou o texto enquanto esperava. O rascunho guardado é a
@@ -427,6 +505,25 @@ export function ConversationPanel({
         </section>
       )}
 
+      {assumidoPorMim && !janela.aberta && (
+        <section className="janela-fechada" role="status" aria-label="Janela de 24 horas fechada">
+          <strong>Janela de {janela.horas ?? 24} horas fechada.</strong>
+          <p>
+            A última mensagem do cliente foi {opcoes?.lastInboundAt ? tempoDecorrido(opcoes.lastInboundAt, agora) : 'há muito tempo'}. O WhatsApp só permite iniciar ou retomar a
+            conversa com um <b>modelo de mensagem aprovado</b>: o texto livre fica bloqueado até o cliente escrever de novo.
+          </p>
+          {modelos.length === 0 && (
+            <p className="aviso">
+              Nenhum modelo aprovado está associado a este número. Peça ao administrador para associar os modelos da Meta à conta do WhatsApp.
+            </p>
+          )}
+        </section>
+      )}
+
+      {assumidoPorMim && !janela.aberta && modelos.length > 0 && (
+        <ModeloDeMensagem modelos={modelos} ocupado={ocupado === 'reply'} errosDoServidor={errosDoModelo} aoEnviar={enviarModelo} aoEditar={() => setErrosDoModelo([])} />
+      )}
+
       {assumidoPorMim && (
         <form className="compositor" onSubmit={(e) => void enviar(e)}>
           <label className="sr-only" htmlFor="texto-resposta">
@@ -438,13 +535,32 @@ export function ConversationPanel({
             onChange={(e) => mudarTexto(e.target.value)}
             onKeyDown={aoTeclar}
             readOnly={ocupado === 'reply'}
+            disabled={!janela.aberta}
             rows={3}
-            placeholder="Escreva a resposta (Enter envia, Shift+Enter quebra a linha)"
+            placeholder={
+              janela.aberta ? 'Escreva a resposta (Enter envia, Shift+Enter quebra a linha)' : 'Texto livre indisponível: a janela de 24 horas está fechada. Use um modelo de mensagem.'
+            }
           />
-          <button type="submit" className="btn btn-primario" disabled={ocupado !== null || texto.trim() === ''}>
+          <button type="submit" className="btn btn-primario" disabled={ocupado !== null || texto.trim() === '' || !janela.aberta}>
             {ocupado === 'reply' ? 'Enviando...' : 'Responder'}
           </button>
         </form>
+      )}
+
+      {assumidoPorMim && janela.aberta && modelos.length > 0 && (
+        <div className="modelos-alternar">
+          <button type="button" className="btn btn-pequeno" aria-expanded={mostrandoModelos} disabled={ocupado !== null} onClick={() => setMostrandoModelos((aberto) => !aberto)}>
+            {mostrandoModelos ? 'Ocultar modelos de mensagem' : 'Enviar modelo de mensagem'}
+          </button>
+          {janela.fechaEm && (
+            <span className="discreto">
+              Resposta livre até {new Date(janela.fechaEm).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}.
+            </span>
+          )}
+        </div>
+      )}
+      {assumidoPorMim && janela.aberta && mostrandoModelos && modelos.length > 0 && (
+        <ModeloDeMensagem modelos={modelos} ocupado={ocupado === 'reply'} errosDoServidor={errosDoModelo} aoEnviar={enviarModelo} aoEditar={() => setErrosDoModelo([])} />
       )}
     </section>
   );
