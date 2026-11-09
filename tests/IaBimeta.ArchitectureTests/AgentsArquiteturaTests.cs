@@ -29,13 +29,16 @@ public class AgentsArquiteturaTests
     }
 
     [Fact]
-    public void O_Agents_tem_Core_e_Infrastructure_sem_Contracts_e_so_as_referencias_permitidas()
+    public void O_Agents_tem_Core_Infrastructure_e_Presentation_sem_Contracts_e_so_as_referencias_permitidas()
     {
         var projetos = RepositorioDeProjetos.LerProjetos();
         var doModulo = projetos.Where(p => p.Nome.StartsWith("IaBimeta.Agents.", StringComparison.Ordinal) && !p.Nome.EndsWith("Tests", StringComparison.Ordinal)).ToList();
 
-        // PRJ-2: sem Contracts, porque nenhum módulo ou adaptador consome o Agents. A Presentation nasce com os endpoints de definição (C2.3).
-        Assert.Equal(new[] { "IaBimeta.Agents.Core", "IaBimeta.Agents.Infrastructure" }, doModulo.Select(p => p.Nome).OrderBy(n => n, StringComparer.Ordinal).ToArray());
+        // PRJ-2: sem Contracts, porque nenhum módulo ou adaptador consome o Agents. A Presentation nasceu no ADR 0030 (a revisão das lacunas do FAQ e o rascunho e a publicação da definição; a aresta para
+        // o Conversations já existe e é usada pelo Core), e só referencia o SharedKernel e o Core do próprio módulo, como a Presentation dos outros módulos.
+        Assert.Equal(
+            new[] { "IaBimeta.Agents.Core", "IaBimeta.Agents.Infrastructure", "IaBimeta.Agents.Presentation" },
+            doModulo.Select(p => p.Nome).OrderBy(n => n, StringComparer.Ordinal).ToArray());
 
         var permitidas = new Dictionary<string, string[]>
         {
@@ -44,6 +47,7 @@ public class AgentsArquiteturaTests
                 "IaBimeta.SharedKernel", "IaBimeta.AiGateway.Contracts", "IaBimeta.Conversations.Contracts", "IaBimeta.ContactCenter.Contracts", "IaBimeta.Audit.Contracts",
             },
             ["IaBimeta.Agents.Infrastructure"] = new[] { "IaBimeta.Messaging", "IaBimeta.SharedKernel", "IaBimeta.Conversations.Contracts", "IaBimeta.Agents.Core" },
+            ["IaBimeta.Agents.Presentation"] = new[] { "IaBimeta.SharedKernel", "IaBimeta.Agents.Core" },
         };
         foreach (var projeto in doModulo)
         {

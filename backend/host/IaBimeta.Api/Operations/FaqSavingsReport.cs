@@ -90,6 +90,28 @@ internal static class FaqSavingsReport
         return (contagens, medias);
     }
 
+    /// <summary>As lacunas do FAQ ABERTAS (esperando a revisão do administrador, ADR 0030), por tenant. Só lê a situação e conta: nenhum texto, nenhuma referência.</summary>
+    public static async Task<IReadOnlyDictionary<Guid, int>> LoadOpenGapsAsync(IServiceProvider root, Guid? onlyTenant, CancellationToken cancellationToken)
+    {
+        await using var escopo = root.CreateAsyncScope();
+        var agentes = escopo.ServiceProvider.GetRequiredService<AgentsDbContext>();
+        var lacunas = agentes.KnowledgeGaps.IgnoreQueryFilters().AsNoTracking().Where(g => g.Status == KnowledgeGapStatus.Open);
+        if (onlyTenant is { } uma)
+        {
+            var tenant = new TenantId(uma);
+            lacunas = lacunas.Where(g => g.TenantId == tenant);
+        }
+
+        var linhas = await lacunas.GroupBy(g => g.TenantId).Select(g => new { Tenant = g.Key, Abertas = g.Count() }).ToListAsync(cancellationToken);
+        return linhas.ToDictionary(l => l.Tenant.Value, l => l.Abertas);
+    }
+
+    /// <summary>Uma linha por empresa com lacuna aberta: o que há para revisar. Informativa (nunca atenção): é trabalho do administrador, não defeito do ambiente.</summary>
+    public static IReadOnlyList<(Guid? Tenant, string Message)> DescribeOpenGaps(IReadOnlyDictionary<Guid, int> open) =>
+        open.Where(p => p.Value > 0).OrderBy(p => p.Key)
+            .Select(p => ((Guid?)p.Key, $"{p.Value.ToString("N0", Pt)} lacuna(s) do FAQ aberta(s) esperando revisão do administrador (perguntas de clientes que o FAQ não respondeu direto: GET /agents/knowledge-gaps ou a área Conhecimento da interface)."))
+            .ToList();
+
     /// <summary>O texto do relatório: duas linhas por empresa, a MEDIDA e a ESTIMADA. Puro (sem banco), para o teste provar os números e os rótulos.</summary>
     public static IReadOnlyList<(Guid? Tenant, string Message)> Describe(IReadOnlyList<FaqTurnCounts> counts, IReadOnlyList<ModelCallAverage> averages, IReadOnlyList<Guid> mandatory)
     {

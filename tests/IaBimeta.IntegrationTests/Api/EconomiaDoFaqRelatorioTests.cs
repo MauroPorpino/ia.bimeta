@@ -101,6 +101,18 @@ public sealed class EconomiaDoFaqRelatorioTests
         Assert.Contains("não há média para estimar", linhas[3].Message); // B não tem chamadas: sem base, sem número
     }
 
+
+    [Fact]
+    public void As_lacunas_abertas_aparecem_por_empresa_so_quando_ha_e_a_linha_e_informativa_sem_texto_de_cliente()
+    {
+        var linhas = FaqSavingsReport.DescribeOpenGaps(new Dictionary<Guid, int> { [A] = 3, [B] = 0 });
+
+        var unica = Assert.Single(linhas);
+        Assert.Equal(A, unica.Tenant);
+        Assert.Contains("3 lacuna(s) do FAQ aberta(s) esperando revisão do administrador", unica.Message);
+        Assert.Empty(FaqSavingsReport.DescribeOpenGaps(new Dictionary<Guid, int>()));
+    }
+
     [Fact]
     public void O_texto_nunca_traz_conteudo_de_conversa_so_numeros_e_rotulos()
     {

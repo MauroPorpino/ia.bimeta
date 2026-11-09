@@ -140,6 +140,14 @@ internal static class StatusCollector
                 var slug = tenant is { } id ? await SlugOfAsync(root, slugs, id, cancellationToken) : null;
                 linhas.Add(new StatusLine(FaqSavingsReport.Section, HealthSeverity.Ok, mensagem, null, slug));
             }
+
+            // O que há para REVISAR (ADR 0030): as lacunas abertas de cada empresa.
+            var abertas = await FaqSavingsReport.LoadOpenGapsAsync(root, so, cancellationToken);
+            foreach (var (tenant, mensagem) in FaqSavingsReport.DescribeOpenGaps(abertas))
+            {
+                var slug = tenant is { } id ? await SlugOfAsync(root, slugs, id, cancellationToken) : null;
+                linhas.Add(new StatusLine(FaqSavingsReport.Section, HealthSeverity.Ok, mensagem, null, slug));
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

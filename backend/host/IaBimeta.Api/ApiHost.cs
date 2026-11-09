@@ -1,5 +1,6 @@
 using IaBimeta.Adapters.Ai.OpenAI;
 using IaBimeta.Adapters.WhatsApp;
+using IaBimeta.Agents.Presentation;
 using IaBimeta.Agents.Infrastructure;
 using IaBimeta.AiGateway.Application;
 using IaBimeta.AiGateway.Infrastructure;
@@ -198,6 +199,9 @@ public static class ApiHost
         app.MapAuditEndpoints();
         app.MapConversationsEndpoints();
         app.MapChannelsEndpoints();
+
+        // A API administrativa do agente do tenant (ADR 0030): revisão das lacunas do FAQ, rascunho e publicação da definição.
+        app.MapAgentsEndpoints();
 
         // O Receiver do webhook do provedor: anônimo, autenticado pela assinatura do corpo (ADR 0011, seção C).
         app.MapChannelWebhookEndpoints();

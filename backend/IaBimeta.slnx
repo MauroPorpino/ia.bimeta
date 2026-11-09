@@ -21,6 +21,7 @@
   <Project Path="adapters/IaBimeta.Adapters.WhatsApp/IaBimeta.Adapters.WhatsApp.csproj" />
   <Project Path="modules/agents/IaBimeta.Agents.Core/IaBimeta.Agents.Core.csproj" />
   <Project Path="modules/agents/IaBimeta.Agents.Infrastructure/IaBimeta.Agents.Infrastructure.csproj" />
+  <Project Path="modules/agents/IaBimeta.Agents.Presentation/IaBimeta.Agents.Presentation.csproj" />
   <Project Path="modules/ai-gateway/IaBimeta.AiGateway.Contracts/IaBimeta.AiGateway.Contracts.csproj" />
   <Project Path="modules/ai-gateway/IaBimeta.AiGateway.Core/IaBimeta.AiGateway.Core.csproj" />
   <Project Path="modules/ai-gateway/IaBimeta.AiGateway.Infrastructure/IaBimeta.AiGateway.Infrastructure.csproj" />

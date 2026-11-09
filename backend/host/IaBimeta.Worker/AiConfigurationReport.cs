@@ -1,3 +1,4 @@
+using IaBimeta.Agents.Domain;
 using IaBimeta.AiGateway.Application;
 using IaBimeta.AiGateway.Domain;
 using IaBimeta.AiGateway.Infrastructure;
@@ -15,14 +16,16 @@ internal sealed class AiConfigurationReport : IHostedService
     private readonly AiProviderRegistry _providers;
     private readonly AiSecretOptions _secrets;
     private readonly AiDefaultLimits _limits;
+    private readonly AgentsOptions _agents;
     private readonly ILogger<AiConfigurationReport> _logger;
 
-    public AiConfigurationReport(AiModelCatalog catalog, AiProviderRegistry providers, AiSecretOptions secrets, AiDefaultLimits limits, ILogger<AiConfigurationReport> logger)
+    public AiConfigurationReport(AiModelCatalog catalog, AiProviderRegistry providers, AiSecretOptions secrets, AiDefaultLimits limits, AgentsOptions agents, ILogger<AiConfigurationReport> logger)
     {
         _catalog = catalog;
         _providers = providers;
         _secrets = secrets;
         _limits = limits;
+        _agents = agents;
         _logger = logger;
     }
 
@@ -42,6 +45,12 @@ internal sealed class AiConfigurationReport : IHostedService
             _logger.LogWarning(
                 "A configuração de IA deste Worker está incompleta: as chamadas ao modelo vão terminar em 'não configurada'. Confira o appsettings.json do Worker (catálogo e limites padrão) e AiGateway:Secrets (chave mestra, nos user-secrets ou no ambiente).");
         }
+
+        // O registro das lacunas do FAQ (ADR 0030) exige a chave mestra do hash; sem ela fica desligado, em silêncio no turno, então a partida é o lugar de dizer isso. O valor da chave nunca é impresso.
+        var lacunasLigadas = _agents.KnowledgeGapsEnabled && !string.IsNullOrWhiteSpace(_agents.KnowledgeGapHashKey);
+        _logger.LogInformation(
+            "Registro de lacunas do FAQ deste Worker: {Gaps} (chave do hash configurada: {Key}; Agents:Options:KnowledgeGapsEnabled: {Enabled}).",
+            lacunasLigadas ? "LIGADO" : "desligado", string.IsNullOrWhiteSpace(_agents.KnowledgeGapHashKey) ? "NÃO" : "sim", _agents.KnowledgeGapsEnabled ? "sim" : "NÃO");
 
         return Task.CompletedTask;
     }
