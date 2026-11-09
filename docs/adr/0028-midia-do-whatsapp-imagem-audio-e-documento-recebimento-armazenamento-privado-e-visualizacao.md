@@ -77,7 +77,7 @@ Conferido: o identificador da mídia recebida vale **7 dias**; o endereço de do
 4. **Retenção e direito de apagamento** de arquivos de cliente (a tabela é "pessoal" no inventário de retenção; o objeto no disco ainda não é apagado por nenhuma rotina).
 5. Vídeo, figurinha e outros tipos; miniaturas geradas no servidor (hoje a imagem inteira, até 5 MB, é baixada pelo navegador); transcrição de áudio e leitura de imagem (IA multimodal) com consentimento e política própria.
 6. Cota de armazenamento por tenant e limite de arquivos por conversa (hoje só o limite por arquivo).
-7. Envio de arquivos pelo atendente.
+7. ~~Envio de arquivos pelo atendente.~~ Feito em 09/11/2026 no ADR 0031 (Proposto): `docs/operations/ENVIO-DE-ARQUIVOS.md`.
 
 ## Consequências
 

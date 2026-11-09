@@ -1,6 +1,6 @@
 # Mídia do WhatsApp: imagem, áudio e documento
 
-Como o ia.bimeta **recebe** os arquivos que o cliente manda pelo WhatsApp e como o atendente os **vê, ouve e baixa** (ADR 0028). Só **recebimento e visualização**: o atendente **não envia** arquivos, e não há transcrição de áudio, reconhecimento de imagem, OCR, IA multimodal nem armazenamento em nuvem.
+Como o ia.bimeta **recebe** os arquivos que o cliente manda pelo WhatsApp e como o atendente os **vê, ouve e baixa** (ADR 0028). Este guia é só de **recebimento e visualização**; o **envio** de arquivos pelo atendente está em `ENVIO-DE-ARQUIVOS.md` (ADR 0031). Não há transcrição de áudio, reconhecimento de imagem, OCR, IA multimodal nem armazenamento em nuvem.
 
 ## 1. O que o atendente vê
 

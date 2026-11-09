@@ -171,6 +171,10 @@ Opcional e **independente** dos passos acima; exige um modelo **realmente aprova
 
 Opcional e independente. Com o número de teste, mande do celular **uma foto, uma nota de voz e um PDF** para o número; na interface, o atendente deve ver a miniatura, ouvir o áudio e baixar o documento. Siga o checklist da seção 7 de `docs/operations/MIDIA-DO-WHATSAPP.md` (domínio do endereço de conteúdo, formato do resumo, tipo da nota de voz, expiração). **Antes de operar com cliente real:** decidir antivírus, cópia e criptografia da pasta de arquivos e o prazo de guarda.
 
+### 4.10 Mídia enviada pelo atendente (imagem, documento, áudio)
+
+Opcional e independente. Com o cliente **dentro da janela de 24 horas** (mande "Olá" do celular antes), assuma a conversa e envie, pela interface, **uma imagem (JPEG e PNG), um PDF e um áudio Ogg Opus mono**, com legenda onde cabe. Confira no celular: o arquivo, a legenda, o nome do documento e o status (`sent`, `delivered`, `read`). Depois provoque as recusas da **subida** (um áudio Ogg que não é Opus, uma imagem acima de 4096 px) e **anote o estado HTTP e o código que a Meta devolve** para ajustar o tratamento (`docs/operations/ENVIO-DE-ARQUIVOS.md`, seção 6, e ADR 0031). Antes de operar com cliente real: antivírus, criptografia, cota e cópia da pasta de arquivos (o arquivo enviado dura 30 dias).
+
 ## 5. Se algo falhar
 
 | Sintoma | Causa provável | O que fazer |
