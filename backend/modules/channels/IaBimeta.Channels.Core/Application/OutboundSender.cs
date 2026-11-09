@@ -162,6 +162,18 @@ public sealed class OutboundMessageRequestedHandler : EventHandlerBase<OutboundM
             return await FailAsync(mensagem, "provider-unavailable", cancellationToken);
         }
 
+        // Uma mensagem por MODELO aprovado (ADR 0027) leva o modelo e os parâmetros no bloco de canal. O plano é montado e conferido ANTES de gastar ficha, tentativa ou chamada: um modelo que sumiu, que não é
+        // da conta do número, que deixou de estar aprovado ou cuja estrutura mudou desde a validação falha de forma visível, sem nada enviado.
+        TemplateSendPlan? plano = null;
+        if (visao.ChannelData is { } dadosDoCanal && dadosDoCanal.Values.ContainsKey(TemplateRenderer.KeyTemplateId))
+        {
+            plano = await PlanTemplateAsync(dadosDoCanal, instancia.AccountId, cancellationToken);
+            if (plano.FailureCode is not null)
+            {
+                return await FailAsync(mensagem, plano.FailureCode, cancellationToken);
+            }
+        }
+
         var token = await ChannelSecretReader.ReadAsync(_repository, _protector, envelope.TenantId, instancia.AccountId, ChannelSecretKind.AccessToken, cancellationToken);
         if (token is null)
         {
@@ -207,8 +219,13 @@ public sealed class OutboundMessageRequestedHandler : EventHandlerBase<OutboundM
         await _store.SaveAsync(cancellationToken);
 
         // (2) A chamada ao provedor, sem transação aberta. O identificador da nossa mensagem vai como dado opaco: o provedor o devolve nos status.
-        var resultado = await adaptador.SendTextAsync(
-            new ProviderSendRequest(token, instancia.PhoneNumberId, visao.ContactExternalRef, visao.Text, payload.MessageId.ToString("N")), cancellationToken);
+        var resultado = plano is null
+            ? await adaptador.SendTextAsync(
+                new ProviderSendRequest(token, instancia.PhoneNumberId, visao.ContactExternalRef, visao.Text, payload.MessageId.ToString("N")), cancellationToken)
+            : await adaptador.SendTemplateAsync(
+                new ProviderTemplateSendRequest(
+                    token, instancia.PhoneNumberId, visao.ContactExternalRef, plano.Template!.Name, plano.Template.Language, plano.Parameters, payload.MessageId.ToString("N")),
+                cancellationToken);
 
         // (3) O desfecho.
         var depois = _clock.GetUtcNow();
@@ -288,7 +305,84 @@ public sealed class OutboundMessageRequestedHandler : EventHandlerBase<OutboundM
         }
 
         await _store.SaveAsync(cancellationToken);
+
+        // A Meta recusou o MODELO (pausado, desativado, inexistente): o cadastro deixa de oferecê-lo ao atendente até o administrador o reaprovar. Melhor esforço, DEPOIS de o desfecho da mensagem estar gravado.
+        if (plano?.Template is { } modeloRecusado && resultado.Outcome == ProviderSendOutcome.RejectedPermanent)
+        {
+            await MarkTemplateUnavailableAsync(modeloRecusado.Id, resultado.ErrorCode, cancellationToken);
+        }
+
         return await NotifyAsync(mensagem, cancellationToken);
+    }
+
+    /// <summary>O modelo de um envio, os parâmetros na ordem do modelo ou o motivo de não poder enviar.</summary>
+    private sealed record TemplateSendPlan(ChannelTemplate? Template, IReadOnlyList<ProviderTemplateParameter> Parameters, string? FailureCode);
+
+    private async Task<TemplateSendPlan> PlanTemplateAsync(ChannelData dados, Guid accountId, CancellationToken cancellationToken)
+    {
+        static TemplateSendPlan Fail(string codigo) => new(null, Array.Empty<ProviderTemplateParameter>(), codigo);
+
+        if (!dados.Values.TryGetValue(TemplateRenderer.KeyTemplateId, out var texto) || !Guid.TryParse(texto, out var id) || id == Guid.Empty)
+        {
+            return Fail("template-invalid");
+        }
+
+        var modelo = await _repository.FindTemplateReadOnlyAsync(id, cancellationToken);
+        if (modelo is null)
+        {
+            return Fail("template-not-found");
+        }
+
+        // O modelo é da conta do número: uma mensagem nunca sai por um modelo de outra conta (mesmo do mesmo tenant).
+        if (modelo.AccountId != accountId)
+        {
+            return Fail("template-account-mismatch");
+        }
+
+        if (!modelo.IsSendable)
+        {
+            return Fail("template-not-approved");
+        }
+
+        // A estrutura gravada com a mensagem precisa ser a do modelo de agora: se o administrador recadastrou o modelo com outros parâmetros, não se monta um envio pela metade.
+        var recebidos = dados.Values.Where(par => par.Key.StartsWith(TemplateRenderer.KeyParameterPrefix, StringComparison.Ordinal)).ToDictionary(par => par.Key, par => par.Value, StringComparer.Ordinal);
+        if (recebidos.Count != modelo.Parameters.Count || modelo.Parameters.Any(p => !recebidos.ContainsKey(TemplateRenderer.ChannelDataKey(p.Key))))
+        {
+            return Fail("template-changed");
+        }
+
+        var parametros = modelo.Parameters
+            .Select(p => new ProviderTemplateParameter(p.Component, p.Index, p.Name, recebidos[TemplateRenderer.ChannelDataKey(p.Key)]))
+            .ToList();
+        return new TemplateSendPlan(modelo, parametros, null);
+    }
+
+    private async Task MarkTemplateUnavailableAsync(Guid templateId, string? errorCode, CancellationToken cancellationToken)
+    {
+        var novaSituacao = errorCode switch
+        {
+            "132015" => (TemplateStatus?)TemplateStatus.Paused,
+            "132016" or "132001" => TemplateStatus.Disabled,
+            _ => null,
+        };
+        if (novaSituacao is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var modelo = await _repository.FindTemplateAsync(templateId, cancellationToken);
+            if (modelo is not null && modelo.SetStatus(novaSituacao.Value, _clock.GetUtcNow()))
+            {
+                await _repository.SaveChangesAsync(cancellationToken);
+                await _audit.WriteAsync(new AuditEntry("channels.template.status.provider-error", "channel-template", templateId.ToString(), AuditOutcome.Success), cancellationToken);
+            }
+        }
+        catch (ChannelsConflictException)
+        {
+            // Outra operação mexeu no modelo ao mesmo tempo: o desfecho da mensagem já está gravado, e o próximo envio com o mesmo erro tenta de novo.
+        }
     }
 
     private static TimeSpan PairBackoff(int attempts) => TimeSpan.FromSeconds(Math.Min(60, Math.Pow(4, Math.Max(0, attempts - 1))));

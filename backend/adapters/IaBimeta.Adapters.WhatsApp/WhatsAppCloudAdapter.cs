@@ -73,6 +73,9 @@ public sealed class WhatsAppCloudAdapter : IChannelProviderAdapter, IDisposable
 
     public ProviderEffectStrategy EffectStrategy => ProviderEffectStrategy.None;
 
+    /// <summary>A janela de atendimento do WhatsApp: 24 horas depois da última mensagem do cliente. Fora dela, só modelo aprovado (a Meta recusa o texto livre com o erro 131047).</summary>
+    public TimeSpan? ReplyWindow => TimeSpan.FromHours(24);
+
     /// <summary>O adaptador com o próprio cliente HTTP: sem redirecionamento (o token nunca segue para outro endereço), sem tempo limite do cliente (cada chamada tem o dela) e com a vida da conexão limitada.</summary>
     public static WhatsAppCloudAdapter Create(WhatsAppOptions options, TimeProvider? clock = null)
     {
@@ -150,14 +153,28 @@ public sealed class WhatsAppCloudAdapter : IChannelProviderAdapter, IDisposable
 
     // Envio
 
-    public async Task<ProviderSendResult> SendTextAsync(ProviderSendRequest request, CancellationToken cancellationToken)
+    public Task<ProviderSendResult> SendTextAsync(ProviderSendRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        return DispatchAsync(WhatsAppSendRequestFactory.Create(request, _versionedBase, out var recusa), recusa, cancellationToken);
+    }
 
-        using var mensagem = WhatsAppSendRequestFactory.Create(request, _versionedBase, out var recusa);
+    /// <summary>
+    /// O envio de um MODELO de mensagem aprovado (<c>type: "template"</c>), o único que a Meta aceita fora da janela de 24 horas. Mesmo canal HTTP, mesmo token só no cabeçalho do pedido, mesma leitura da resposta e mesma
+    /// regra de dúvida do texto livre: o que não é recusa inequívoca do provedor é <see cref="ProviderSendOutcome.Unknown"/> e nunca é reenviado.
+    /// </summary>
+    public Task<ProviderSendResult> SendTemplateAsync(ProviderTemplateSendRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return DispatchAsync(WhatsAppSendRequestFactory.CreateTemplate(request, _versionedBase, out var recusa), recusa, cancellationToken);
+    }
+
+    private async Task<ProviderSendResult> DispatchAsync(HttpRequestMessage? mensagemPronta, ProviderSendResult? recusa, CancellationToken cancellationToken)
+    {
+        using var mensagem = mensagemPronta;
         if (mensagem is null)
         {
-            // Recusado ANTES de chamar o provedor (token fora do formato, destinatário ou texto inválidos): nada foi enviado.
+            // Recusado ANTES de chamar o provedor (token fora do formato, destinatário, texto ou parâmetro inválidos): nada foi enviado.
             return recusa!;
         }
 

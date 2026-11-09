@@ -84,15 +84,146 @@ internal static class WhatsAppSendRequestFactory
             corpo["biz_opaque_callback_data"] = Safe(request.OpaqueCallbackData);
         }
 
-        var endereco = new Uri(versionedBase, $"{request.ExternalAccountId}/messages");
+        return BuildSend(corpo, request.ExternalAccountId, request.AccessToken, versionedBase);
+    }
+
+    /// <summary>O ÚNICO lugar que monta o <c>POST {base}{versão}/{phone_number_id}/messages</c> (texto livre e modelo): o token vai só no cabeçalho deste pedido.</summary>
+    private static HttpRequestMessage BuildSend(JsonObject corpo, string accountId, string accessToken, Uri versionedBase)
+    {
+        var endereco = new Uri(versionedBase, $"{accountId}/messages");
         var mensagem = new HttpRequestMessage(HttpMethod.Post, endereco)
         {
             Content = new StringContent(corpo.ToJsonString(), Encoding.UTF8, "application/json"),
         };
         mensagem.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-        mensagem.Headers.Authorization = new AuthenticationHeaderValue("Bearer", request.AccessToken);
+        mensagem.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
         return mensagem;
     }
+
+    /// <summary>O nome do modelo: o que a Meta aceita (letras minúsculas, números e sublinhado). Entra no corpo JSON, não na URL, mas o formato é o do cadastro.</summary>
+    private static readonly Regex TemplateNamePattern = new("^[a-z0-9_]{1,512}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private static readonly Regex LanguagePattern = new("^[a-z]{2,3}(_[A-Za-z]{2,4})?$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    /// <summary>O teto de parâmetros por modelo (o mesmo do cadastro) e o de cada valor de texto: 1024 no corpo, 60 no cabeçalho, 512 no botão (a Meta conta o valor, não o texto final).</summary>
+    internal const int MaxTemplateParameters = 28;
+
+    private const int MaxTemplateParameterCharacters = 1024;
+
+    /// <summary>
+    /// O pedido de envio de um modelo (<c>type: "template"</c>): nome, idioma e os componentes com os parâmetros de TEXTO (cabeçalho, corpo e botão de link). Parâmetros nomeados levam o <c>parameter_name</c>. O que o
+    /// adaptador prova errado antes de chamar a Meta (formato do nome ou do idioma, parâmetro vazio, com quebra de linha ou grande demais) é recusa definitiva, sem enviar e sem repetir o valor.
+    /// </summary>
+    public static HttpRequestMessage? CreateTemplate(ProviderTemplateSendRequest request, Uri versionedBase, out ProviderSendResult? refusal)
+    {
+        refusal = null;
+
+        if (!IsHeaderSafeToken(request.AccessToken))
+        {
+            refusal = Refuse(ProviderSendOutcome.AccountError, "credential-invalid-format");
+            return null;
+        }
+
+        if (request.ExternalAccountId is null || !AccountIdPattern.IsMatch(request.ExternalAccountId))
+        {
+            refusal = Refuse(ProviderSendOutcome.AccountError, "invalid-account-id");
+            return null;
+        }
+
+        if (request.To is null || !RecipientPattern.IsMatch(request.To))
+        {
+            refusal = Refuse(ProviderSendOutcome.RejectedPermanent, "invalid-recipient");
+            return null;
+        }
+
+        if (request.TemplateName is null || !TemplateNamePattern.IsMatch(request.TemplateName) || request.Language is null || !LanguagePattern.IsMatch(request.Language))
+        {
+            refusal = Refuse(ProviderSendOutcome.RejectedPermanent, "template-invalid");
+            return null;
+        }
+
+        if (request.OpaqueCallbackData is { Length: > MaxCallbackDataCharacters })
+        {
+            refusal = Refuse(ProviderSendOutcome.RejectedPermanent, "callback-data-too-long");
+            return null;
+        }
+
+        var parametros = request.Parameters ?? Array.Empty<ProviderTemplateParameter>();
+        if (parametros.Count > MaxTemplateParameters
+            || parametros.Any(p => p is null || !IsValidParameterValue(p.Value) || p.Index < 0 || p.Component is not ("header" or "body" or "button")))
+        {
+            refusal = Refuse(ProviderSendOutcome.RejectedPermanent, "template-parameter-invalid");
+            return null;
+        }
+
+        var componentes = new JsonArray();
+        foreach (var grupo in new[] { "header", "body" })
+        {
+            var doGrupo = parametros.Where(p => p.Component == grupo).OrderBy(p => p.Index).ToList();
+            if (doGrupo.Count > 0)
+            {
+                componentes.Add(new JsonObject
+                {
+                    ["type"] = grupo,
+                    ["parameters"] = new JsonArray(doGrupo.Select(TextParameter).ToArray<JsonNode?>()),
+                });
+            }
+        }
+
+        // O botão de link leva o índice do botão (como texto, na referência da Meta) e o complemento do endereço.
+        foreach (var botao in parametros.Where(p => p.Component == "button").OrderBy(p => p.Index))
+        {
+            componentes.Add(new JsonObject
+            {
+                ["type"] = "button",
+                ["sub_type"] = "url",
+                ["index"] = botao.Index.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["parameters"] = new JsonArray(TextParameter(botao)),
+            });
+        }
+
+        var modelo = new JsonObject
+        {
+            ["name"] = request.TemplateName,
+            ["language"] = new JsonObject { ["code"] = request.Language },
+        };
+        if (componentes.Count > 0)
+        {
+            modelo["components"] = componentes;
+        }
+
+        var corpo = new JsonObject
+        {
+            ["messaging_product"] = "whatsapp",
+            ["recipient_type"] = "individual",
+            ["to"] = request.To,
+            ["type"] = "template",
+            ["template"] = modelo,
+        };
+
+        if (!string.IsNullOrEmpty(request.OpaqueCallbackData))
+        {
+            corpo["biz_opaque_callback_data"] = Safe(request.OpaqueCallbackData);
+        }
+
+        return BuildSend(corpo, request.ExternalAccountId, request.AccessToken, versionedBase);
+    }
+
+    private static JsonObject TextParameter(ProviderTemplateParameter parametro)
+    {
+        var json = new JsonObject { ["type"] = "text" };
+        if (!string.IsNullOrEmpty(parametro.Name))
+        {
+            json["parameter_name"] = parametro.Name;
+        }
+
+        json["text"] = Safe(parametro.Value);
+        return json;
+    }
+
+    /// <summary>O valor de um parâmetro de texto: não vazio, sem controle (a Meta recusa quebra de linha e tabulação) e dentro do tamanho.</summary>
+    private static bool IsValidParameterValue(string? valor) =>
+        !string.IsNullOrWhiteSpace(valor) && CountCharacters(valor) <= MaxTemplateParameterCharacters && !valor.Any(char.IsControl);
 
     /// <summary>
     /// A sonda: <c>GET {base}{versão}/{phone_number_id}?fields=id,display_phone_number,verified_name,quality_rating</c>, só leitura. Os campos são os que a referência oficial do número lista como padrão. O token vai só no

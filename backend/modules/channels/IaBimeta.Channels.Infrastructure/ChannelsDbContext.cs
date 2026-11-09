@@ -39,6 +39,9 @@ public sealed class ChannelsDbContext : DbContext
 
     public DbSet<ChannelSecret> Secrets => Set<ChannelSecret>();
 
+    /// <summary>Os modelos de mensagem (templates) aprovados na Meta e associados a cada conta.</summary>
+    public DbSet<ChannelTemplate> Templates => Set<ChannelTemplate>();
+
     /// <summary>Sem filtro de tenant, de propósito (a URL do webhook é consultada antes de o tenant ser conhecido): só chaves de roteamento.</summary>
     public DbSet<ChannelWebhook> Webhooks => Set<ChannelWebhook>();
 
@@ -59,6 +62,7 @@ public sealed class ChannelsDbContext : DbContext
         modelBuilder.ApplyConfiguration(new ChannelInstanceUnitConfiguration());
         modelBuilder.ApplyConfiguration(new ChannelRouteConfiguration());
         modelBuilder.ApplyConfiguration(new ChannelSecretConfiguration());
+        modelBuilder.ApplyConfiguration(new ChannelTemplateConfiguration());
         modelBuilder.ApplyConfiguration(new ChannelWebhookConfiguration());
         modelBuilder.ApplyConfiguration(new OutboundMessageConfiguration());
         modelBuilder.ApplyConfiguration(new AccountSendStateConfiguration());
@@ -73,6 +77,7 @@ public sealed class ChannelsDbContext : DbContext
         modelBuilder.Entity<ChannelInstance>().HasQueryFilter(e => e.TenantId == TenantAtual);
         modelBuilder.Entity<ChannelInstanceUnit>().HasQueryFilter(e => e.TenantId == TenantAtual);
         modelBuilder.Entity<ChannelSecret>().HasQueryFilter(e => e.TenantId == TenantAtual);
+        modelBuilder.Entity<ChannelTemplate>().HasQueryFilter(e => e.TenantId == TenantAtual);
     }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)

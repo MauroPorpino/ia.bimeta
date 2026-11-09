@@ -128,6 +128,44 @@ internal sealed class ChannelRouteConfiguration : IEntityTypeConfiguration<Chann
     }
 }
 
+internal sealed class ChannelTemplateConfiguration : IEntityTypeConfiguration<ChannelTemplate>
+{
+    public const string UniqueTemplateIndex = "ux_channel_templates_tenant_id_account_id_name_language";
+
+    public void Configure(EntityTypeBuilder<ChannelTemplate> builder)
+    {
+        builder.ToTable("channel_templates", table =>
+        {
+            // A categoria de autenticação (3) existe no contrato, mas o cadastro a recusa: o banco também.
+            table.HasCheckConstraint("ck_channel_templates_category", "category IN (1, 2)");
+            table.HasCheckConstraint("ck_channel_templates_status", "status IN (1, 2, 3, 4, 5)");
+            table.HasCheckConstraint("ck_channel_templates_body", "char_length(body_text) BETWEEN 1 AND 1024");
+        });
+
+        builder.HasKey(t => new { t.TenantId, t.Id });
+        builder.Property(t => t.TenantId).HasColumnName("tenant_id").HasConversion(new TenantIdConverter()).ValueGeneratedNever();
+        builder.Property(t => t.Id).HasColumnName("id").ValueGeneratedNever();
+        builder.Property(t => t.AccountId).HasColumnName("account_id");
+        builder.Property(t => t.Name).HasColumnName("name").HasMaxLength(ChannelTemplate.NameMaxLength).IsRequired();
+        builder.Property(t => t.Language).HasColumnName("language").HasMaxLength(ChannelTemplate.LanguageMaxLength).IsRequired();
+        builder.Property(t => t.Category).HasColumnName("category").HasConversion<short>();
+        builder.Property(t => t.Status).HasColumnName("status").HasConversion<short>();
+        builder.Property(t => t.MetaTemplateId).HasColumnName("meta_template_id").HasMaxLength(ChannelTemplate.MetaIdMaxLength);
+        builder.Property(t => t.HeaderText).HasColumnName("header_text").HasMaxLength(ChannelTemplate.TextMaxLength);
+        builder.Property(t => t.BodyText).HasColumnName("body_text").HasMaxLength(ChannelTemplate.TextMaxLength).IsRequired();
+        builder.Property(t => t.FooterText).HasColumnName("footer_text").HasMaxLength(ChannelTemplate.TextMaxLength);
+        builder.Property(t => t.Parameters).HasColumnName("parameters").HasColumnType("jsonb").HasConversion(new TemplateParametersConverter(), new TemplateParametersComparer()).IsRequired();
+        builder.Property(t => t.CreatedAt).HasColumnName("created_at");
+        builder.Property(t => t.UpdatedAt).HasColumnName("updated_at");
+
+        // O modelo é da conta E do mesmo tenant: o banco recusa modelo ligado à conta de outro tenant.
+        builder.HasOne<ChannelAccount>().WithMany().HasForeignKey(t => new { t.TenantId, t.AccountId }).OnDelete(DeleteBehavior.Restrict);
+
+        // Um modelo por conta, nome e idioma (a Meta identifica o modelo por nome e idioma dentro da conta).
+        builder.HasIndex(t => new { t.TenantId, t.AccountId, t.Name, t.Language }).IsUnique().HasDatabaseName(UniqueTemplateIndex);
+    }
+}
+
 internal sealed class ChannelSecretConfiguration : IEntityTypeConfiguration<ChannelSecret>
 {
     public const string UniqueKindIndex = "ux_channel_secrets_tenant_id_account_id_kind";

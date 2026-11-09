@@ -107,6 +107,41 @@ internal sealed class ChannelRepository : IChannelRepository
         return await consulta.OrderBy(i => i.Name).ThenBy(i => i.Id).ToListAsync(cancellationToken);
     }
 
+    public async Task AddTemplateAsync(ChannelTemplate template, CancellationToken cancellationToken)
+    {
+        _db.Templates.Add(template);
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex) when (PostgresErrors.IsUniqueViolation(ex, ChannelTemplateConfiguration.UniqueTemplateIndex))
+        {
+            // Outra requisição cadastrou o mesmo modelo primeiro: quem repetir atualiza o existente.
+            _db.Entry(template).State = EntityState.Detached;
+            throw new ChannelsConflictException();
+        }
+    }
+
+    public Task<ChannelTemplate?> FindTemplateAsync(Guid id, CancellationToken cancellationToken) =>
+        _db.Templates.FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
+
+    public Task<ChannelTemplate?> FindTemplateReadOnlyAsync(Guid id, CancellationToken cancellationToken) =>
+        _db.Templates.AsNoTracking().FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
+
+    public Task<ChannelTemplate?> FindTemplateAsync(Guid accountId, string name, string language, CancellationToken cancellationToken) =>
+        _db.Templates.FirstOrDefaultAsync(t => t.AccountId == accountId && t.Name == name && t.Language == language, cancellationToken);
+
+    public async Task<IReadOnlyList<ChannelTemplate>> ListTemplatesAsync(Guid accountId, bool onlyApproved, CancellationToken cancellationToken)
+    {
+        var consulta = _db.Templates.AsNoTracking().Where(t => t.AccountId == accountId);
+        if (onlyApproved)
+        {
+            consulta = consulta.Where(t => t.Status == TemplateStatus.Approved);
+        }
+
+        return await consulta.OrderBy(t => t.Name).ThenBy(t => t.Language).ToListAsync(cancellationToken);
+    }
+
     public async Task SaveChangesAsync(CancellationToken cancellationToken)
     {
         try

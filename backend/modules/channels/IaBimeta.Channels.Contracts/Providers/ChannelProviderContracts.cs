@@ -104,6 +104,18 @@ public enum ProviderSendOutcome
 /// <param name="OpaqueCallbackData">O dado opaco que o provedor devolve nos status (a correlação com a nossa mensagem); até 512 caracteres.</param>
 public sealed record ProviderSendRequest(string AccessToken, string ExternalAccountId, string To, string Text, string? OpaqueCallbackData);
 
+/// <summary>Um valor de parâmetro de modelo, no componente e na posição (ou nome) em que o provedor o espera.</summary>
+/// <param name="Component"><c>header</c>, <c>body</c> ou <c>button</c>.</param>
+/// <param name="Index">A posição: do marcador no texto (1, 2...) ou, no botão, o índice do botão (0, 1...).</param>
+/// <param name="Name">O nome do marcador nos modelos de parâmetro nomeado; nulo nos posicionais.</param>
+public sealed record ProviderTemplateParameter(string Component, int Index, string? Name, string Value);
+
+/// <summary>O pedido de envio de um modelo de mensagem aprovado (o ÚNICO jeito de iniciar ou retomar uma conversa fora da janela de resposta livre). Mesmas regras de segredo e de efeito do envio de texto.</summary>
+/// <param name="TemplateName">O nome do modelo no provedor.</param>
+/// <param name="Language">O código de idioma do modelo (por exemplo, <c>pt_BR</c>): um modelo é identificado por nome E idioma.</param>
+public sealed record ProviderTemplateSendRequest(
+    string AccessToken, string ExternalAccountId, string To, string TemplateName, string Language, IReadOnlyList<ProviderTemplateParameter> Parameters, string? OpaqueCallbackData);
+
 /// <summary>A quem o limite de taxa do provedor se aplica (só vale em <see cref="ProviderSendOutcome.RejectedTransient"/> de limite de taxa).</summary>
 public enum ProviderRateLimitScope
 {
@@ -185,6 +197,17 @@ public interface IChannelProviderAdapter
     /// <see cref="ProviderSendResult"/>. Cancelamento do chamador propaga como <see cref="OperationCanceledException"/>.
     /// </summary>
     Task<ProviderSendResult> SendTextAsync(ProviderSendRequest request, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Envia um MODELO de mensagem aprovado. Mesmas regras do envio de texto: não repete a chamada por conta própria, não lança por falha do provedor e o desfecho vai em <see cref="ProviderSendResult"/>; um erro
+    /// do próprio modelo (inexistente neste idioma, parâmetros que não conferem, pausado ou desativado) é recusa definitiva, com o código do provedor.
+    /// </summary>
+    Task<ProviderSendResult> SendTemplateAsync(ProviderTemplateSendRequest request, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Por quanto tempo depois da última mensagem do cliente o provedor aceita resposta LIVRE (no WhatsApp, 24 horas); fora dela só modelo aprovado. Nulo: o provedor não tem janela.
+    /// </summary>
+    TimeSpan? ReplyWindow { get; }
 
     /// <summary>
     /// Confere, SEM enviar mensagem, que a credencial é aceita e que o número existe e é acessível por ela (uma leitura no provedor). Não lança por falha do provedor: o desfecho vai em

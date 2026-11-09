@@ -31,7 +31,15 @@ internal static class WhatsAppSendResponseReader
     private const int WindowClosedCode = 131047;
 
     /// <summary>131049, 131026 e 131048: falha definitiva da mensagem (ADR 0011, A.2, item 8).</summary>
-    private static readonly HashSet<int> PermanentCodes = new() { 131049, 131026, 131048 };
+    private static readonly HashSet<int> PermanentCodes = new()
+    {
+        131049, 131026, 131048,
+
+        // Recusas do MODELO de mensagem (ADR 0027; página oficial de códigos de erro, consulta de 09/11/2026): parâmetros que não batem com o modelo (132000, 132012), modelo inexistente no idioma ou não aprovado
+        // (132001), texto traduzido longo demais (132005), conteúdo que viola a política (132007), modelo pausado por baixa qualidade (132015) e desativado de vez (132016). A página não fixa o estado HTTP
+        // desses códigos: o código decide, e todos são recusa DEFINITIVA da mensagem (nada saiu). O Sender usa 132015, 132016 e 132001 para tirar o modelo da oferta do atendente.
+        132000, 132001, 132005, 132007, 132012, 132015, 132016,
+    };
 
     /// <summary>
     /// 190 e 368 pausam a conta e alertam (ADR 0011, A.2, item 9). Os códigos 0, 3 e 10 (token inválido ou invalidado e permissão ausente) são do mesmo tipo na página oficial de códigos de erro (consulta de

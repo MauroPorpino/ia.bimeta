@@ -24,3 +24,6 @@ public sealed record SetChannelDefaultLocaleRequest(Locale? DefaultLocale);
 
 /// <summary>A vazão própria da conta, em mensagens por segundo (de 1 a 1000). Nulo: volta ao padrão da configuração.</summary>
 public sealed record SetAccountThroughputRequest(int? MessagesPerSecond);
+
+/// <summary>A situação de um modelo de mensagem: <c>Approved</c>, <c>Pending</c>, <c>Rejected</c>, <c>Paused</c> ou <c>Disabled</c>. Só o aprovado é oferecido ao atendente e enviado.</summary>
+public sealed record SetChannelTemplateStatusRequest(string Status);

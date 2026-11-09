@@ -354,6 +354,90 @@ namespace IaBimeta.Channels.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("IaBimeta.Channels.Domain.ChannelTemplate", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("account_id");
+
+                    b.Property<string>("BodyText")
+                        .IsRequired()
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)")
+                        .HasColumnName("body_text");
+
+                    b.Property<short>("Category")
+                        .HasColumnType("smallint")
+                        .HasColumnName("category");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("FooterText")
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)")
+                        .HasColumnName("footer_text");
+
+                    b.Property<string>("HeaderText")
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)")
+                        .HasColumnName("header_text");
+
+                    b.Property<string>("Language")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("language");
+
+                    b.Property<string>("MetaTemplateId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("meta_template_id");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("Parameters")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("parameters");
+
+                    b.Property<short>("Status")
+                        .HasColumnType("smallint")
+                        .HasColumnName("status");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("TenantId", "Id");
+
+                    b.HasIndex("TenantId", "AccountId", "Name", "Language")
+                        .IsUnique()
+                        .HasDatabaseName("ux_channel_templates_tenant_id_account_id_name_language");
+
+                    b.ToTable("channel_templates", "channels", t =>
+                        {
+                            t.HasCheckConstraint("ck_channel_templates_body", "char_length(body_text) BETWEEN 1 AND 1024");
+
+                            t.HasCheckConstraint("ck_channel_templates_category", "category IN (1, 2)");
+
+                            t.HasCheckConstraint("ck_channel_templates_status", "status IN (1, 2, 3, 4, 5)");
+                        });
+                });
+
             modelBuilder.Entity("IaBimeta.Channels.Domain.ChannelWebhook", b =>
                 {
                     b.Property<Guid>("TenantId")
@@ -392,6 +476,7 @@ namespace IaBimeta.Channels.Infrastructure.Migrations
                         .HasColumnName("id");
 
                     b.Property<int>("Attempts")
+                        .IsConcurrencyToken()
                         .HasColumnType("integer")
                         .HasColumnName("attempts");
 
@@ -422,6 +507,7 @@ namespace IaBimeta.Channels.Infrastructure.Migrations
                         .HasColumnName("provider_message_id");
 
                     b.Property<short>("State")
+                        .IsConcurrencyToken()
                         .HasColumnType("smallint")
                         .HasColumnName("state");
 
@@ -621,6 +707,15 @@ namespace IaBimeta.Channels.Infrastructure.Migrations
                 });
 
             modelBuilder.Entity("IaBimeta.Channels.Domain.ChannelSecret", b =>
+                {
+                    b.HasOne("IaBimeta.Channels.Domain.ChannelAccount", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "AccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("IaBimeta.Channels.Domain.ChannelTemplate", b =>
                 {
                     b.HasOne("IaBimeta.Channels.Domain.ChannelAccount", null)
                         .WithMany()

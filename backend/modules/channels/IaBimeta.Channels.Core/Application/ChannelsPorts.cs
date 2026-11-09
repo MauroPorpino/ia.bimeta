@@ -37,6 +37,21 @@ public interface IChannelRepository
 
     Task<IReadOnlyList<ChannelInstance>> ListInstancesAsync(IReadOnlyCollection<Guid>? organizationIds, CancellationToken cancellationToken);
 
+    /// <exception cref="ChannelsConflictException">Outra operação cadastrou o mesmo modelo (conta, nome e idioma) primeiro.</exception>
+    Task AddTemplateAsync(ChannelTemplate template, CancellationToken cancellationToken);
+
+    /// <summary>O modelo, rastreado para alteração.</summary>
+    Task<ChannelTemplate?> FindTemplateAsync(Guid id, CancellationToken cancellationToken);
+
+    /// <summary>O modelo, só para leitura.</summary>
+    Task<ChannelTemplate?> FindTemplateReadOnlyAsync(Guid id, CancellationToken cancellationToken);
+
+    /// <summary>O modelo da conta com o nome e o idioma, rastreado para alteração.</summary>
+    Task<ChannelTemplate?> FindTemplateAsync(Guid accountId, string name, string language, CancellationToken cancellationToken);
+
+    /// <summary>Os modelos da conta, só para leitura, por nome e idioma.</summary>
+    Task<IReadOnlyList<ChannelTemplate>> ListTemplatesAsync(Guid accountId, bool onlyApproved, CancellationToken cancellationToken);
+
     /// <summary>Grava as alterações das entidades rastreadas.</summary>
     /// <exception cref="ChannelsConflictException">Outra operação alterou o mesmo recurso antes.</exception>
     Task SaveChangesAsync(CancellationToken cancellationToken);

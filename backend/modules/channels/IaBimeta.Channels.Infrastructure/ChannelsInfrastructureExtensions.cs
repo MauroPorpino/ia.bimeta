@@ -55,6 +55,11 @@ public static class ChannelsInfrastructureExtensions
         services.AddScoped<ChannelRoutingQuery>();
         services.AddScoped<IChannelRouting>(provider => provider.GetRequiredService<ChannelRoutingQuery>());
 
+        // Modelos de mensagem (templates) aprovados na Meta: o cadastro (administração) e a consulta de módulo a módulo (ADR 0027).
+        services.AddScoped<ChannelTemplateService>();
+        services.AddScoped<ChannelTemplateQueries>();
+        services.AddScoped<IChannelTemplates>(provider => provider.GetRequiredService<ChannelTemplateQueries>());
+
         // O Receiver, o processamento do Inbox e o Sender (ADR 0011). Os adaptadores de provedor (IChannelProviderAdapter) são registrados pelo HOST (só os hosts referenciam adaptadores): sem nenhum, o webhook
         // responde 503 e o Sender falha a mensagem como "provider-unavailable". O Receiver não chama outro módulo (ARQ-19); quem chama o Conversations são os handlers do Inbox e do Sender, no Worker.
         services.AddScoped<ChannelProviderAdapters>();

@@ -1,4 +1,5 @@
 using IaBimeta.Channels.Application;
+using IaBimeta.Channels.Contracts;
 using IaBimeta.Channels.Domain;
 using IaBimeta.SharedKernel;
 using Microsoft.AspNetCore.Builder;
@@ -48,6 +49,26 @@ public static class ChannelsEndpoints
         // O endereço do webhook da conta (o identificador opaco, criado se ainda não existe). Só quem gere os canais da organização o vê.
         contas.MapPost("/{id:guid}/webhook", async (Guid id, ChannelWebhookAdminService servico, CancellationToken ct) =>
             Results.Ok(await servico.EnsureAsync(id, ct)));
+
+        // Os modelos de mensagem (templates) JÁ aprovados na Meta (ADR 0027). O cadastro recebe o JSON como a Meta o devolve (um modelo, uma lista ou a página {"data":[...]} da Graph API); não cria nem aprova nada.
+        contas.MapGet("/{id:guid}/templates", async (Guid id, ChannelTemplateService servico, CancellationToken ct) =>
+        {
+            var modelos = await servico.ListAsync(id, ct);
+            return modelos is null ? Results.NotFound() : Results.Ok(modelos);
+        });
+
+        contas.MapPost("/{id:guid}/templates", async (Guid id, System.Text.Json.JsonElement definicao, ChannelTemplateService servico, CancellationToken ct) =>
+            Results.Ok(await servico.RegisterAsync(id, definicao, ct)));
+
+        contas.MapPut("/{id:guid}/templates/{templateId:guid}/status", async (Guid id, Guid templateId, SetChannelTemplateStatusRequest pedido, ChannelTemplateService servico, CancellationToken ct) =>
+        {
+            if (!Enum.TryParse<TemplateStatus>(pedido.Status, ignoreCase: true, out var situacao) || !Enum.IsDefined(situacao))
+            {
+                return Results.Problem(title: "Dados inválidos", detail: "A situação do modelo é inválida.", statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            return Results.Ok(await servico.SetStatusAsync(id, templateId, situacao, ct));
+        });
 
         // O envio da conta (SND-2 e SND-6): estado, pausa, retomada segura (exige a prova do provedor) e vazão.
         contas.MapGet("/{id:guid}/sending", async (Guid id, AccountSendingService servico, CancellationToken ct) => Results.Ok(await servico.GetAsync(id, ct)));
