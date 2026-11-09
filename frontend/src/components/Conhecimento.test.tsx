@@ -223,6 +223,20 @@ describe('Conhecimento: revisão de uma lacuna', () => {
     expect(revisao().getByText('O cliente enviou outras mensagens (2) antes dessa resposta: ela pode ser de outra pergunta.')).toBeTruthy();
   });
 
+  it('a pergunta vem preenchida com o texto do cliente e o formulário manda remover dado pessoal antes de enviar (achado na homologação)', async () => {
+    const l = lacuna();
+    renderizar(rotasDeUmaLacuna(l, { pergunta: 'Sou a Maria, telefone 11 99999-0501: preciso de jejum?' }));
+    const usuario = userEvent.setup();
+
+    await abrirPrimeiraLacuna(usuario);
+
+    const campo = revisao().getByLabelText('Pergunta') as HTMLTextAreaElement;
+    expect(campo.value).toBe('Sou a Maria, telefone 11 99999-0501: preciso de jejum?'); // ponto de partida, editável: nada é enviado sem o administrador
+    const aviso = revisao().getByText(/Antes de enviar, remova nome, telefone, documento ou qualquer outro dado pessoal/);
+    expect(aviso.textContent).toMatch(/vale para todos os clientes da empresa/);
+    expect(campo.getAttribute('aria-describedby')).toContain(aviso.id); // o leitor de tela lê o aviso junto do campo
+  });
+
   it('a resposta direta (autoReply) começa desmarcada, com o alerta, e o envio leva false', async () => {
     const l = lacuna();
     const f = renderizar(

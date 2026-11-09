@@ -253,9 +253,19 @@ export function LacunaRevisao({ api, lacunaId, onDecidida, onRascunhoAlterado }:
         <form className="revisao-formulario" aria-label="Entrada do FAQ" onSubmit={(e) => void enviarAoRascunho(e)}>
           <div className="campo">
             <label htmlFor={idPergunta}>Pergunta</label>
-            <textarea id={idPergunta} rows={2} value={pergunta} disabled={ocupado !== null} aria-describedby={`${idPergunta}-contador`} onChange={(e) => setPergunta(e.target.value)} />
+            <textarea
+              id={idPergunta}
+              rows={2}
+              value={pergunta}
+              disabled={ocupado !== null}
+              aria-describedby={`${idPergunta}-contador ${idPergunta}-aviso`}
+              onChange={(e) => setPergunta(e.target.value)}
+            />
             <span id={`${idPergunta}-contador`} className={pergunta.length > LIMITE_PERGUNTA ? 'contador excedido' : 'contador'}>
               {pergunta.length} de {LIMITE_PERGUNTA} caracteres
+            </span>
+            <span id={`${idPergunta}-aviso`} className="discreto">
+              A pergunta já vem preenchida com o texto do cliente. Antes de enviar, remova nome, telefone, documento ou qualquer outro dado pessoal: o FAQ vale para todos os clientes da empresa.
             </span>
           </div>
 
