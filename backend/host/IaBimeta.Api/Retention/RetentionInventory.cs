@@ -25,6 +25,12 @@ internal enum DataClass
 /// </summary>
 internal static class RetentionInventory
 {
+    /// <summary>
+    /// As tarefas de expurgo que agem sobre OBJETOS do armazenamento privado (e não sobre as linhas de uma tabela técnica). Cada uma é uma EXCEÇÃO nomeada e decidida: o objeto expira, mas a linha do banco (dado
+    /// pessoal) nunca é apagada por prazo. Hoje: o conteúdo dos arquivos que o atendente enviou (ADR 0031). O teste de inventário exige que toda tarefa seja de uma tabela técnica OU esteja aqui.
+    /// </summary>
+    public static readonly IReadOnlySet<string> ObjectStoreTasks = new HashSet<string>(StringComparer.Ordinal) { "conversations.outbound-attachment-objects" };
+
     public static readonly IReadOnlyDictionary<string, (DataClass Class, string Note)> Tables = new Dictionary<string, (DataClass, string)>(StringComparer.Ordinal)
     {
         // Técnicas (expurgadas por política)
@@ -40,7 +46,7 @@ internal static class RetentionInventory
         // Pessoais ou conteúdo de cliente (somente relatório)
         ["conversations.messages"] = (DataClass.Personal, "conteúdo das mensagens do cliente e das respostas"),
         ["conversations.message_translations"] = (DataClass.Personal, "traduções do conteúdo das mensagens"),
-        ["conversations.message_attachments"] = (DataClass.Personal, "metadados dos arquivos do cliente (nome, tipo, tamanho, hash); os bytes ficam no armazenamento privado de anexos, FORA do banco e do backup do banco (ADR 0028)"),
+        ["conversations.message_attachments"] = (DataClass.Personal, "metadados dos arquivos do cliente e do atendente (nome, tipo, tamanho, hash); os bytes ficam no armazenamento privado de anexos, FORA do banco e do backup do banco (ADR 0028). O conteúdo do arquivo ENVIADO expira (ObjectStoreTasks, ADR 0031); a linha nunca é apagada por prazo"),
         ["conversations.contacts"] = (DataClass.Personal, "identificadores do contato (telefone, nome)"),
         ["conversations.conversations"] = (DataClass.Personal, "conversas do contato"),
         ["conversations.service_sessions"] = (DataClass.Personal, "atendimentos (numeração nunca reemitida: ADR 0012)"),

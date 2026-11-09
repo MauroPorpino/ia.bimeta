@@ -19,6 +19,23 @@ public class RetentionTests
         Assert.Equal(30, opcoes.DaysFor(RetentionCategory.Sessions));
         Assert.Equal(30, opcoes.DaysFor(RetentionCategory.PasswordResetTokens));
         Assert.Equal(7, opcoes.DaysFor(RetentionCategory.LoginThrottles));
+        Assert.Equal(30, opcoes.DaysFor(RetentionCategory.OutboundAttachments)); // arquivo enviado pelo atendente (ADR 0031): 30 dias, o mesmo do arquivo subido na Meta
+    }
+
+    [Fact]
+    public void O_prazo_do_arquivo_enviado_pode_ser_sobrescrito_por_empresa_e_precisa_ficar_entre_1_e_3650_dias()
+    {
+        var opcoes = new RetentionOptions();
+        opcoes.Tenants["lab-a"] = new Dictionary<RetentionCategory, int> { [RetentionCategory.OutboundAttachments] = 7 };
+
+        Assert.Equal(7, opcoes.DaysFor(RetentionCategory.OutboundAttachments, "lab-a"));
+        Assert.Equal(30, opcoes.DaysFor(RetentionCategory.OutboundAttachments, "lab-b"));
+        opcoes.Validate();
+
+        opcoes.Days[RetentionCategory.OutboundAttachments] = 0;
+        Assert.Throws<InvalidOperationException>(opcoes.Validate);
+        opcoes.Days[RetentionCategory.OutboundAttachments] = RetentionOptions.MaximumDays + 1;
+        Assert.Throws<InvalidOperationException>(opcoes.Validate);
     }
 
     [Fact]

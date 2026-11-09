@@ -39,7 +39,10 @@ public sealed class OutboundAttachmentRetentionTask : IRetentionTask
         _clock = clock;
     }
 
-    public string Name => "conversations.message_attachments";
+    public string Name => ObjectName;
+
+    /// <summary>O nome da tarefa: ela age sobre os OBJETOS da pasta privada de arquivos (a linha do banco só muda de estado, nunca é apagada), então não é o nome de uma tabela técnica (ver <c>RetentionInventory.ObjectStoreTasks</c>).</summary>
+    public const string ObjectName = "conversations.outbound-attachment-objects";
 
     public RetentionCategory Category => RetentionCategory.OutboundAttachments;
 

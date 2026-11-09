@@ -383,8 +383,12 @@ public sealed class RetencaoDeDadosTests(PostgresFixture banco)
 
         Assert.DoesNotContain(linhas, l => l.Table.Contains("NÃO CLASSIFICADA"));
         var tecnicas = RetentionInventory.Tables.Where(e => e.Value.Class == DataClass.Technical).Select(e => e.Key).Order().ToList();
-        var comTarefa = api.Services.GetServices<IRetentionTask>().Select(t => t.Name).Order().ToList();
-        Assert.Equal(tecnicas, comTarefa);
+        var tarefas = api.Services.GetServices<IRetentionTask>().Select(t => t.Name).Order().ToList();
+
+        // Toda tarefa é de uma tabela técnica, ou é uma exceção NOMEADA que age só sobre objetos do armazenamento privado (a linha pessoal nunca é apagada por prazo).
+        Assert.Equal(tecnicas, tarefas.Where(t => !RetentionInventory.ObjectStoreTasks.Contains(t)).ToList());
+        Assert.Equal(RetentionInventory.ObjectStoreTasks.Order().ToList(), tarefas.Where(RetentionInventory.ObjectStoreTasks.Contains).ToList());
+        Assert.DoesNotContain(RetentionInventory.ObjectStoreTasks, nome => RetentionInventory.Tables.ContainsKey(nome));
 
         // Toda tabela classificada existe de fato (sem entrada esquecida de tabela que já saiu).
         var existentes = linhas.Select(l => l.Table).ToHashSet();
