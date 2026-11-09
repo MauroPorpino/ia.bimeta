@@ -14,6 +14,9 @@
 
     # Uma conversa longa (130 mensagens do mesmo cliente), para ver o historico em paginas na interface:
     .\tools\dev\Send-MensagemWhatsApp.ps1 -Texto 'mensagem' -Nome 'Historia' -Numero 5511999990301 -Quantidade 130
+
+    # Uma conversa com a janela de 24 horas FECHADA (a ultima mensagem do cliente tem 26 horas): so modelo aprovado:
+    .\tools\dev\Send-MensagemWhatsApp.ps1 -Texto 'Quero falar com um atendente' -Nome Mauro -Numero 5511999990301 -HorasAtras 26
 #>
 [CmdletBinding()]
 param(
@@ -24,7 +27,11 @@ param(
     [string]$Tenant = 'demo-ia',
 
     # Quantas mensagens enviar (com mais de uma, cada texto ganha " (i/N)" e o id do provedor e unico).
-    [ValidateRange(1, 1000)][int]$Quantidade = 1
+    [ValidateRange(1, 1000)][int]$Quantidade = 1,
+
+    # A mensagem do cliente tem ESTA idade pelo relogio da Meta (padrao: agora). Com mais de 24 horas, a janela de resposta
+    # livre do WhatsApp esta fechada e o atendente so pode responder com um modelo de mensagem aprovado.
+    [ValidateRange(0, 720)][double]$HorasAtras = 0
 )
 
 Set-StrictMode -Version Latest
@@ -43,7 +50,7 @@ $lote = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
 for ($indice = 1; $indice -le $Quantidade; $indice++) {
 $Texto = $textoBase
 if ($Quantidade -gt 1) { $Texto = $textoBase + ' (' + $indice + '/' + $Quantidade + ')' }
-$agora = [DateTimeOffset]::UtcNow
+$agora = [DateTimeOffset]::UtcNow.AddHours(-1 * $HorasAtras)
 $idDaMensagem = 'wamid.SIM' + $lote + '-' + $indice
 $payload = @{
     object = 'whatsapp_business_account'

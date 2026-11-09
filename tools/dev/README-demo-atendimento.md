@@ -39,6 +39,13 @@ Abre uma janela para cada peça. Depois que o Api subir, cadastre uma chave de I
 3. **O atendente atende.** Em `http://localhost:5173`, entre com tenant `demo-ia`, `admin@demo-ia.local` e `DevLocal-Admin-2026!`. Abra a conversa, **Assumir**, escreva a resposta e envie: ela aparece na janela do WhatsApp simulado. O cliente responde com outro `Send-MensagemWhatsApp.ps1` (mesmo `-Numero`): quem responde agora é o humano, a IA não fala.
 4. **Encerrar.** **Encerrar** na interface (com confirmação): a sessão fecha e o item sai da fila.
 
+## Fora da janela de 24 horas: modelos de mensagem (ADR 0027)
+
+1. `.\tools\dev\Add-ModelosDeDemonstracao.ps1` associa à conta de demonstração os modelos de `modelos-demonstracao.json` (como se a Meta já os tivesse aprovado; o de cabeçalho de imagem é **recusado com o motivo**, de propósito).
+2. `.\tools\dev\Send-MensagemWhatsApp.ps1 -Texto 'Quero falar com um atendente' -Nome Maria -Numero 5511999990301 -HorasAtras 26` manda uma mensagem de cliente **de 26 horas atrás**: a IA transfere e a janela de resposta livre já está fechada.
+3. Na interface, **assuma** a conversa da Maria: a faixa **Janela de 24 horas fechada** aparece, o texto livre fica bloqueado e o seletor lista os modelos. Escolha `resultado_disponivel`, deixe os campos vazios e envie (erro ao lado de cada campo), preencha e **Enviar modelo**: a prévia é o texto que o cliente lê, e a janela do **WhatsApp simulado** mostra `[MODELO resultado_disponivel / pt_BR]` com os parâmetros.
+4. Com `Send-MensagemWhatsApp.ps1` **sem** `-HorasAtras`, a janela está aberta: o texto livre vale e o botão **Enviar modelo de mensagem** abre o seletor. Guia completo: `docs/operations/MODELOS-DE-MENSAGEM.md`.
+
 ## Dois atendentes ao mesmo tempo (operação diária)
 
 Para ver a Central de Atendimento com **dois atendentes** e várias conversas (ADR 0022):

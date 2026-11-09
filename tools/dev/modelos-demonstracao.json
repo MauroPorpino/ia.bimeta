@@ -1,0 +1,40 @@
+{
+  "data": [
+    {
+      "name": "resultado_disponivel",
+      "language": "pt_BR",
+      "category": "UTILITY",
+      "status": "APPROVED",
+      "id": "1001",
+      "components": [
+        {
+          "type": "BODY",
+          "text": "Olá {{1}}, o resultado do seu exame {{2}} já está disponível. Qualquer dúvida, é só responder esta mensagem.",
+          "example": { "body_text": [ [ "Maria", "hemograma" ] ] }
+        },
+        { "type": "FOOTER", "text": "Laboratório de Demonstração" }
+      ]
+    },
+    {
+      "name": "retomar_atendimento",
+      "language": "pt_BR",
+      "category": "UTILITY",
+      "status": "APPROVED",
+      "id": "1002",
+      "components": [
+        { "type": "BODY", "text": "Olá! Estamos retomando o seu atendimento no Laboratório de Demonstração. Pode continuar por aqui." }
+      ]
+    },
+    {
+      "name": "promocao_com_imagem",
+      "language": "pt_BR",
+      "category": "MARKETING",
+      "status": "APPROVED",
+      "id": "1003",
+      "components": [
+        { "type": "HEADER", "format": "IMAGE" },
+        { "type": "BODY", "text": "Novidades do laboratório." }
+      ]
+    }
+  ]
+}

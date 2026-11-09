@@ -53,16 +53,52 @@ try {
 
         $para = '?'
         $texto = ''
+        $modelo = $null
+        $linhasDoModelo = @()
         try {
             $json = ConvertFrom-Json -InputObject $corpo
             $para = [string]$json.to
-            $texto = [string]$json.text.body
+            if ([string]$json.type -eq 'template') {
+                # Um MODELO de mensagem aprovado (o unico tipo que a Meta aceita fora da janela de 24 horas). O corpo e o da Cloud API:
+                # template.name, template.language.code e os componentes (header, body, button) com os parametros de texto.
+                $modelo = $json.template
+                foreach ($componente in @($modelo.components)) {
+                    foreach ($parametro in @($componente.parameters)) {
+                        $nome = ''
+                        if ($parametro.PSObject.Properties['parameter_name']) { $nome = ' (' + [string]$parametro.parameter_name + ')' }
+                        $linhasDoModelo += ('      ' + [string]$componente.type + $nome + ' = ' + [string]$parametro.text)
+                    }
+                }
+            }
+            else {
+                $texto = [string]$json.text.body
+            }
         }
         catch {
         }
 
-        Write-Host ((Get-Date).ToString('HH:mm:ss') + '  WhatsApp -> ' + $para + ' :')
-        Write-Host ('    ' + $texto)
+        # Como a Meta: um modelo sem nome ou sem idioma e um pedido invalido (nada e "entregue").
+        if ($null -ne $modelo -and ([string]::IsNullOrWhiteSpace([string]$modelo.name) -or [string]::IsNullOrWhiteSpace([string]$modelo.language.code))) {
+            Write-Host ((Get-Date).ToString('HH:mm:ss') + '  [recusado] modelo sem nome ou sem idioma: a Meta responderia 400.')
+            Write-Host ''
+            $recusa = @{ error = @{ message = 'Parametro invalido'; type = 'OAuthException'; code = 100; fbtrace_id = 'SIMULADO' } }
+            $bytesRecusa = [System.Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject $recusa -Depth 5 -Compress))
+            $contexto.Response.StatusCode = 400
+            $contexto.Response.ContentType = 'application/json'
+            $contexto.Response.ContentLength64 = $bytesRecusa.Length
+            $contexto.Response.OutputStream.Write($bytesRecusa, 0, $bytesRecusa.Length)
+            $contexto.Response.Close()
+            continue
+        }
+
+        if ($null -ne $modelo) {
+            Write-Host ((Get-Date).ToString('HH:mm:ss') + '  WhatsApp -> ' + $para + ' :  [MODELO ' + [string]$modelo.name + ' / ' + [string]$modelo.language.code + ']')
+            foreach ($linha in $linhasDoModelo) { Write-Host $linha }
+        }
+        else {
+            Write-Host ((Get-Date).ToString('HH:mm:ss') + '  WhatsApp -> ' + $para + ' :')
+            Write-Host ('    ' + $texto)
+        }
         Write-Host ''
 
         $resposta = @{
