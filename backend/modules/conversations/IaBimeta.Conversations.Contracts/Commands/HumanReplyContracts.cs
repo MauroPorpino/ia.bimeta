@@ -58,7 +58,10 @@ public enum ResponderMatch
 /// <summary>O conteúdo efetivo de uma resposta humana, tal como foi materializado na intenção (nunca recalculado a partir de dado vivo).</summary>
 /// <param name="Text">O texto da resposta.</param>
 /// <param name="InReplyToMessageId">A mensagem citada, pelo identificador imutável dela, se houver.</param>
-/// <param name="ChannelData">Metadados de envio que o adaptador declara relevantes. Enquanto o <see cref="IaBimeta.Conversations.Contracts.ChannelData"/> não for persistido (fatia A3), é recusado.</param>
+/// <param name="ChannelData">
+/// Metadados de envio que o canal declara relevantes (por exemplo, o modelo de mensagem aprovado e os parâmetros que o Sender usa para montar o envio fora da janela de 24 horas). Gravado com a mensagem de saída
+/// (as mesmas regras de forma da mensagem do cliente) e comparado na idempotência: o mesmo <c>OperationId</c> com outros dados é outro efeito. Fora dos limites, a resposta é recusada (<c>ContentRejected</c>).
+/// </param>
 public sealed record ReplyContent(string Text, Guid? InReplyToMessageId = null, ChannelData? ChannelData = null);
 
 /// <summary>

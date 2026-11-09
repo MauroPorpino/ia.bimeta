@@ -215,6 +215,85 @@ public class MessageTests
         Assert.Equal((original.Locale, original.LocaleOrigin), (reenvio.Locale, reenvio.LocaleOrigin)); // o reenvio não muda o idioma da mensagem
     }
 
+    // Resposta humana por modelo de mensagem (ADR 0027): o bloco de canal acompanha a mensagem até o Sender
+
+    private static ChannelData BlocoDeModelo() => new(1, new Dictionary<string, string>
+    {
+        [ChannelDataKeys.TemplateName] = "resultado_pronto",
+        ["tpl.id"] = "0197a1b2-0000-7000-8000-000000000001",
+        ["tpl.lang"] = "pt_BR",
+        ["tpl.p.body.1"] = "Mauro",
+    });
+
+    private static Message RespostaHumana(ChannelData? bloco = null) =>
+        Message.CreateHumanReply(
+            Fabrica.Tenant, Guid.NewGuid(), Guid.NewGuid(), ChannelInstanceId.New(), 3, Guid.NewGuid(), Guid.NewGuid(), "Olá Mauro, seu resultado está pronto.", Fabrica.Agora, Locale.Parse("pt-BR"), bloco);
+
+    [Fact]
+    public void Resposta_humana_por_modelo_guarda_o_bloco_de_canal_com_a_mensagem_e_o_texto_e_o_que_o_cliente_le()
+    {
+        var resposta = RespostaHumana(BlocoDeModelo());
+
+        Assert.Equal("Olá Mauro, seu resultado está pronto.", resposta.Text);
+        Assert.Equal(1, resposta.ChannelData!.Version);
+        Assert.Equal("resultado_pronto", resposta.ChannelData.Values[ChannelDataKeys.TemplateName]);
+        Assert.Equal(("resultado_pronto", DeliveryState.Requested), (resposta.ToView().TemplateName, resposta.DeliveryState));
+    }
+
+    [Fact]
+    public void Resposta_humana_de_texto_livre_nao_tem_bloco_e_nao_tem_rotulo_de_modelo()
+    {
+        var resposta = RespostaHumana();
+
+        Assert.Null(resposta.ChannelData);
+        Assert.Null(resposta.ToView().TemplateName);
+    }
+
+    [Fact]
+    public void O_bloco_da_resposta_humana_e_uma_copia_o_dicionario_do_chamador_nao_o_altera_depois()
+    {
+        var valores = new Dictionary<string, string> { ["tpl.name"] = "a", ["tpl.id"] = "1" };
+        var resposta = RespostaHumana(new ChannelData(1, valores));
+
+        valores["tpl.name"] = "alterado";
+        valores["novo"] = "x";
+
+        Assert.Equal("a", resposta.ChannelData!.Values["tpl.name"]);
+        Assert.Equal(2, resposta.ChannelData.Values.Count);
+    }
+
+    [Fact]
+    public void Bloco_de_canal_fora_dos_limites_na_resposta_humana_e_recusado_e_nada_nasce()
+    {
+        Assert.Throws<ConversationsValidationException>(() => RespostaHumana(new ChannelData(0, new Dictionary<string, string>())));
+        Assert.Throws<ConversationsValidationException>(() => RespostaHumana(new ChannelData(1, new Dictionary<string, string> { ["Chave Invalida"] = "v" })));
+        Assert.Throws<ConversationsValidationException>(() => RespostaHumana(new ChannelData(1, new Dictionary<string, string> { ["k"] = new string('v', ConversationLimits.ChannelDataValueMaxLength + 1) })));
+        Assert.Throws<ConversationsValidationException>(() => RespostaHumana(new ChannelData(
+            1, Enumerable.Range(0, ConversationLimits.ChannelDataMaxEntries + 1).ToDictionary(i => $"k{i}", _ => "v"))));
+    }
+
+    [Fact]
+    public void Reenvio_de_mensagem_por_modelo_continua_sendo_por_modelo_com_os_mesmos_parametros()
+    {
+        var original = RespostaHumana(BlocoDeModelo());
+        original.TryApplyDelivery(DeliveryState.Failed, "send-failed.131049");
+
+        var reenvio = Message.CreateResend(original, 5, Guid.NewGuid(), Guid.NewGuid(), Fabrica.Agora.AddMinutes(1));
+
+        Assert.Equal(original.ChannelData!.Version, reenvio.ChannelData!.Version);
+        Assert.Equal(original.ChannelData.Values.OrderBy(p => p.Key, StringComparer.Ordinal).ToArray(), reenvio.ChannelData.Values.OrderBy(p => p.Key, StringComparer.Ordinal).ToArray());
+        Assert.Equal("resultado_pronto", reenvio.ToView().TemplateName);
+    }
+
+    [Fact]
+    public void Reenvio_de_texto_livre_continua_sem_bloco()
+    {
+        var original = RespostaHumana();
+        original.TryApplyDelivery(DeliveryState.Failed, "send-failed.131049");
+
+        Assert.Null(Message.CreateResend(original, 5, Guid.NewGuid(), Guid.NewGuid(), Fabrica.Agora.AddMinutes(1)).ChannelData);
+    }
+
     // Entrega
 
     [Fact]

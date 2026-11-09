@@ -18,6 +18,7 @@ public interface IOutboundDispatchQueries
 /// <param name="ContactExternalRef">O destinatário no provedor (no WhatsApp, o wa_id), do contato da sessão.</param>
 /// <param name="Text">O texto a enviar, exatamente como foi aceito.</param>
 /// <param name="DeliveryState">O estado de entrega atual da mensagem (o Sender não envia o que já saiu do estado de pedido).</param>
+/// <param name="ChannelData">Os metadados de envio gravados com a mensagem (por exemplo, o modelo de mensagem e os parâmetros que o Sender monta); nulo na mensagem de texto livre.</param>
 public sealed record OutboundDispatchView(
     Guid MessageId,
     Guid SessionId,
@@ -25,7 +26,8 @@ public sealed record OutboundDispatchView(
     string ContactExternalRef,
     MessageAuthor Author,
     string? Text,
-    DeliveryState? DeliveryState);
+    DeliveryState? DeliveryState,
+    ChannelData? ChannelData = null);
 
 /// <summary>
 /// A leitura de DIAGNÓSTICO das mensagens de saída que ainda não tiveram desfecho: pedidas ao provedor (<c>Requested</c>, <c>Queued</c> ou <c>Sending</c>) e paradas há mais que o tempo dado. É o sinal de que

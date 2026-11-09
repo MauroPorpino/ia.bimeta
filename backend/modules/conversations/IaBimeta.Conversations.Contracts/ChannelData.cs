@@ -16,3 +16,12 @@ namespace IaBimeta.Conversations.Contracts;
 /// <param name="Version">A versão do esquema de chaves declarada pelo adaptador (1 ou mais). Mudar o significado de uma chave exige uma versão nova.</param>
 /// <param name="Values">As chaves e os valores, tal como o adaptador os declara.</param>
 public sealed record ChannelData(int Version, IReadOnlyDictionary<string, string> Values);
+
+/// <summary>
+/// As chaves do bloco de canal que o Conversations reconhece (e só estas). Todas as outras continuam opacas. Hoje é uma só: o nome do modelo de mensagem do provedor (ADR 0027), que a visão do histórico mostra
+/// como rótulo da mensagem enviada por modelo. O conteúdo do modelo, os parâmetros e o resto do bloco o Conversations guarda e devolve ao Sender sem interpretar.
+/// </summary>
+public static class ChannelDataKeys
+{
+    public const string TemplateName = "tpl.name";
+}

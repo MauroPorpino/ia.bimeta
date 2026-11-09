@@ -60,6 +60,7 @@ internal sealed class OutboundDispatchReader : IOutboundDispatchReader
                 linha.ExternalRef,
                 linha.mensagem.Author,
                 linha.mensagem.Text,
-                linha.mensagem.DeliveryState);
+                linha.mensagem.DeliveryState,
+                linha.mensagem.ChannelData);
     }
 }

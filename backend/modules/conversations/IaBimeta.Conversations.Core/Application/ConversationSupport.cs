@@ -117,7 +117,8 @@ internal static class ConversationMapping
             s.DepartmentId,
             s.LastMessageSeq,
             s.HandlingPeriod,
-            s.PlacementEpoch);
+            s.PlacementEpoch,
+            linha.LastInboundAt);
     }
 
     public static SessionTransferView ToView(this SessionTransfer t) =>
@@ -149,7 +150,8 @@ internal static class ConversationMapping
         m.CoveredThroughSeq,
         m.ChannelInstanceId,
         m.Locale,
-        m.LocaleOrigin);
+        m.LocaleOrigin,
+        m.ChannelDataValues is { } dados && dados.TryGetValue(ChannelDataKeys.TemplateName, out var modelo) ? modelo : null);
 
     /// <summary>
     /// Visão para o modelo de IA: conteúdo indisponível nunca entra (I9). Sem texto, sem marcador que o modelo possa tratar

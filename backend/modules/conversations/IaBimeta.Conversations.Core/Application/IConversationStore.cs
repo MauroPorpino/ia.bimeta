@@ -18,12 +18,14 @@ public sealed record MessagePageFilter(HistoryOrder Order, MessageCursor? After,
 
 /// <param name="ContactPreferredLocale">A preferência de idioma do contato, se houver.</param>
 /// <param name="EffectiveLocale">O idioma efetivo da conversa da sessão e a origem da escolha.</param>
+/// <param name="LastInboundAt">O instante da última mensagem do cliente (relógio do provedor quando há). Só a leitura de UMA sessão o preenche; na listagem fica nulo.</param>
 public sealed record SessionRow(
     ServiceSession Session,
     string? ContactDisplayName,
     Locale? ContactPreferredLocale = null,
     Locale? EffectiveLocale = null,
-    LocaleSource? LocaleSource = null);
+    LocaleSource? LocaleSource = null,
+    DateTimeOffset? LastInboundAt = null);
 
 /// <summary>
 /// Porta de persistência do Conversations. Opera sempre dentro do tenant do contexto da operação: um registro de outro

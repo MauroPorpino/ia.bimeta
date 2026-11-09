@@ -264,6 +264,10 @@ public sealed class Message : ITenantOwned
             CreatedAt = now,
             Locale = original.Locale,
             LocaleOrigin = original.LocaleOrigin,
+
+            // O reenvio de uma mensagem por modelo continua sendo por modelo: perder o bloco o transformaria em texto livre, que fora da janela o provedor recusa.
+            ChannelDataVersion = original.ChannelDataVersion,
+            ChannelDataValues = original.ChannelDataValues is null ? null : SnapshotOf(original.ChannelDataValues),
         };
     }
 
@@ -274,12 +278,18 @@ public sealed class Message : ITenantOwned
     /// </summary>
     public static Message CreateHumanReply(
         TenantId tenantId, Guid sessionId, Guid conversationId, ChannelInstanceId channelInstanceId, long messageSeq, Guid authorUserId, Guid operationId, string text, DateTimeOffset now,
-        Locale conversationLocale)
+        Locale conversationLocale, IaBimeta.Conversations.Contracts.ChannelData? channelData = null)
     {
         ArgumentNullException.ThrowIfNull(tenantId);
         ArgumentNullException.ThrowIfNull(conversationLocale);
 
         ValidateText(text, MessageKind.Text, required: true);
+
+        // Defesa em profundidade, como na mensagem do cliente: o serviço já valida o bloco antes de tocar o armazenamento.
+        if (channelData is not null)
+        {
+            ConversationLimits.ValidateChannelData(channelData);
+        }
 
         return new Message
         {
@@ -292,6 +302,8 @@ public sealed class Message : ITenantOwned
             MessageSeq = messageSeq,
             Author = MessageAuthor.Human,
             AuthorRef = authorUserId,
+            ChannelDataVersion = channelData?.Version,
+            ChannelDataValues = channelData is null ? null : SnapshotOf(channelData.Values),
             Kind = MessageKind.Text,
             ContentState = ContentState.Ready,
             Text = text,

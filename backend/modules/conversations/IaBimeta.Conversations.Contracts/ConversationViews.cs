@@ -10,6 +10,8 @@ public sealed record Page<T>(IReadOnlyList<T> Items, string? NextCursor);
 /// <c>PlacementEpoch</c> são só para quem chama em processo (o ContactCenter, para a fronteira do histórico, para a identidade do período de
 /// atendimento a que um acesso está preso e para a identidade da colocação, a geração monotônica que avança a cada mudança de unidade ou setor
 /// e prova a continuidade do vínculo entre a sessão e o lugar onde um acesso foi autorizado) e não fazem parte do JSON da API HTTP.
+/// <c>LastInboundAt</c> (o instante da última mensagem do CLIENTE, pelo relógio do provedor quando há) só vem preenchido na leitura de UMA sessão, não na listagem: é o que o ContactCenter usa para dizer se a janela de
+/// resposta livre do provedor (24 horas no WhatsApp) ainda está aberta; nulo, o cliente nunca escreveu.
 /// </summary>
 public sealed record SessionView(
     Guid Id,
@@ -34,11 +36,13 @@ public sealed record SessionView(
     Guid? DepartmentId = null,
     [property: System.Text.Json.Serialization.JsonIgnore] long LastMessageSeq = 0,
     [property: System.Text.Json.Serialization.JsonIgnore] long HandlingPeriod = 0,
-    [property: System.Text.Json.Serialization.JsonIgnore] long PlacementEpoch = 0);
+    [property: System.Text.Json.Serialization.JsonIgnore] long PlacementEpoch = 0,
+    [property: System.Text.Json.Serialization.JsonIgnore] DateTimeOffset? LastInboundAt = null);
 
 /// <summary>
 /// Visão de uma mensagem para quem lê o histórico (usuário autorizado). O texto de conteúdo que ainda não está pronto é
-/// nulo: ninguém lê conteúdo que não foi interpretado.
+/// nulo: ninguém lê conteúdo que não foi interpretado. <c>TemplateName</c> é o nome do modelo de mensagem do provedor quando a mensagem foi enviada por um modelo (o texto é o que o cliente leu, já com os
+/// parâmetros); nulo nas demais.
 /// </summary>
 public sealed record MessageView(
     Guid Id,
@@ -62,7 +66,8 @@ public sealed record MessageView(
     long? CoveredThroughSeq,
     ChannelInstanceId ChannelInstanceId,
     Locale? Locale = null,
-    MessageLocaleOrigin? LocaleOrigin = null);
+    MessageLocaleOrigin? LocaleOrigin = null,
+    string? TemplateName = null);
 
 /// <summary>
 /// Um encaminhamento da sessão entre unidades (e setores): de onde, para onde, quem pediu, por quê e quando. O rastro é só

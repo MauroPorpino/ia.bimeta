@@ -55,7 +55,13 @@ internal sealed class ConversationStore : IConversationStore
             .Select(x => new { x.EffectiveLocale, x.LocaleSource })
             .FirstOrDefaultAsync(cancellationToken);
 
-        return new SessionRow(linha.Sessao, linha.DisplayName, linha.PreferredLocale, conversa?.EffectiveLocale, conversa?.LocaleSource);
+        // O instante da última mensagem do CLIENTE: o relógio do provedor quando há (é o que a janela de resposta livre do provedor conta), senão o da chegada. Um agregado indexado pela sessão; sem mensagem
+        // do cliente, nulo.
+        var ultimaEntrada = await _db.Messages.AsNoTracking()
+            .Where(m => m.SessionId == sessionId && m.Direction == MessageDirection.Inbound)
+            .MaxAsync(m => (DateTimeOffset?)(m.ProviderTimestamp ?? m.OccurredAt), cancellationToken);
+
+        return new SessionRow(linha.Sessao, linha.DisplayName, linha.PreferredLocale, conversa?.EffectiveLocale, conversa?.LocaleSource, ultimaEntrada);
     }
 
     public async Task<IReadOnlyList<SessionRow>> ListSessionsAsync(SessionListFilter filter, CancellationToken cancellationToken)

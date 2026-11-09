@@ -410,12 +410,13 @@ public sealed class HandlingService : IHandlingCommands
         var contexto = _context.GetRequired();
         contexto.Require(Permission.SystemOperation);
 
-        // A forma do pedido antes de qualquer acesso ao armazenamento. Anexos e destinatários (DP-05) e a citação ainda não existem: um bloco de canal ou uma citação é recusado, nunca ignorado.
+        // A forma do pedido antes de qualquer acesso ao armazenamento. Anexos e destinatários (DP-05) e a citação ainda não existem: a citação é recusada, nunca ignorada. O bloco de canal (por exemplo, o
+        // modelo de mensagem aprovado) segue as mesmas regras de forma da mensagem do cliente.
         var conteudo = command.Content;
         if (conteudo is null
             || string.IsNullOrWhiteSpace(conteudo.Text)
             || conteudo.Text.Length > ConversationLimits.TextMaxLength
-            || conteudo.ChannelData is not null
+            || !IsValidChannelData(conteudo.ChannelData)
             || conteudo.InReplyToMessageId is not null
             || command.OperationId == Guid.Empty
             || command.AuthorUserId == Guid.Empty
@@ -435,7 +436,8 @@ public sealed class HandlingService : IHandlingCommands
         var existente = await trabalho.FindResendByRequestAsync(command.OperationId, cancellationToken);
         if (existente is not null)
         {
-            var mesmoEfeito = existente.SessionId == sessao.Id && existente.Author == MessageAuthor.Human && existente.AuthorRef == command.AuthorUserId && existente.Text == conteudo.Text;
+            var mesmoEfeito = existente.SessionId == sessao.Id && existente.Author == MessageAuthor.Human && existente.AuthorRef == command.AuthorUserId && existente.Text == conteudo.Text
+                && SameChannelData(existente.ChannelData, conteudo.ChannelData);
             return mesmoEfeito
                 ? new RegisterHumanReplyResult(
                     RegisterHumanReplyOutcome.AlreadyApplied, existente.Id, existente.MessageSeq, sessao.StateVersion, existente.CreatedAt,
@@ -480,7 +482,7 @@ public sealed class HandlingService : IHandlingCommands
         var agora = _clock.GetUtcNow();
         var sequencia = sessao.NextOutboundSeq(agora);
         var mensagem = Message.CreateHumanReply(
-            contexto.TenantId, sessao.Id, conversa.Id, conversa.ChannelInstanceId, sequencia, command.AuthorUserId, command.OperationId, conteudo.Text, agora, conversa.EffectiveLocale);
+            contexto.TenantId, sessao.Id, conversa.Id, conversa.ChannelInstanceId, sequencia, command.AuthorUserId, command.OperationId, conteudo.Text, agora, conversa.EffectiveLocale, conteudo.ChannelData);
         sessao.AdvanceFence(command.FenceToken);
         trabalho.Add(mensagem);
         await trabalho.CommitAsync(
@@ -499,6 +501,38 @@ public sealed class HandlingService : IHandlingCommands
         await _audit.WriteAsync(new AuditEntry("conversations.message.human-reply", "message", mensagem.Id.ToString(), AuditOutcome.Success), cancellationToken);
         return new RegisterHumanReplyResult(
             RegisterHumanReplyOutcome.Applied, mensagem.Id, mensagem.MessageSeq, sessao.StateVersion, agora, FenceObservation.Current);
+    }
+
+    /// <summary>Sem bloco, vale; com bloco, só se ele cabe nos limites estruturais do Conversations.</summary>
+    private static bool IsValidChannelData(ChannelData? dados)
+    {
+        if (dados is null)
+        {
+            return true;
+        }
+
+        try
+        {
+            ConversationLimits.ValidateChannelData(dados);
+            return true;
+        }
+        catch (ConversationsValidationException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>O mesmo bloco (versão e pares, na comparação ordinal), ou os dois ausentes.</summary>
+    private static bool SameChannelData(ChannelData? a, ChannelData? b)
+    {
+        if (a is null || b is null)
+        {
+            return a is null && b is null;
+        }
+
+        return a.Version == b.Version
+            && a.Values.Count == b.Values.Count
+            && a.Values.All(par => b.Values.TryGetValue(par.Key, out var outro) && string.Equals(par.Value, outro, StringComparison.Ordinal));
     }
 
     public async Task<CloseSessionDelegatedResult> CloseSessionDelegatedAsync(CloseSessionDelegatedCommand command, CancellationToken cancellationToken = default)
