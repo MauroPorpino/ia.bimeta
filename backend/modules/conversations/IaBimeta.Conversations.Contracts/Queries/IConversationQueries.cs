@@ -49,4 +49,8 @@ public sealed record ListSessionsQuery(int Take, string? Cursor, SessionStatus? 
 /// ingestão não é a mesma: nenhuma mensagem válida é omitida e nenhuma de fora aparece).
 /// </param>
 /// <param name="MessageId">Se informado, só essa mensagem (dentro dos mesmos limites): é como o ContactCenter confere, com as regras do histórico, se o atendente pode abrir o arquivo de UMA mensagem.</param>
-public sealed record GetHistoryQuery(Guid SessionId, int Take, string? Cursor, HistoryOrder Order, long? ThroughMessageSeq = null, Guid? MessageId = null);
+/// <param name="AfterMessageSeq">
+/// Se informado, só as mensagens cuja sequência (<c>MessageSeq</c>) é MAIOR que ela (o que veio depois de uma mensagem conhecida). Como <paramref name="ThroughMessageSeq"/>, vale na própria consulta, antes da paginação,
+/// e com a ordem <see cref="HistoryOrder.OldestFirst"/> devolve a mensagem seguinte primeiro: é como o Agents acha a resposta humana que veio depois de uma pergunta, sem percorrer o histórico inteiro (ADR 0030).
+/// </param>
+public sealed record GetHistoryQuery(Guid SessionId, int Take, string? Cursor, HistoryOrder Order, long? ThroughMessageSeq = null, Guid? MessageId = null, long? AfterMessageSeq = null);

@@ -125,6 +125,12 @@ internal sealed class ConversationStore : IConversationStore
             mensagens = mensagens.Where(m => m.MessageSeq <= ate);
         }
 
+        // O corte de baixo (o que veio DEPOIS de uma mensagem conhecida) vale pelo mesmo motivo: antes da paginação.
+        if (filter.AfterMessageSeq is { } depoisDe)
+        {
+            mensagens = mensagens.Where(m => m.MessageSeq > depoisDe);
+        }
+
         if (filter.Order == HistoryOrder.OldestFirst)
         {
             if (filter.After is { } apos)

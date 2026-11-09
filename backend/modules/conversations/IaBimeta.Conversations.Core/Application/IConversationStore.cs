@@ -14,7 +14,7 @@ public sealed record MessageCursor(DateTimeOffset OccurredAt, long MessageSeq);
 public sealed record SessionListFilter(IReadOnlySet<Guid>? OrganizationIds, SessionStatus? Status, SessionCursor? After, int Take);
 
 /// <param name="ThroughMessageSeq">Só as mensagens com <c>MessageSeq</c> até este valor (a fronteira de um período), aplicado antes da paginação.</param>
-public sealed record MessagePageFilter(HistoryOrder Order, MessageCursor? After, int Take, long? ThroughMessageSeq = null, Guid? MessageId = null);
+public sealed record MessagePageFilter(HistoryOrder Order, MessageCursor? After, int Take, long? ThroughMessageSeq = null, Guid? MessageId = null, long? AfterMessageSeq = null);
 
 /// <param name="ContactPreferredLocale">A preferência de idioma do contato, se houver.</param>
 /// <param name="EffectiveLocale">O idioma efetivo da conversa da sessão e a origem da escolha.</param>
