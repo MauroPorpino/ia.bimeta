@@ -1,6 +1,7 @@
 import { encerrarSessaoLocal, obterToken } from './session';
 import type {
   ActionResult,
+  AgentDefinition,
   AgentPresence,
   AgentStatus,
   ChangePasswordRequest,
@@ -9,11 +10,17 @@ import type {
   CurrentUser,
   HistoryOrder,
   ItemActionRequest,
+  KnowledgeGapDetail,
+  KnowledgeGapPage,
+  KnowledgeGapPromotion,
+  KnowledgeGapStatus,
+  KnowledgeGapSummary,
   LoginRequest,
   LoginResponse,
   Message,
   Page,
   ProblemDetails,
+  PromoteKnowledgeGapRequest,
   QueueItem,
   QueueItemOperationResult,
   QueueItemStatus,
@@ -95,6 +102,13 @@ export interface ListItemsParams {
   assignedToMe?: boolean;
   queueId?: string;
   take?: number;
+}
+
+export interface ListKnowledgeGapsParams {
+  /** Ausente = todas as situações. */
+  status?: KnowledgeGapStatus;
+  take?: number;
+  skip?: number;
 }
 
 export interface MessagesParams {
@@ -248,6 +262,19 @@ export function createApi(opcoes: ApiOptions = {}) {
   }
 
   const rotaItem = (itemId: string) => `/contact-center/items/${encodeURIComponent(itemId)}`;
+  const rotaLacuna = (lacunaId: string) => `/agents/knowledge-gaps/${encodeURIComponent(lacunaId)}`;
+
+  /** Uma versão da definição que pode não existir: o 404 do servidor ("não há rascunho" ou "não há publicada") vira `null`; qualquer outro erro continua erro. */
+  async function versaoOuNula(caminho: string): Promise<AgentDefinition | null> {
+    try {
+      return await requisitar<AgentDefinition>('GET', caminho);
+    } catch (erro) {
+      if (erro instanceof ApiError && erro.status === 404) {
+        return null;
+      }
+      throw erro;
+    }
+  }
 
   return {
     // ---- Identity
@@ -311,6 +338,19 @@ export function createApi(opcoes: ApiOptions = {}) {
       acao<ActionResult>(`close|${itemId}|${reasonCode}`, (requestId) =>
         requisitar<ActionResult>('POST', `${rotaItem(itemId)}/close`, { corpo: { requestId, reasonCode } satisfies CloseRequest }),
       ),
+
+    // ---- Conhecimento do agente (ADR 0030): só o administrador do tenant (os demais recebem 403). Tenant e usuário vêm da sessão, nunca de parâmetro.
+    // Lacunas do FAQ: perguntas reais de clientes que o FAQ não respondeu direto. Decidir (descartar ou enviar ao rascunho) é decisão do servidor: não há requestId.
+    listarLacunasDoFaq: (p: ListKnowledgeGapsParams = {}) =>
+      requisitar<KnowledgeGapPage>('GET', '/agents/knowledge-gaps', { consulta: { status: p.status, take: p.take, skip: p.skip } }),
+    obterLacunaDoFaq: (lacunaId: string) => requisitar<KnowledgeGapDetail>('GET', rotaLacuna(lacunaId)),
+    descartarLacunaDoFaq: (lacunaId: string) => requisitar<KnowledgeGapSummary>('POST', `${rotaLacuna(lacunaId)}/dismiss`),
+    enviarLacunaAoRascunho: (lacunaId: string, entrada: PromoteKnowledgeGapRequest) =>
+      requisitar<KnowledgeGapPromotion>('POST', `${rotaLacuna(lacunaId)}/promote`, { corpo: entrada }),
+    // Definição do agente: o rascunho e a publicada (`null` quando não existem). Publicar é uma ação explícita, à parte.
+    obterRascunhoDoAgente: () => versaoOuNula('/agents/definition/draft'),
+    obterPublicadaDoAgente: () => versaoOuNula('/agents/definition/published'),
+    publicarRascunhoDoAgente: () => requisitar<AgentDefinition>('POST', '/agents/definition/publish'),
   };
 }
 

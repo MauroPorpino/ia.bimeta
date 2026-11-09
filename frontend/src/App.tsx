@@ -5,11 +5,13 @@ import { gravarItemAberto, lerItemAberto } from './armazem';
 import type { CurrentUser, SendingAlert } from './api/types';
 import { AlertasDeEnvio } from './components/AlertasDeEnvio';
 import { ConexaoBanner } from './components/ConexaoBanner';
+import { Conhecimento } from './components/Conhecimento';
 import { ConversationPanel } from './components/ConversationPanel';
 import { ErrorBanner, type Aviso } from './components/ErrorBanner';
 import { LoginScreen } from './components/LoginScreen';
 import { QueuePanel } from './components/QueuePanel';
 import { TrocarSenha } from './components/TrocarSenha';
+import { ehAdministradorDoTenant } from './conhecimento';
 import { useCacheDeConversas, useEstadoDaConexao, useNomesDosContatos, usePolling } from './hooks';
 
 interface AppProps {
@@ -81,6 +83,9 @@ function Atendimento({ api, saidaManual, intervaloFilaMs, intervaloConversaMs, i
   const [erroAoCarregarUsuario, setErroAoCarregarUsuario] = useState<string | null>(null);
   const [tentativa, setTentativa] = useState(0);
   const [trocandoSenha, setTrocandoSenha] = useState(false);
+  // A área "Conhecimento" (ADR 0030) é só do administrador do tenant. Aberta uma vez, fica montada (escondida) ao voltar ao Atendimento, para não perder o que ele escrevia.
+  const [area, setArea] = useState<'atendimento' | 'conhecimento'>('atendimento');
+  const [conhecimentoAberto, setConhecimentoAberto] = useState(false);
   const [itemSelecionado, setItemSelecionado] = useState<string | null>(null);
   const [versaoDaLista, setVersaoDaLista] = useState(0);
   const [errosDeRede, setErrosDeRede] = useState<Record<string, ErroDeRede>>({});
@@ -216,10 +221,30 @@ function Atendimento({ api, saidaManual, intervaloFilaMs, intervaloConversaMs, i
     }
   }
 
+  const podeVerConhecimento = me !== null && ehAdministradorDoTenant(me);
+  const naAreaDeConhecimento = podeVerConhecimento && area === 'conhecimento';
+
+  function irParaArea(destino: 'atendimento' | 'conhecimento') {
+    setArea(destino);
+    if (destino === 'conhecimento') {
+      setConhecimentoAberto(true);
+    }
+  }
+
   return (
     <div className="app">
       <header className="topo">
-        <h1>ia.bimeta - Atendimento</h1>
+        <h1>{naAreaDeConhecimento ? 'ia.bimeta - Conhecimento' : 'ia.bimeta - Atendimento'}</h1>
+        {podeVerConhecimento && (
+          <nav className="areas" aria-label="Áreas do sistema">
+            <button type="button" className="area-aba" aria-current={!naAreaDeConhecimento ? 'page' : undefined} onClick={() => irParaArea('atendimento')}>
+              Atendimento
+            </button>
+            <button type="button" className="area-aba" aria-current={naAreaDeConhecimento ? 'page' : undefined} onClick={() => irParaArea('conhecimento')}>
+              Conhecimento
+            </button>
+          </nav>
+        )}
         <div className="topo-usuario">
           {me && <span>{me.displayName}</span>}
           <button type="button" className="btn" aria-expanded={trocandoSenha} onClick={() => setTrocandoSenha((aberto) => !aberto)}>
@@ -248,7 +273,7 @@ function Atendimento({ api, saidaManual, intervaloFilaMs, intervaloConversaMs, i
           )}
         </main>
       ) : (
-        <main className={itemSelecionado ? 'colunas com-selecao' : 'colunas'}>
+        <main className={itemSelecionado ? 'colunas com-selecao' : 'colunas'} hidden={naAreaDeConhecimento}>
           <QueuePanel
             api={api}
             me={me}
@@ -285,6 +310,8 @@ function Atendimento({ api, saidaManual, intervaloFilaMs, intervaloConversaMs, i
           )}
         </main>
       )}
+
+      {podeVerConhecimento && conhecimentoAberto && <Conhecimento api={api} oculto={!naAreaDeConhecimento} />}
     </div>
   );
 }

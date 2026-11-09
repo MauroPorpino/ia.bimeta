@@ -1,11 +1,31 @@
 import { vi, type Mock } from 'vitest';
-import type { Attachment, CurrentUser, Message, QueueItem, ServiceQueue } from '../api/types';
+import type {
+  AgentDefinition,
+  Attachment,
+  CurrentUser,
+  FaqEntry,
+  KnowledgeGapDetail,
+  KnowledgeGapHumanReply,
+  KnowledgeGapSummary,
+  Message,
+  QueueItem,
+  ServiceQueue,
+} from '../api/types';
 
 export const USUARIO: CurrentUser = {
   id: '11111111-1111-4111-8111-111111111111',
   email: 'ana@demo-a.local',
   displayName: 'Ana Atendente',
   grants: [],
+  preferredLocale: null,
+};
+
+/** Administrador do TENANT: concessão `OrganizationAdmin` sem organização (escopo do tenant). */
+export const ADMINISTRADOR: CurrentUser = {
+  id: '33333333-3333-4333-8333-333333333333',
+  email: 'beto@demo-a.local',
+  displayName: 'Beto Administrador',
+  grants: [{ organizationId: null, role: 'OrganizationAdmin' }],
   preferredLocale: null,
 };
 
@@ -86,6 +106,62 @@ export function anexo(sobrescrever: Partial<Attachment> = {}): Attachment {
     sizeBytes: 2048,
     failureCode: null,
     caption: null,
+    ...sobrescrever,
+  };
+}
+
+/** Uma lacuna do FAQ da lista da revisão (por padrão, aberta, sem correspondência, 3 ocorrências, vista há 5 minutos). */
+export function lacuna(sobrescrever: Partial<KnowledgeGapSummary> = {}): KnowledgeGapSummary {
+  sequencia += 1;
+  return {
+    id: `aaaa0000-0000-4000-8000-${String(sequencia).padStart(12, '0')}`,
+    kind: 'NoMatch',
+    status: 'Open',
+    occurrences: 3,
+    firstSeenAt: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+    lastSeenAt: new Date(Date.now() - 5 * 60_000).toISOString(),
+    decidedAt: null,
+    promotedVersion: null,
+    ...sobrescrever,
+  };
+}
+
+/** O detalhe de uma lacuna com a fonte disponível: a pergunta do cliente e, opcionalmente, a resposta de um atendente. */
+export function detalheDaLacuna(
+  resumo: KnowledgeGapSummary,
+  fonte: { pergunta?: string | null; respostaHumana?: KnowledgeGapHumanReply | null; indisponivel?: boolean } = {},
+): KnowledgeGapDetail {
+  const indisponivel = fonte.indisponivel === true;
+  return {
+    gap: resumo,
+    occurrences: [
+      {
+        sessionId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+        conversationId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+        messageId: '00000000-0000-4000-8000-0000000000ff',
+        occurredAt: resumo.lastSeenAt,
+      },
+    ],
+    source: {
+      state: indisponivel ? 'Unavailable' : 'Available',
+      question: indisponivel ? null : (fonte.pergunta ?? 'Vocês fazem exame de sangue sem hora marcada?'),
+      humanReply: indisponivel ? null : (fonte.respostaHumana ?? null),
+    },
+  };
+}
+
+export function entradaDoFaq(sobrescrever: Partial<FaqEntry> = {}): FaqEntry {
+  return { question: 'Qual o horário de funcionamento?', answer: 'Funcionamos de segunda a sexta, das 7h às 17h.', aliases: null, autoReply: false, ...sobrescrever };
+}
+
+/** Uma versão da definição do agente (por padrão, o rascunho 2). */
+export function definicao(faq: FaqEntry[], sobrescrever: Partial<AgentDefinition> = {}): AgentDefinition {
+  return {
+    number: 2,
+    status: 'Draft',
+    content: { instructions: 'Seja cordial.', faq, audioInformativeText: null, handoffNoticeText: null, faqLocale: null },
+    updatedAt: new Date().toISOString(),
+    publishedAt: null,
     ...sobrescrever,
   };
 }

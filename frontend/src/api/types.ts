@@ -6,6 +6,8 @@
 //  - ContactCenter: backend/modules/contact-center/IaBimeta.ContactCenter.Core/Application/ContactCenterViews.cs
 //                   backend/modules/contact-center/IaBimeta.ContactCenter.Presentation/ContactCenterDtos.cs
 //  - Conversations: backend/modules/conversations/IaBimeta.Conversations.Contracts/ConversationViews.cs e ConversationEnums.cs
+//  - Agents:        backend/modules/agents/IaBimeta.Agents.Core/Application/KnowledgeGapService.cs e AgentDefinitionService.cs
+//                   backend/modules/agents/IaBimeta.Agents.Presentation/AgentsEndpoints.cs
 
 // ---------------------------------------------------------------- Identity
 
@@ -228,6 +230,105 @@ export interface SendingAlert {
   cooldownUntil: string | null;
   /** Os números da conta (`Message.channelInstanceId`). */
   channelInstanceIds: string[];
+}
+
+// ---------------------------------------------------------------- Agents (lacunas do FAQ e definição do agente, ADR 0030)
+
+/** Por que a pergunta de um cliente virou lacuna: nenhuma entrada do FAQ a responde, duas ou mais a respondem (duplicata) ou a única que a responde não tem resposta direta. */
+export type KnowledgeGapKind = 'NoMatch' | 'Ambiguous' | 'NotAutoReply';
+
+export type KnowledgeGapStatus = 'Open' | 'Dismissed' | 'Promoted';
+
+/** Uma lacuna na lista da revisão (KnowledgeGapSummary). Nunca traz texto de cliente: só referências e contagens. */
+export interface KnowledgeGapSummary {
+  id: string;
+  kind: KnowledgeGapKind;
+  status: KnowledgeGapStatus;
+  occurrences: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  decidedAt: string | null;
+  /** A versão do rascunho que recebeu a entrada (só nas lacunas enviadas ao rascunho). */
+  promotedVersion: number | null;
+}
+
+/** GET /agents/knowledge-gaps: a página (das mais frequentes para as menos) e o total da situação pedida. */
+export interface KnowledgeGapPage {
+  items: KnowledgeGapSummary[];
+  total: number;
+}
+
+/** Onde a pergunta apareceu: só identificadores do atendimento. */
+export interface KnowledgeGapOccurrence {
+  sessionId: string;
+  conversationId: string;
+  messageId: string;
+  occurredAt: string;
+}
+
+/** `Unavailable` = a mensagem foi removida ou quem pede não pode lê-la: a lacuna continua revisável (o administrador escreve a pergunta). */
+export type KnowledgeGapSourceState = 'Available' | 'Unavailable';
+
+/** A resposta de um ATENDENTE que veio depois da pergunta: só uma sugestão editável, nunca é usada sozinha. */
+export interface KnowledgeGapHumanReply {
+  text: string;
+  occurredAt: string;
+  /** Quantas mensagens do cliente vieram entre a pergunta e a resposta: com mais de zero, ela pode ser de outra pergunta. */
+  customerMessagesBetween: number;
+}
+
+export interface KnowledgeGapSource {
+  state: KnowledgeGapSourceState;
+  question: string | null;
+  humanReply: KnowledgeGapHumanReply | null;
+}
+
+/** GET /agents/knowledge-gaps/{id}. */
+export interface KnowledgeGapDetail {
+  gap: KnowledgeGapSummary;
+  occurrences: KnowledgeGapOccurrence[];
+  source: KnowledgeGapSource;
+}
+
+/** Corpo de POST /agents/knowledge-gaps/{id}/promote: a entrada de FAQ que o administrador montou. `autoReply` só vale se ele o ligou de propósito. */
+export interface PromoteKnowledgeGapRequest {
+  question: string;
+  aliases: string[];
+  answer: string;
+  autoReply: boolean;
+}
+
+/** O resultado do envio ao rascunho. NADA foi publicado. */
+export interface KnowledgeGapPromotion {
+  gap: KnowledgeGapSummary;
+  draftVersion: number;
+  faqEntries: number;
+}
+
+export type AgentDefinitionStatus = 'Draft' | 'Published' | 'Retired';
+
+export interface FaqEntry {
+  question: string;
+  answer: string;
+  aliases: string[] | null;
+  autoReply: boolean;
+}
+
+export interface AgentDefinitionContent {
+  instructions: string;
+  faq: FaqEntry[];
+  audioInformativeText: string | null;
+  handoffNoticeText: string | null;
+  faqLocale: string | null;
+}
+
+/** Uma versão da definição do agente (AgentDefinitionView): o rascunho ou a publicada. */
+export interface AgentDefinition {
+  number: number;
+  status: AgentDefinitionStatus;
+  content: AgentDefinitionContent;
+  updatedAt: string;
+  publishedAt: string | null;
 }
 
 // ---------------------------------------------------------------- Conversations
