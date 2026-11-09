@@ -41,6 +41,12 @@ public sealed class AgentsOptions
     /// <summary>O teto de tokens de saída de uma resposta (o AiGateway o limita ao teto do tenant e ao do modelo).</summary>
     public int MaxOutputTokens { get; set; } = 600;
 
+    /// <summary>
+    /// Liga a resposta direta do FAQ (ADR 0029): a mensagem IGUAL à pergunta ou a um alias de uma entrada com <c>AutoReply</c> é respondida com o texto aprovado do tenant, sem chamar o modelo. Desligar manda todos os
+    /// turnos ao modelo, sem mexer nas definições. Vale para todos os tenants (no MVP não há configuração por tenant); o opt-in por entrada continua sendo da definição.
+    /// </summary>
+    public bool FaqDirectAnswerEnabled { get; set; } = true;
+
     /// <summary>A espera por capacidade: o limite de chamadas simultâneas do tenant no AiGateway está cheio, e o turno volta depois sem gastar tentativa.</summary>
     public TimeSpan CapacityRetry { get; set; } = TimeSpan.FromSeconds(3);
 

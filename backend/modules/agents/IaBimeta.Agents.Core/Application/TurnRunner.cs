@@ -38,13 +38,16 @@ public enum TurnRunOutcome
 
     /// <summary>Outra operação (uma mensagem nova, a mudança de modo) alterou o turno durante a execução: nada mais é gravado por este executor.</summary>
     Lost = 10,
+
+    /// <summary>A resposta direta do FAQ (ADR 0029) foi aceita pelo Conversations: nenhuma chamada ao modelo.</summary>
+    FaqReply = 11,
 }
 
 public sealed record TurnRunResult(TurnRunOutcome Outcome, string Code);
 
 /// <summary>
-/// Executa UM turno já reivindicado (T4 a T11): <c>BeginTurn</c>, snapshot da sessão autorizada, política de conteúdo, prompt, <see cref="IAiGateway"/>, validação da decisão e o registro da resposta ou o
-/// pedido de handoff. O Agents PROPÕE; quem aceita a resposta é o Conversations, pelas cercas transacionais (turno ativo, época, <c>StateVersion</c>, cerca de entrada): a resposta defasada é sempre recusada
+/// Executa UM turno já reivindicado (T4 a T11): <c>BeginTurn</c>, snapshot da sessão autorizada, política de conteúdo, a resposta direta do FAQ cadastrado de propósito (ADR 0029, sem chamar o modelo), prompt,
+/// <see cref="IAiGateway"/>, validação da decisão e o registro da resposta ou o pedido de handoff. O Agents PROPÕE; quem aceita a resposta é o Conversations, pelas cercas transacionais (turno ativo, época, <c>StateVersion</c>, cerca de entrada): a resposta defasada é sempre recusada
 /// e o cancelamento físico da chamada é só otimização. O modelo SUGERE: nada é executado fora da lista fechada de ações, e toda falha fecha para o lado seguro (transferir, nunca inventar). Roda no
 /// contexto de SISTEMA do tenant do turno, criado pelo host. Sem I/O próprio além das portas, e sem log: o resultado devolve o código para o executor registrar.
 /// </summary>
@@ -172,6 +175,13 @@ public sealed class TurnRunner
             return await HandoffFlowAsync(turno, lane, concessao, snapshot, null, HandoffReasons.AiNotConfigured, "ai-not-configured", failure: true, ct);
         }
 
+        // ADR 0029: antes de gastar uma chamada, a pergunta cadastrada de propósito como resposta direta é respondida com o texto aprovado do tenant.
+        var direta = await TryAnswerFromFaqAsync(turno, lane, concessao, snapshot, grupo, definicao, ct);
+        if (direta is not null)
+        {
+            return direta;
+        }
+
         var mensagens = AgentPrompt.BuildMessages(snapshot);
         if (mensagens.Count == 0)
         {
@@ -227,7 +237,43 @@ public sealed class TurnRunner
         }
 
         var resposta = await RegisterAsync(turno, concessao, snapshot, ReplyKind.Generated, decisao.ReplyText!, new[] { resultado.AiRequestId }, ct);
-        return await AfterRegisterAsync(turno, lane, concessao, snapshot, resposta, "replied", TurnRunOutcome.Replied, definicao, ct);
+        return await AfterRegisterAsync(turno, lane, concessao, snapshot, resposta, AiTurnEndReasons.Replied, TurnRunOutcome.Replied, definicao, ct);
+    }
+
+    /// <summary>
+    /// A resposta direta do FAQ (ADR 0029). Só responde quando TODAS as condições valem: a função está ligada, o grupo é UMA mensagem de texto pronta, o idioma efetivo da conversa é o do FAQ e exatamente uma entrada,
+    /// com <c>AutoReply</c>, tem a pergunta ou um alias IGUAL à mensagem (<see cref="FaqMatcher"/>). Qualquer dúvida devolve nulo e o turno segue ao modelo, que já tem o FAQ no prompt. A resposta sai pelo mesmo
+    /// <c>RegisterAiReply</c> do aviso e da resposta de áudio (<see cref="ReplyKind.Informative"/>, sem identificador de chamada ao modelo): as cercas do Conversations (turno ativo, época, <c>StateVersion</c>, cerca de
+    /// entrada e idempotência por <c>TurnId</c>) valem como sempre, e uma resposta defasada é recusada. O texto vem da definição PUBLICADA do tenant do turno e a mensagem, da sessão autorizada: não há cache nem
+    /// estado compartilhado entre tenants ou sessões.
+    /// </summary>
+    private async Task<TurnRunResult?> TryAnswerFromFaqAsync(
+        AiTurn turno, long lane, TurnGrant concessao, TurnSnapshot snapshot, IReadOnlyList<SnapshotMessage> grupo, AgentDefinitionContent definicao, CancellationToken ct)
+    {
+        if (!_options.FaqDirectAnswerEnabled || grupo.Count != 1)
+        {
+            return null;
+        }
+
+        var mensagem = grupo[0];
+        if (mensagem.Kind != MessageKind.Text || mensagem.ContentState != ContentState.Ready || string.IsNullOrWhiteSpace(mensagem.Text))
+        {
+            return null;
+        }
+
+        if (!definicao.EffectiveFaqLocale.Equals(snapshot.EffectiveLocale))
+        {
+            return null;
+        }
+
+        var achado = FaqMatcher.Match(definicao.Faq, mensagem.Text);
+        if (achado.Kind != FaqMatchKind.Direct)
+        {
+            return null;
+        }
+
+        var registro = await RegisterAsync(turno, concessao, snapshot, ReplyKind.Informative, achado.Entry!.Answer, Array.Empty<Guid>(), ct);
+        return await AfterRegisterAsync(turno, lane, concessao, snapshot, registro, AiTurnEndReasons.FaqHit, TurnRunOutcome.FaqReply, definicao, ct);
     }
 
     // O registro da resposta e o que cada recusa significa (CONVERSATION-LIFECYCLE.md §6.1, T5, T7 e T7b).
