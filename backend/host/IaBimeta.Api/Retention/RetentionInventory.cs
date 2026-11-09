@@ -70,6 +70,7 @@ internal static class RetentionInventory
         ["channels.channel_routes"] = (DataClass.Configuration, "rotas do canal"),
         ["channels.channel_secrets"] = (DataClass.Configuration, "credenciais cifradas (não são dado pessoal)"),
         ["channels.channel_webhooks"] = (DataClass.Configuration, "identificador opaco do webhook"),
+        ["channels.channel_templates"] = (DataClass.Configuration, "modelos de mensagem aprovados na Meta (texto e estrutura de parâmetros; os valores preenchidos ficam na mensagem, não aqui)"),
         ["channels.account_send_state"] = (DataClass.Configuration, "estado de envio da conta"),
         ["contact_center.service_queues"] = (DataClass.Configuration, "filas"),
         ["contact_center.routing_rules"] = (DataClass.Configuration, "regras de roteamento"),
