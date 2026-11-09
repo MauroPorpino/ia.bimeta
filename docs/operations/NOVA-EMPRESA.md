@@ -42,6 +42,8 @@ Todo FAQ vai ao prompt da IA. Uma entrada com **`"autoReply": true`** faz mais (
 - Para desligar tudo sem reimplantar: `Agents:Options:FaqDirectAnswerEnabled = false` na configuração do **Worker**. Para desligar uma entrada: republique com `autoReply` removido (`provision` de novo).
 - O FAQ publicado **antes** deste recurso continua sem resposta direta até o arquivo da empresa ligar `autoReply`; rodar o comando de novo com `autoReply` ou `aliases` novos publica uma versão nova do agente.
 
+Para **descobrir** o que acrescentar (as perguntas dos clientes que o FAQ não respondeu) e revisar sem editar arquivo, veja `CONHECIMENTO-DO-FAQ.md` (ADR 0030): o administrador envia a pergunta ao **rascunho** e publica; `autoReply` continua desligado por padrão.
+
 Quanto isso economiza fica no `status` (seção **FAQ direto**; `OPERACAO-E-SUPERVISAO.md`): as chamadas evitadas são **contadas** (exato) e os tokens e o custo evitados são uma **estimativa** (acertos × a média das chamadas da própria empresa).
 
 ## 3. Conferir e executar
