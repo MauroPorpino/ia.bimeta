@@ -22,6 +22,11 @@ internal sealed class MessageAttachmentConfiguration : IEntityTypeConfiguration<
                 "(status = 2 AND storage_key IS NOT NULL AND mime_type IS NOT NULL AND size_bytes IS NOT NULL AND size_bytes >= 1 AND sha256 IS NOT NULL AND failure_code IS NULL) " +
                 "OR (status <> 2 AND storage_key IS NULL AND mime_type IS NULL AND size_bytes IS NULL AND sha256 IS NULL)");
             table.HasCheckConstraint("ck_message_attachments_failure", "(status IN (3, 4) AND failure_code IS NOT NULL) OR (status IN (1, 2) AND failure_code IS NULL)");
+
+            // ADR 0031: o arquivo é do cliente (1, entrada) ou do atendente (2, saída). O do cliente tem o identificador da mídia no provedor e passa por Pending; o do atendente não tem identificador e já nasce guardado.
+            table.HasCheckConstraint("ck_message_attachments_direction", "direction IN (1, 2)");
+            table.HasCheckConstraint("ck_message_attachments_provider_media", "(direction = 1 AND provider_media_id IS NOT NULL) OR (direction = 2 AND provider_media_id IS NULL)");
+            table.HasCheckConstraint("ck_message_attachments_outbound_stored", "direction = 1 OR status <> 1");
         });
 
         builder.HasKey(a => new { a.TenantId, a.Id });
@@ -30,8 +35,9 @@ internal sealed class MessageAttachmentConfiguration : IEntityTypeConfiguration<
         builder.Property(a => a.MessageId).HasColumnName("message_id");
         builder.Property(a => a.SessionId).HasColumnName("session_id");
         builder.Property(a => a.Kind).HasColumnName("kind").HasConversion<short>();
+        builder.Property(a => a.Direction).HasColumnName("direction").HasConversion<short>();
         builder.Property(a => a.Status).HasColumnName("status").HasConversion<short>();
-        builder.Property(a => a.ProviderMediaId).HasColumnName("provider_media_id").HasMaxLength(MessageAttachment.ProviderMediaIdMaxLength).IsRequired();
+        builder.Property(a => a.ProviderMediaId).HasColumnName("provider_media_id").HasMaxLength(MessageAttachment.ProviderMediaIdMaxLength);
         builder.Property(a => a.DeclaredMimeType).HasColumnName("declared_mime_type").HasMaxLength(MessageAttachment.MimeTypeMaxLength);
         builder.Property(a => a.MimeType).HasColumnName("mime_type").HasMaxLength(MessageAttachment.MimeTypeMaxLength);
         builder.Property(a => a.FileName).HasColumnName("file_name").HasMaxLength(MessageAttachment.FileNameMaxLength);

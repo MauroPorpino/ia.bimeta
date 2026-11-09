@@ -314,6 +314,9 @@ public enum ResendOutcome
     SessionClosed = 6,
 
     MessageNotFound = 7,
+
+    /// <summary>A mensagem é de mídia (ADR 0031): o reenvio automático do arquivo não existe, e o atendente envia o arquivo de novo (uma nova resposta, com outro pedido).</summary>
+    MediaNotSupported = 8,
 }
 
 public sealed record RequestResendResult(ResendOutcome Outcome, Guid? NewMessageId);

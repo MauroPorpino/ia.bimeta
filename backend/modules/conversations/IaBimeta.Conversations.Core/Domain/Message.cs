@@ -276,14 +276,24 @@ public sealed class Message : ITenantOwned
     /// do efeito externo) fica em <see cref="ResendRequestId"/>, a mesma coluna que guarda a do reenvio: uma só pesquisa responde "esta ação do atendente já gerou mensagem?". Não cobre
     /// mensagem do cliente (a cobertura é da IA) e não vem de turno.
     /// </summary>
+    /// <param name="kind">O tipo da mensagem. Imagem, áudio e documento são o arquivo que o atendente enviou (ADR 0031): o texto é nulo (a legenda mora no arquivo, nunca no texto que a IA lê) e o arquivo é gravado junto.</param>
     public static Message CreateHumanReply(
-        TenantId tenantId, Guid sessionId, Guid conversationId, ChannelInstanceId channelInstanceId, long messageSeq, Guid authorUserId, Guid operationId, string text, DateTimeOffset now,
-        Locale conversationLocale, IaBimeta.Conversations.Contracts.ChannelData? channelData = null)
+        TenantId tenantId, Guid sessionId, Guid conversationId, ChannelInstanceId channelInstanceId, long messageSeq, Guid authorUserId, Guid operationId, string? text, DateTimeOffset now,
+        Locale conversationLocale, IaBimeta.Conversations.Contracts.ChannelData? channelData = null, MessageKind kind = MessageKind.Text)
     {
         ArgumentNullException.ThrowIfNull(tenantId);
         ArgumentNullException.ThrowIfNull(conversationLocale);
 
-        ValidateText(text, MessageKind.Text, required: true);
+        if (kind is not (MessageKind.Text or MessageKind.Image or MessageKind.Audio or MessageKind.Document))
+        {
+            throw new ConversationsValidationException("O tipo da resposta do atendente é inválido.");
+        }
+
+        ValidateText(text, MessageKind.Text, required: kind == MessageKind.Text);
+        if (kind != MessageKind.Text && (!string.IsNullOrEmpty(text) || channelData is not null))
+        {
+            throw new ConversationsValidationException("A mensagem de arquivo não tem texto nem bloco de canal: a legenda mora no arquivo.");
+        }
 
         // Defesa em profundidade, como na mensagem do cliente: o serviço já valida o bloco antes de tocar o armazenamento.
         if (channelData is not null)
@@ -304,9 +314,9 @@ public sealed class Message : ITenantOwned
             AuthorRef = authorUserId,
             ChannelDataVersion = channelData?.Version,
             ChannelDataValues = channelData is null ? null : SnapshotOf(channelData.Values),
-            Kind = MessageKind.Text,
+            Kind = kind,
             ContentState = ContentState.Ready,
-            Text = text,
+            Text = kind == MessageKind.Text ? text : null,
             ReceivedAt = now,
             OccurredAt = now,
             DeliveryState = Contracts.DeliveryState.Requested,

@@ -66,6 +66,17 @@ public class ServiceGuardsTests
         public Task<Guid?> FindBusinessUnitIdAsync(Guid departmentId, CancellationToken cancellationToken = default) => Task.FromResult<Guid?>(null);
     }
 
+    private sealed class ArmazenamentoProibido : IAttachmentContentStore
+    {
+        public Task<string> WriteAsync(TenantId tenant, Guid attachmentId, ReadOnlyMemory<byte> content, CancellationToken cancellationToken) => throw new InvalidOperationException("O armazenamento não pode ser tocado antes da autorização.");
+
+        public Task<Stream?> OpenReadAsync(TenantId tenant, string key, CancellationToken cancellationToken) => throw new InvalidOperationException("O armazenamento não pode ser tocado antes da autorização.");
+
+        public Task DeleteAsync(TenantId tenant, string key, CancellationToken cancellationToken) => throw new InvalidOperationException("O armazenamento não pode ser tocado antes da autorização.");
+
+        public IAsyncEnumerable<StoredAttachmentObject> ListOlderThanAsync(DateTimeOffset cutoff, CancellationToken cancellationToken) => throw new InvalidOperationException("O armazenamento não pode ser tocado antes da autorização.");
+    }
+
     private sealed class AuditoriaNula : IAuditWriter
     {
         public Task WriteAsync(AuditEntry entry, CancellationToken cancellationToken = default) => Task.CompletedTask;
@@ -81,7 +92,9 @@ public class ServiceGuardsTests
 
         public InboundMessageService Ingestao => new(new StoreProibido(), new Organizacoes(), new Unidades(), new Setores(), new ConfiguracoesDoTenant(), Holder, TimeProvider.System, new DenyAllChannelUnitAuthorization());
         public TurnService Turnos => new(new StoreProibido(), Holder, TimeProvider.System);
-        public HandlingService Atendimento => new(new StoreProibido(), Holder, TimeProvider.System, new AuditoriaNula(), new Unidades(), new Setores(), new DenyAllChannelUnitAuthorization());
+        public HandlingService Atendimento => new(
+            new StoreProibido(), Holder, TimeProvider.System, new AuditoriaNula(), new Unidades(), new Setores(), new DenyAllChannelUnitAuthorization(),
+            new OutboundAttachmentWriter(new ArmazenamentoProibido(), new NullAttachmentScanner(), new AttachmentOptions()));
         public ConversationQueryService Consultas => new(new StoreProibido(), Holder);
 
         public void ComoSistema() => Holder.Set(new RequestContext(Tenant, "development-header"));

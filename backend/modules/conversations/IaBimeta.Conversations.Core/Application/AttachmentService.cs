@@ -11,7 +11,7 @@ namespace IaBimeta.Conversations.Application;
 /// SISTEMA); o conteúdo é validado pela <see cref="AttachmentPolicy"/> ANTES de ser guardado, e só então a linha passa a <c>Available</c> (o objeto no armazenamento tem chave por arquivo, então repetir
 /// regrava o mesmo objeto). A abertura (<see cref="IAttachmentQueries"/>) respeita a permissão de leitura da sessão e só devolve arquivo disponível DA sessão informada.
 /// </summary>
-public sealed class AttachmentService : IAttachmentCommands, IAttachmentQueries
+public sealed class AttachmentService : IAttachmentCommands, IAttachmentQueries, IOutboundAttachmentReader
 {
     private readonly IConversationStore _store;
     private readonly IAttachmentContentStore _content;
@@ -35,11 +35,26 @@ public sealed class AttachmentService : IAttachmentCommands, IAttachmentQueries
     {
         _context.GetRequired().Require(Permission.SystemOperation);
 
+        // Só o arquivo do CLIENTE tem o que buscar no provedor: o que o atendente enviou (ADR 0031) já nasce guardado e não tem plano de busca.
         var anexo = await _store.FindAttachmentAsync(messageId, cancellationToken);
-        return anexo is null
+        return anexo is not { Direction: MessageDirection.Inbound, ProviderMediaId: { } identificador }
             ? null
             : new AttachmentFetchPlan(
-                anexo.MessageId, anexo.SessionId, anexo.Status, anexo.Kind, anexo.ProviderMediaId, anexo.DeclaredMimeType, _options.MaxBytesFor(anexo.Kind), _options.AllowedTypesFor(anexo.Kind));
+                anexo.MessageId, anexo.SessionId, anexo.Status, anexo.Kind, identificador, anexo.DeclaredMimeType, _options.MaxBytesFor(anexo.Kind), _options.AllowedTypesFor(anexo.Kind));
+    }
+
+    public async Task<Stream?> OpenAsync(Guid messageId, CancellationToken cancellationToken = default)
+    {
+        var contexto = _context.GetRequired();
+        contexto.Require(Permission.SystemOperation);
+
+        // Só o arquivo de uma mensagem de SAÍDA do tenant do contexto, ainda disponível: o Sender nunca lê o arquivo que o cliente mandou.
+        if (await _store.FindAttachmentAsync(messageId, cancellationToken) is not { Direction: MessageDirection.Outbound, Status: AttachmentStatus.Available, StorageKey: { } chave })
+        {
+            return null;
+        }
+
+        return await _content.OpenReadAsync(contexto.TenantId, chave, cancellationToken);
     }
 
     public async Task<AttachmentChangeResult> CompleteAsync(CompleteAttachmentCommand command, CancellationToken cancellationToken = default)

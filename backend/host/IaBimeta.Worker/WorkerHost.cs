@@ -142,6 +142,7 @@ public static class WorkerHost
         // (Retention:Schedule:Enabled). Dado pessoal e registros de referência não têm tarefa de expurgo.
         builder.Services.AddIdentityRetention();
         builder.Services.AddOutboxRetention<ConversationsDbContext>("conversations");
+        builder.Services.AddAttachmentRetention();
         builder.Services.AddOutboxRetention<ChannelsDbContext>("channels");
         builder.Services.AddInboxRetention<ChannelsDbContext>("channels");
         builder.Services.AddInboxRetention<AgentsDbContext>("agents");

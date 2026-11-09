@@ -39,6 +39,7 @@ internal static class RetentionComposition
         services.AddRetentionPolicy(configuration);
         services.AddIdentityRetention();
         services.AddOutboxRetention<ConversationsDbContext>("conversations");
+        services.AddAttachmentRetention();
         services.AddOutboxRetention<ChannelsDbContext>("channels");
         services.AddInboxRetention<ChannelsDbContext>("channels");
         services.AddInboxRetention<AgentsDbContext>("agents");

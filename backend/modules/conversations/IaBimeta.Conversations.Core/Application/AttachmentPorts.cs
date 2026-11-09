@@ -15,7 +15,21 @@ public interface IAttachmentContentStore
 
     /// <summary>Abre o conteúdo para leitura, ou nulo se não existe PARA ESTE TENANT (uma chave de outro tenant é inexistente).</summary>
     Task<Stream?> OpenReadAsync(TenantId tenant, string key, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Apaga o objeto (ADR 0031: o prazo de guarda do arquivo enviado venceu, ou a gravação da mensagem não se completou). Idempotente: o objeto que não existe (ou a chave de outro tenant, ou adulterada) é sucesso sem efeito;
+    /// o tenant é conferido como na leitura.
+    /// </summary>
+    Task DeleteAsync(TenantId tenant, string key, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Os objetos de TODOS os tenants cuja última gravação é anterior ao corte (a limpeza de objetos órfãos, ADR 0031: gravados e sem linha que os referencie). Só devolve o que tem a forma exata das chaves geradas aqui.
+    /// </summary>
+    IAsyncEnumerable<StoredAttachmentObject> ListOlderThanAsync(DateTimeOffset cutoff, CancellationToken cancellationToken);
 }
+
+/// <summary>Um objeto guardado: o tenant e o arquivo a que a chave pertence, e a chave opaca (a mesma gravada na linha do arquivo).</summary>
+public sealed record StoredAttachmentObject(Guid TenantId, Guid AttachmentId, string Key);
 
 public enum ScanVerdict
 {

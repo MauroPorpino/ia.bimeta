@@ -359,6 +359,10 @@ namespace IaBimeta.Conversations.Infrastructure.Migrations
                         .HasColumnType("character varying(127)")
                         .HasColumnName("declared_mime_type");
 
+                    b.Property<short>("Direction")
+                        .HasColumnType("smallint")
+                        .HasColumnName("direction");
+
                     b.Property<string>("FailureCode")
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)")
@@ -383,7 +387,6 @@ namespace IaBimeta.Conversations.Infrastructure.Migrations
                         .HasColumnName("mime_type");
 
                     b.Property<string>("ProviderMediaId")
-                        .IsRequired()
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)")
                         .HasColumnName("provider_media_id");
@@ -427,9 +430,15 @@ namespace IaBimeta.Conversations.Infrastructure.Migrations
                         {
                             t.HasCheckConstraint("ck_message_attachments_available", "(status = 2 AND storage_key IS NOT NULL AND mime_type IS NOT NULL AND size_bytes IS NOT NULL AND size_bytes >= 1 AND sha256 IS NOT NULL AND failure_code IS NULL) OR (status <> 2 AND storage_key IS NULL AND mime_type IS NULL AND size_bytes IS NULL AND sha256 IS NULL)");
 
+                            t.HasCheckConstraint("ck_message_attachments_direction", "direction IN (1, 2)");
+
                             t.HasCheckConstraint("ck_message_attachments_failure", "(status IN (3, 4) AND failure_code IS NOT NULL) OR (status IN (1, 2) AND failure_code IS NULL)");
 
                             t.HasCheckConstraint("ck_message_attachments_kind", "kind IN (2, 3, 4)");
+
+                            t.HasCheckConstraint("ck_message_attachments_outbound_stored", "direction = 1 OR status <> 1");
+
+                            t.HasCheckConstraint("ck_message_attachments_provider_media", "(direction = 1 AND provider_media_id IS NOT NULL) OR (direction = 2 AND provider_media_id IS NULL)");
 
                             t.HasCheckConstraint("ck_message_attachments_status", "status IN (1, 2, 3, 4)");
                         });

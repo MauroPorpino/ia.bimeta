@@ -51,16 +51,33 @@ internal sealed class OutboundDispatchReader : IOutboundDispatchReader
             select new { mensagem, contato.ExternalRef })
             .FirstOrDefaultAsync(cancellationToken);
 
-        return linha is null
-            ? null
-            : new OutboundDispatchView(
-                linha.mensagem.Id,
-                linha.mensagem.SessionId,
-                linha.mensagem.ChannelInstanceId,
-                linha.ExternalRef,
-                linha.mensagem.Author,
-                linha.mensagem.Text,
-                linha.mensagem.DeliveryState,
-                linha.mensagem.ChannelData);
+        if (linha is null)
+        {
+            return null;
+        }
+
+        // O arquivo que o atendente enviou (ADR 0031): só o que ainda está disponível; sem ele, a mensagem de arquivo segue sem Attachment e o Sender não a envia.
+        OutboundAttachmentInfo? arquivo = null;
+        if (linha.mensagem.Kind != MessageKind.Text)
+        {
+            var anexo = await _db.Attachments.AsNoTracking()
+                .FirstOrDefaultAsync(a => a.MessageId == messageId && a.Direction == MessageDirection.Outbound && a.Status == AttachmentStatus.Available, cancellationToken);
+            if (anexo is { MimeType: { } tipo, FileName: { } nome, SizeBytes: { } tamanho })
+            {
+                arquivo = new OutboundAttachmentInfo(anexo.Kind, tipo, nome, tamanho, anexo.Caption);
+            }
+        }
+
+        return new OutboundDispatchView(
+            linha.mensagem.Id,
+            linha.mensagem.SessionId,
+            linha.mensagem.ChannelInstanceId,
+            linha.ExternalRef,
+            linha.mensagem.Author,
+            linha.mensagem.Text,
+            linha.mensagem.DeliveryState,
+            linha.mensagem.ChannelData,
+            arquivo,
+            linha.mensagem.Kind);
     }
 }

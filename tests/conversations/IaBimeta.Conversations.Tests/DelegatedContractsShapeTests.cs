@@ -56,12 +56,12 @@ public class DelegatedContractsShapeTests
     }
 
     [Fact]
-    public void ReplyContent_do_MVP_nao_tem_destinatarios_nem_anexos_que_ficaram_fora_do_escopo_aprovado()
+    public void ReplyContent_do_MVP_nao_tem_destinatarios_e_o_unico_anexo_e_o_arquivo_do_atendente_do_ADR_0031()
     {
         Assert.Equal(
-            new[] { ("String", "Text"), ("Guid?", "InReplyToMessageId"), ("ChannelData", "ChannelData") },
+            new[] { ("String", "Text"), ("Guid?", "InReplyToMessageId"), ("ChannelData", "ChannelData"), ("OutboundAttachment", "Attachment") },
             Parametros(typeof(ReplyContent)));
-        Assert.Equal(new[] { "InReplyToMessageId", "ChannelData" }, ComPadrao(typeof(ReplyContent)));
+        Assert.Equal(new[] { "InReplyToMessageId", "ChannelData", "Attachment" }, ComPadrao(typeof(ReplyContent)));
     }
 
     [Fact]
@@ -76,7 +76,7 @@ public class DelegatedContractsShapeTests
             Valores<RegisterHumanReplyOutcome>());
         Assert.Equal(new[] { ("Current", 1), ("Overtaken", 2) }, Valores<FenceObservation>());
         Assert.Equal(
-            new[] { "MessageId", "MessageSeq", "StateVersionAfter", "RegisteredAt", "Fence", "CurrentDeliveryState" },
+            new[] { "MessageId", "MessageSeq", "StateVersionAfter", "RegisteredAt", "Fence", "CurrentDeliveryState", "RejectionCode" },
             ComPadrao(typeof(RegisterHumanReplyResult)));
     }
 

@@ -24,6 +24,7 @@ public sealed class HandlingService : IHandlingCommands
     private readonly IBusinessUnitDirectory _units;
     private readonly IDepartmentDirectory _departments;
     private readonly IChannelUnitAuthorization _channelUnits;
+    private readonly OutboundAttachmentWriter _outboundFiles;
 
     public HandlingService(
         IConversationStore store,
@@ -32,7 +33,8 @@ public sealed class HandlingService : IHandlingCommands
         IAuditWriter audit,
         IBusinessUnitDirectory units,
         IDepartmentDirectory departments,
-        IChannelUnitAuthorization channelUnits)
+        IChannelUnitAuthorization channelUnits,
+        OutboundAttachmentWriter outboundFiles)
     {
         _store = store;
         _context = context;
@@ -41,6 +43,7 @@ public sealed class HandlingService : IHandlingCommands
         _units = units;
         _departments = departments;
         _channelUnits = channelUnits;
+        _outboundFiles = outboundFiles;
     }
 
     public async Task<TransitionResult> TransitionHandlingModeAsync(TransitionHandlingModeCommand command, CancellationToken cancellationToken = default)
@@ -410,17 +413,35 @@ public sealed class HandlingService : IHandlingCommands
         var contexto = _context.GetRequired();
         contexto.Require(Permission.SystemOperation);
 
-        // A forma do pedido antes de qualquer acesso ao armazenamento. Anexos e destinatários (DP-05) e a citação ainda não existem: a citação é recusada, nunca ignorada. O bloco de canal (por exemplo, o
-        // modelo de mensagem aprovado) segue as mesmas regras de forma da mensagem do cliente.
+        // A forma do pedido antes de qualquer acesso ao armazenamento. Destinatários (DP-05) e a citação ainda não existem: a citação é recusada, nunca ignorada. O bloco de canal (por exemplo, o
+        // modelo de mensagem aprovado) segue as mesmas regras de forma da mensagem do cliente. O arquivo (ADR 0031) tem a forma própria: sem texto (a legenda vai nele) e sem bloco de canal.
         var conteudo = command.Content;
         if (conteudo is null
-            || string.IsNullOrWhiteSpace(conteudo.Text)
-            || conteudo.Text.Length > ConversationLimits.TextMaxLength
             || !IsValidChannelData(conteudo.ChannelData)
             || conteudo.InReplyToMessageId is not null
             || command.OperationId == Guid.Empty
             || command.AuthorUserId == Guid.Empty
             || command.Precondition is null)
+        {
+            return new RegisterHumanReplyResult(RegisterHumanReplyOutcome.ContentRejected);
+        }
+
+        OutboundAttachmentVerdict? veredito = null;
+        if (conteudo.Attachment is { } arquivo)
+        {
+            if (arquivo.Content is null || !string.IsNullOrWhiteSpace(conteudo.Text) || conteudo.ChannelData is not null)
+            {
+                return new RegisterHumanReplyResult(RegisterHumanReplyOutcome.ContentRejected, RejectionCode: "invalid-shape");
+            }
+
+            // O tipo real, o tamanho, o nome, a legenda e a varredura, ANTES de abrir a transação e de guardar qualquer coisa: o arquivo que não passa nunca chega ao armazenamento.
+            veredito = await _outboundFiles.ScreenAsync(arquivo, cancellationToken);
+            if (!veredito.Accepted)
+            {
+                return new RegisterHumanReplyResult(RegisterHumanReplyOutcome.ContentRejected, RejectionCode: veredito.FailureCode);
+            }
+        }
+        else if (string.IsNullOrWhiteSpace(conteudo.Text) || conteudo.Text.Length > ConversationLimits.TextMaxLength)
         {
             return new RegisterHumanReplyResult(RegisterHumanReplyOutcome.ContentRejected);
         }
@@ -436,8 +457,10 @@ public sealed class HandlingService : IHandlingCommands
         var existente = await trabalho.FindResendByRequestAsync(command.OperationId, cancellationToken);
         if (existente is not null)
         {
-            var mesmoEfeito = existente.SessionId == sessao.Id && existente.Author == MessageAuthor.Human && existente.AuthorRef == command.AuthorUserId && existente.Text == conteudo.Text
-                && SameChannelData(existente.ChannelData, conteudo.ChannelData);
+            var mesmoEfeito = existente.SessionId == sessao.Id && existente.Author == MessageAuthor.Human && existente.AuthorRef == command.AuthorUserId
+                && (existente.Text ?? string.Empty) == (conteudo.Text ?? string.Empty)
+                && SameChannelData(existente.ChannelData, conteudo.ChannelData)
+                && await SameAttachmentAsync(trabalho, existente, veredito, cancellationToken);
             return mesmoEfeito
                 ? new RegisterHumanReplyResult(
                     RegisterHumanReplyOutcome.AlreadyApplied, existente.Id, existente.MessageSeq, sessao.StateVersion, existente.CreatedAt,
@@ -482,25 +505,73 @@ public sealed class HandlingService : IHandlingCommands
         var agora = _clock.GetUtcNow();
         var sequencia = sessao.NextOutboundSeq(agora);
         var mensagem = Message.CreateHumanReply(
-            contexto.TenantId, sessao.Id, conversa.Id, conversa.ChannelInstanceId, sequencia, command.AuthorUserId, command.OperationId, conteudo.Text, agora, conversa.EffectiveLocale, conteudo.ChannelData);
+            contexto.TenantId, sessao.Id, conversa.Id, conversa.ChannelInstanceId, sequencia, command.AuthorUserId, command.OperationId, veredito is null ? conteudo.Text : null, agora, conversa.EffectiveLocale,
+            conteudo.ChannelData, veredito?.Kind ?? MessageKind.Text);
         sessao.AdvanceFence(command.FenceToken);
         trabalho.Add(mensagem);
-        await trabalho.CommitAsync(
-            new[]
+
+        // O arquivo (ADR 0031): o objeto é guardado AGORA (todas as condições já valeram, com a sessão travada) e a linha do arquivo entra na MESMA transação da mensagem e do evento de envio. Se a transação
+        // não se completa, o objeto é descartado; se o processo cair no meio, a limpeza de objetos órfãos o recolhe.
+        string? chave = null;
+        if (veredito is not null)
+        {
+            var arquivoId = Guid.CreateVersion7();
+            chave = await _outboundFiles.StoreAsync(contexto.TenantId, arquivoId, conteudo.Attachment!.Content, cancellationToken);
+            trabalho.Add(MessageAttachment.CreateOutbound(contexto.TenantId, arquivoId, mensagem.Id, sessao.Id, veredito, conteudo.Attachment.Content.Length, chave, agora));
+        }
+
+        try
+        {
+            await trabalho.CommitAsync(
+                new[]
+                {
+                    ConversationEventFactory.Create(
+                        contexto.TenantId,
+                        sessao.Id,
+                        ConversationEventTypes.OutboundMessageRequested,
+                        new OutboundMessageRequestedV1(sessao.Id, conversa.Id, mensagem.Id, command.OperationId, null, mensagem.ChannelInstanceId),
+                        agora),
+                },
+                cancellationToken);
+        }
+        catch
+        {
+            if (chave is not null)
             {
-                ConversationEventFactory.Create(
-                    contexto.TenantId,
-                    sessao.Id,
-                    ConversationEventTypes.OutboundMessageRequested,
-                    new OutboundMessageRequestedV1(sessao.Id, conversa.Id, mensagem.Id, command.OperationId, null, mensagem.ChannelInstanceId),
-                    agora),
-            },
-            cancellationToken);
+                await _outboundFiles.DiscardAsync(contexto.TenantId, chave);
+            }
+
+            throw;
+        }
 
         // A trilha registra QUEM respondeu e a qual sessão: nunca o texto (dado do cliente e do atendimento).
         await _audit.WriteAsync(new AuditEntry("conversations.message.human-reply", "message", mensagem.Id.ToString(), AuditOutcome.Success), cancellationToken);
         return new RegisterHumanReplyResult(
             RegisterHumanReplyOutcome.Applied, mensagem.Id, mensagem.MessageSeq, sessao.StateVersion, agora, FenceObservation.Current);
+    }
+
+    /// <summary>
+    /// O mesmo arquivo na repetição do pedido: a mensagem existente é do mesmo tipo e, se é de arquivo, o arquivo tem o mesmo conteúdo (resumo), tipo, nome e legenda. O arquivo cujo prazo de guarda venceu já não tem
+    /// resumo nem tipo: o nome e a legenda bastam para reconhecer a repetição.
+    /// </summary>
+    private static async Task<bool> SameAttachmentAsync(IConversationUnitOfWork trabalho, Message existente, OutboundAttachmentVerdict? veredito, CancellationToken cancellationToken)
+    {
+        if (existente.Kind != (veredito?.Kind ?? MessageKind.Text))
+        {
+            return false;
+        }
+
+        if (veredito is null)
+        {
+            return true;
+        }
+
+        var anexo = await trabalho.FindAttachmentForUpdateAsync(existente.Id, cancellationToken);
+        return anexo is { Direction: MessageDirection.Outbound }
+            && (anexo.Sha256 is null || anexo.Sha256 == veredito.Sha256)
+            && (anexo.MimeType is null || anexo.MimeType == veredito.MimeType)
+            && anexo.FileName == veredito.FileName
+            && anexo.Caption == veredito.Caption;
     }
 
     /// <summary>Sem bloco, vale; com bloco, só se ele cabe nos limites estruturais do Conversations.</summary>
@@ -635,6 +706,12 @@ public sealed class HandlingService : IHandlingCommands
             || !DeliveryStateRules.IsDefinitiveFailure(estado))
         {
             return new RequestResendResult(ResendOutcome.NotDefinitiveFailure, null);
+        }
+
+        // ADR 0031: a mensagem de ARQUIVO não é reenviada por aqui (o reenvio copiaria uma mensagem sem o arquivo): o atendente envia o arquivo de novo, por uma nova resposta.
+        if (original.Kind != MessageKind.Text)
+        {
+            return new RequestResendResult(ResendOutcome.MediaNotSupported, null);
         }
 
         // COV-7.3: no máximo um reenvio ativo por mensagem original, mesmo com requestId diferente.

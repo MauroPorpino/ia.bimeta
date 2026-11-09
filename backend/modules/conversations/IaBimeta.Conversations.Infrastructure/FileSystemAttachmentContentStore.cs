@@ -117,6 +117,63 @@ public sealed partial class FileSystemAttachmentContentStore : IAttachmentConten
         return Task.FromResult<Stream?>(fluxo);
     }
 
+    public Task DeleteAsync(TenantId tenant, string key, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(tenant);
+
+        // Só a forma exata gerada aqui, e só o tenant do contexto: o que não é desta empresa nunca é apagado.
+        if (string.IsNullOrEmpty(key) || !KeyPattern().IsMatch(key) || !key.StartsWith($"{tenant.Value:N}/", StringComparison.Ordinal))
+        {
+            return Task.CompletedTask;
+        }
+
+        var caminho = Resolve(key);
+        try
+        {
+            File.Delete(caminho);
+        }
+        catch (Exception ex) when (ex is DirectoryNotFoundException)
+        {
+            // Nada a apagar.
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public async IAsyncEnumerable<StoredAttachmentObject> ListOlderThanAsync(DateTimeOffset cutoff, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        if (!Directory.Exists(_root))
+        {
+            yield break;
+        }
+
+        foreach (var pasta in Directory.EnumerateDirectories(_root))
+        {
+            var nomeDaPasta = Path.GetFileName(pasta);
+            if (!Guid.TryParseExact(nomeDaPasta, "N", out var tenant))
+            {
+                continue;
+            }
+
+            foreach (var arquivo in Directory.EnumerateFiles(pasta, "*.bin"))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var chave = $"{nomeDaPasta}/{Path.GetFileName(arquivo)}";
+                if (!KeyPattern().IsMatch(chave) || !Guid.TryParseExact(Path.GetFileNameWithoutExtension(arquivo), "N", out var anexo))
+                {
+                    continue;
+                }
+
+                if (new DateTimeOffset(File.GetLastWriteTimeUtc(arquivo), TimeSpan.Zero) < cutoff)
+                {
+                    yield return new StoredAttachmentObject(tenant, anexo, chave);
+                }
+            }
+
+            await Task.Yield();
+        }
+    }
+
     private string Resolve(string key)
     {
         var completo = Path.GetFullPath(Path.Combine(_root, key));

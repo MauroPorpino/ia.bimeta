@@ -59,6 +59,10 @@ public static class ConversationsInfrastructureExtensions
         services.AddScoped<IAttachmentCommands>(provider => provider.GetRequiredService<AttachmentService>());
         services.AddScoped<IAttachmentQueries>(provider => provider.GetRequiredService<AttachmentService>());
 
+        // O arquivo que o atendente ENVIA (ADR 0031): o mesmo armazenamento e a mesma varredura, validação própria do arquivo de saída, e a leitura do conteúdo pelo Sender (contexto de sistema).
+        services.AddSingleton<OutboundAttachmentWriter>();
+        services.AddScoped<IOutboundAttachmentReader>(provider => provider.GetRequiredService<AttachmentService>());
+
         services.AddScoped<ConversationQueryService>();
         services.AddScoped<IConversationQueries>(provider => provider.GetRequiredService<ConversationQueryService>());
 

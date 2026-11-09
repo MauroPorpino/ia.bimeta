@@ -62,7 +62,12 @@ public enum ResponderMatch
 /// Metadados de envio que o canal declara relevantes (por exemplo, o modelo de mensagem aprovado e os parâmetros que o Sender usa para montar o envio fora da janela de 24 horas). Gravado com a mensagem de saída
 /// (as mesmas regras de forma da mensagem do cliente) e comparado na idempotência: o mesmo <c>OperationId</c> com outros dados é outro efeito. Fora dos limites, a resposta é recusada (<c>ContentRejected</c>).
 /// </param>
-public sealed record ReplyContent(string Text, Guid? InReplyToMessageId = null, ChannelData? ChannelData = null);
+/// <param name="Attachment">
+/// Um arquivo (imagem, áudio ou documento) enviado pelo atendente (ADR 0031). Com arquivo, o <paramref name="Text"/> é VAZIO (a legenda vai no arquivo) e não há <paramref name="ChannelData"/>: o arquivo e o modelo de
+/// mensagem não se misturam. O arquivo é validado e guardado pelo Conversations, na mesma operação que grava a mensagem e o evento de envio; o desfecho <see cref="RegisterHumanReplyOutcome.ContentRejected"/> traz o
+/// motivo em <see cref="RegisterHumanReplyResult.RejectionCode"/>. Comparado na idempotência pelo conteúdo (resumo), pelo tipo, pelo nome e pela legenda.
+/// </param>
+public sealed record ReplyContent(string Text, Guid? InReplyToMessageId = null, ChannelData? ChannelData = null, OutboundAttachment? Attachment = null);
 
 /// <summary>
 /// O resultado da resposta humana. Só <see cref="Applied"/> e <see cref="AlreadyApplied"/> deixam efeito; uma operação rejeitada não deixa registro, e repetir
@@ -118,4 +123,5 @@ public sealed record RegisterHumanReplyResult(
     long? StateVersionAfter = null,
     DateTimeOffset? RegisteredAt = null,
     FenceObservation? Fence = null,
-    DeliveryState? CurrentDeliveryState = null);
+    DeliveryState? CurrentDeliveryState = null,
+    string? RejectionCode = null);

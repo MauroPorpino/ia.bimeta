@@ -20,6 +20,9 @@ public enum RetentionCategory
 
     /// <summary>Marcas de idempotência dos consumidores (só identificadores).</summary>
     InboxMarkers = 5,
+
+    /// <summary>O CONTEÚDO dos arquivos que o atendente enviou ao cliente (ADR 0031): guardado só pelo prazo de guarda (padrão 30 dias, o mesmo do identificador do arquivo no provedor); passado o prazo o objeto é apagado e o arquivo fica "indisponível" no histórico. Também recolhe objetos sem linha (gravação que não se completou). O arquivo do cliente não entra aqui.</summary>
+    OutboundAttachments = 6,
 }
 
 /// <summary>
@@ -40,6 +43,7 @@ public sealed class RetentionOptions
         [RetentionCategory.LoginThrottles] = 7,
         [RetentionCategory.ProcessedEvents] = 7,
         [RetentionCategory.InboxMarkers] = 30,
+        [RetentionCategory.OutboundAttachments] = 30,
     };
 
     /// <summary>Sobrescritas por empresa (o slug do tenant), só das categorias citadas.</summary>
