@@ -252,3 +252,54 @@ describe('cliente da API: requestId das ações', () => {
     });
   });
 });
+
+describe('cliente da API: arquivo de uma mensagem de mídia (ADR 0028)', () => {
+  const MENSAGEM = '00000000-0000-4000-8000-0000000000aa';
+  const ROTA = `GET /contact-center/items/${ITEM.id}/messages/${MENSAGEM}/attachment`;
+
+  it('baixa como Blob, com o token só no cabeçalho e sem pedir JSON', async () => {
+    const f = criarFetch({ [ROTA]: new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'Content-Type': 'image/png' } }) });
+    vi.stubGlobal('fetch', f);
+    definirSessao('token-sintetico', new Date(Date.now() + 3_600_000).toISOString());
+
+    const arquivo = await createApi().obterAnexo(ITEM.id, MENSAGEM);
+
+    expect(arquivo.type).toBe('image/png');
+    expect(arquivo.size).toBe(3);
+    const [url, init] = f.mock.calls[0] ?? [];
+    expect(String(url)).toBe(`/api/contact-center/items/${ITEM.id}/messages/${MENSAGEM}/attachment`);
+    expect(String(url)).not.toContain('token-sintetico');
+    expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer token-sintetico');
+    expect(new Headers(init?.headers).get('Accept')).toBe('*/*');
+  });
+
+  it('404 vira erro da API (o arquivo não existe para este atendente) e não derruba a sessão', async () => {
+    vi.stubGlobal('fetch', criarFetch({ [ROTA]: new Response(null, { status: 404 }) }));
+    definirSessao('t', new Date(Date.now() + 3_600_000).toISOString());
+
+    await expect(createApi().obterAnexo(ITEM.id, MENSAGEM)).rejects.toMatchObject({ status: 404 });
+
+    expect(obterToken()).toBe('t');
+  });
+
+  it('401 limpa a sessão como nas outras chamadas autenticadas', async () => {
+    vi.stubGlobal('fetch', criarFetch({ [ROTA]: problema(401, 'Autenticação necessária') }));
+    definirSessao('t', new Date(Date.now() + 3_600_000).toISOString());
+    const saiu = vi.fn();
+    aoSair(saiu);
+
+    await expect(createApi().obterAnexo(ITEM.id, MENSAGEM)).rejects.toMatchObject({ status: 401 });
+
+    expect(saiu).toHaveBeenCalledTimes(1);
+    expect(obterToken()).toBeNull();
+  });
+
+  it('sem rede, o erro é de conexão', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+    definirSessao('t', new Date(Date.now() + 3_600_000).toISOString());
+
+    const erro = await createApi().obterAnexo(ITEM.id, MENSAGEM).catch((e: unknown) => e);
+
+    expect(ehFalhaDeConexao(erro)).toBe(true);
+  });
+});

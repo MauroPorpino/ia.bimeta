@@ -139,11 +139,11 @@ describe('ConversationPanel: histórico', () => {
     expect(screen.getByText('Resposta entregue').closest('li')?.textContent).toContain('entregue');
   });
 
-  it('mensagem sem texto vira "mídia recebida (arquivo indisponível no MVP)"', async () => {
+  it('mensagem sem texto vira "mídia recebida (arquivo não disponível)"', async () => {
     vi.stubGlobal('fetch', cenario(COMIGO, [mensagem({ kind: 'Image', text: null, messageSeq: 1 })]));
     renderizar();
 
-    expect(await screen.findByText('mídia recebida (arquivo indisponível no MVP)')).toBeTruthy();
+    expect(await screen.findByText('mídia recebida (arquivo não disponível)')).toBeTruthy();
   });
 
   it('não mostra estado de entrega nas mensagens do cliente', async () => {

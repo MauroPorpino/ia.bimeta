@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNo
 import type { Message } from '../api/types';
 import type { PosicaoDeRolagem } from '../cache';
 import { ROTULO_AUTOR, ROTULO_ENTREGA, corpoDaMensagem, horaCurta } from '../format';
+import { AnexoDaMensagem } from './AnexoDaMensagem';
 
 interface Props {
   /** Em ordem cronológica (a mais antiga primeiro). */
@@ -21,6 +22,8 @@ interface Props {
   /** Onde ele estava quando saiu desta conversa. */
   rolagemInicial?: PosicaoDeRolagem;
   aoMudarRolagem?: (posicao: PosicaoDeRolagem) => void;
+  /** Baixa o arquivo de uma mensagem de mídia (com a sessão do atendente). Sem isto, o histórico mostra só o estado do arquivo. */
+  obterAnexo?: (messageId: string) => Promise<Blob>;
 }
 
 /** Perto do fim (em pixels): ainda conta como "no fim" e acompanha as mensagens novas. */
@@ -39,6 +42,7 @@ export function MessageList({
   aoVisto,
   rolagemInicial,
   aoMudarRolagem,
+  obterAnexo,
 }: Props) {
   const lista = useRef<HTMLOListElement>(null);
   const noFim = useRef(rolagemInicial?.noFim ?? true);
@@ -185,7 +189,11 @@ export function MessageList({
                   )}
                   <time dateTime={m.occurredAt}>{horaCurta(m.occurredAt)}</time>
                 </div>
-                <p className={corpo.semConteudo ? 'mensagem-texto sem-conteudo' : 'mensagem-texto'}>{corpo.texto}</p>
+                {/* Mídia com arquivo: o próprio anexo diz o estado ("recebendo", o arquivo, ou o motivo); o aviso genérico de "sem conteúdo" só vale para mídia SEM arquivo registrado. */}
+                {(!m.attachment || !corpo.semConteudo) && <p className={corpo.semConteudo ? 'mensagem-texto sem-conteudo' : 'mensagem-texto'}>{corpo.texto}</p>}
+                {m.attachment && (
+                  <AnexoDaMensagem anexo={m.attachment} tipo={m.kind} obter={obterAnexo ? () => obterAnexo(m.id) : undefined} />
+                )}
                 {saida && m.deliveryState && (
                   <p
                     className={`entrega ${incerto ? 'entrega-incerta' : falhou ? 'entrega-falha' : ''}`}

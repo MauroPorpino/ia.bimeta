@@ -172,6 +172,36 @@ export function createApi(opcoes: ApiOptions = {}) {
     throw erro;
   }
 
+  /**
+   * O arquivo de uma mensagem (ADR 0028), como Blob: a rota exige a sessão (cabeçalho Authorization, por isso não pode ser um `src` ou `href` direto) e o conteúdo
+   * nunca tem URL pública. O tipo do Blob é o VERIFICADO pelo servidor.
+   */
+  async function baixarArquivo(caminho: string): Promise<Blob> {
+    const cabecalhos: Record<string, string> = { Accept: '*/*' };
+    const token = obterToken();
+    if (token) {
+      cabecalhos.Authorization = `Bearer ${token}`;
+    }
+
+    let resposta: Response;
+    try {
+      const executar = opcoes.fetchFn ?? ((...args: Parameters<typeof fetch>) => fetch(...args));
+      resposta = await executar(`${baseUrl}${caminho}`, { method: 'GET', headers: cabecalhos });
+    } catch {
+      throw new ApiError(0, 'Sem conexão com a API', 'Não foi possível falar com o servidor. Confira se a API está no ar (http://localhost:5155) e tente de novo.');
+    }
+
+    if (resposta.ok) {
+      return resposta.blob();
+    }
+
+    const erro = await lerErro(resposta);
+    if (resposta.status === 401) {
+      encerrarSessaoLocal();
+    }
+    throw erro;
+  }
+
   async function lerErro(resposta: Response): Promise<ApiError> {
     let problema: ProblemDetails | null = null;
     try {
@@ -238,6 +268,9 @@ export function createApi(opcoes: ApiOptions = {}) {
     obterConversa: (itemId: string) => requisitar<Conversation>('GET', `${rotaItem(itemId)}/conversation`),
     obterMensagens: (itemId: string, p: MessagesParams = {}) =>
       requisitar<Page<Message>>('GET', `${rotaItem(itemId)}/messages`, { consulta: { take: p.take, order: p.order, cursor: p.cursor } }),
+
+    // ---- Arquivo de uma mensagem de mídia (imagem, áudio ou documento): só do atendimento que o atendente pode ler
+    obterAnexo: (itemId: string, messageId: string) => baixarArquivo(`${rotaItem(itemId)}/messages/${encodeURIComponent(messageId)}/attachment`),
 
     // ---- Canais: aviso de contas com envio pausado (aviso secundário: quem chama não mostra erro dele)
     listarAlertasDeEnvio: () => requisitar<SendingAlert[]>('GET', '/channels/sending-alerts'),

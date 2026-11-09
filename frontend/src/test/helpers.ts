@@ -1,5 +1,5 @@
 import { vi, type Mock } from 'vitest';
-import type { CurrentUser, Message, QueueItem, ServiceQueue } from '../api/types';
+import type { Attachment, CurrentUser, Message, QueueItem, ServiceQueue } from '../api/types';
 
 export const USUARIO: CurrentUser = {
   id: '11111111-1111-4111-8111-111111111111',
@@ -71,6 +71,21 @@ export function mensagem(sobrescrever: Partial<Message> = {}): Message {
     replyKind: null,
     coveredThroughSeq: null,
     channelInstanceId: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+    ...sobrescrever,
+  };
+}
+
+/** O arquivo de uma mensagem de mídia (por padrão, uma imagem já disponível). */
+export function anexo(sobrescrever: Partial<Attachment> = {}): Attachment {
+  sequencia += 1;
+  return {
+    id: `99999999-9999-4999-8999-${String(sequencia).padStart(12, '0')}`,
+    status: 'Available',
+    mimeType: 'image/png',
+    fileName: 'foto.png',
+    sizeBytes: 2048,
+    failureCode: null,
+    caption: null,
     ...sobrescrever,
   };
 }

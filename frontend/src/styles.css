@@ -754,3 +754,136 @@ label {
   border: 1px solid var(--borda);
   font-size: 0.95em;
 }
+
+/* Arquivos de mídia do cliente no histórico (ADR 0028): miniatura, player de áudio, documento e o estado quando não há arquivo. */
+.anexo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.3rem;
+  min-width: 0;
+}
+
+.anexo-estado {
+  margin: 0;
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  font-size: 0.9em;
+  overflow-wrap: anywhere;
+}
+
+.anexo-pendente {
+  background: var(--superficie-2);
+  color: var(--texto-suave);
+  font-style: italic;
+}
+
+.anexo-indisponivel {
+  background: var(--aviso-fundo);
+  color: var(--aviso-texto);
+}
+
+.anexo-recusado,
+.anexo-erro {
+  background: var(--erro-fundo);
+  color: var(--erro-texto);
+}
+
+.anexo-figura {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0;
+  max-width: 100%;
+}
+
+.anexo-imagem-botao {
+  display: block;
+  padding: 0;
+  border: 1px solid var(--borda);
+  border-radius: 8px;
+  background: var(--superficie-2);
+  cursor: zoom-in;
+  overflow: hidden;
+  max-width: 100%;
+}
+
+.anexo-figura.ampliada .anexo-imagem-botao {
+  cursor: zoom-out;
+}
+
+.anexo-imagem {
+  display: block;
+  max-width: 100%;
+  max-height: 14rem;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+
+.anexo-figura.ampliada .anexo-imagem {
+  max-height: 70vh;
+}
+
+.anexo-detalhe {
+  font-size: 0.8em;
+  color: var(--texto-suave);
+  overflow-wrap: anywhere;
+}
+
+.anexo-audio {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.anexo-audio audio {
+  width: 18rem;
+  max-width: 100%;
+}
+
+.anexo-documento {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--borda);
+  border-radius: 8px;
+  background: var(--superficie-2);
+}
+
+.anexo-icone {
+  font-size: 1.5rem;
+  line-height: 1;
+  color: var(--texto-suave);
+}
+
+.anexo-documento-dados {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 10rem;
+}
+
+.anexo-nome {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.anexo-legenda {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .anexo-imagem {
+    max-height: 11rem;
+  }
+
+  .anexo-figura.ampliada .anexo-imagem {
+    max-height: 60vh;
+  }
+}

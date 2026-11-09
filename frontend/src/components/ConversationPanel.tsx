@@ -487,6 +487,7 @@ export function ConversationPanel({
           aoVisto={(seq) => memoria.gravarVisto(itemId, seq)}
           rolagemInicial={rolagemInicial}
           aoMudarRolagem={(posicao) => memoria.gravarRolagem(itemId, posicao)}
+          obterAnexo={(messageId) => api.obterAnexo(itemId, messageId)}
         />
       )}
 

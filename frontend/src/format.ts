@@ -72,7 +72,50 @@ export const ROTULO_ENTREGA: Record<DeliveryState, string> = {
   SendUnknown: 'envio de resultado incerto',
 };
 
-export const SEM_TEXTO_MIDIA = 'mídia recebida (arquivo indisponível no MVP)';
+export const SEM_TEXTO_MIDIA = 'mídia recebida (arquivo não disponível)';
+
+/** O tamanho de um arquivo para a tela: "812 B", "48 KB", "1,2 MB" (base 1024, uma casa quando fizer diferença). */
+export function formatarTamanho(bytes: number | null | undefined): string {
+  if (bytes === null || bytes === undefined || !Number.isFinite(bytes) || bytes < 0) {
+    return '';
+  }
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  const unidades = ['KB', 'MB', 'GB'];
+  let valor = bytes / 1024;
+  let i = 0;
+  while (valor >= 1024 && i < unidades.length - 1) {
+    valor /= 1024;
+    i += 1;
+  }
+  const texto = valor >= 10 ? String(Math.round(valor)) : valor.toFixed(1).replace('.', ',').replace(/,0$/, '');
+  return `${texto} ${unidades[i]}`;
+}
+
+/** O que dizer ao atendente quando o arquivo de uma mídia NÃO está disponível, conforme o motivo que o servidor registrou. Nunca mostra texto do provedor. */
+export function motivoDoAnexo(status: 'Unavailable' | 'Rejected', codigo: string | null): string {
+  switch (codigo) {
+    case 'expired':
+      return 'O arquivo expirou no WhatsApp e não pode mais ser baixado. Peça ao cliente para enviar de novo.';
+    case 'download-failed':
+      return 'Não foi possível baixar o arquivo do WhatsApp depois de várias tentativas. Peça ao cliente para enviar de novo.';
+    case 'too-large':
+      return 'O arquivo é maior que o limite permitido e foi bloqueado.';
+    case 'type-not-allowed':
+      return 'Este tipo de arquivo não é permitido e foi bloqueado.';
+    case 'content-mismatch':
+      return 'O conteúdo não corresponde ao tipo informado pelo cliente; o arquivo foi bloqueado por segurança.';
+    case 'hash-mismatch':
+      return 'Não foi possível confirmar a integridade do arquivo; ele foi bloqueado por segurança.';
+    case 'empty':
+      return 'O arquivo chegou vazio.';
+    case 'malware':
+      return 'O arquivo foi bloqueado pela verificação de segurança.';
+    default:
+      return status === 'Rejected' ? 'O arquivo foi recusado pela política de segurança e não pode ser aberto.' : 'O arquivo não está disponível.';
+  }
+}
 
 /** O que mostrar no lugar do texto de uma mensagem. Nunca inventa conteúdo. */
 export function corpoDaMensagem(m: Message): { texto: string; semConteudo: boolean } {

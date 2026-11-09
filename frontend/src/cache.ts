@@ -43,7 +43,16 @@ function mesmoHistorico(a: readonly Message[], b: readonly Message[]): boolean {
     a.length === b.length &&
     a.every((m, i) => {
       const outra = b[i];
-      return outra !== undefined && m.id === outra.id && m.text === outra.text && m.contentState === outra.contentState && m.deliveryState === outra.deliveryState;
+      return (
+        outra !== undefined &&
+        m.id === outra.id &&
+        m.text === outra.text &&
+        m.contentState === outra.contentState &&
+        m.deliveryState === outra.deliveryState &&
+        // O arquivo da mídia muda de estado depois da mensagem (Pending → Available/Unavailable/Rejected): a releitura periódica precisa trazer isso à tela.
+        m.attachment?.status === outra.attachment?.status &&
+        m.attachment?.failureCode === outra.attachment?.failureCode
+      );
     })
   );
 }

@@ -252,6 +252,27 @@ export type DeliveryState =
   | 'Dead'
   | 'SendUnknown';
 
+/**
+ * Em que pé está o ARQUIVO de uma mensagem de mídia do cliente (ADR 0028): Pending = sendo buscado no WhatsApp; Available = guardado e
+ * aberto pelo atendente; Unavailable = o WhatsApp não tem mais o arquivo ou ele não pôde ser baixado; Rejected = recusado pela política
+ * de segurança (nunca é guardado nem aberto).
+ */
+export type AttachmentStatus = 'Pending' | 'Available' | 'Unavailable' | 'Rejected';
+
+/** O arquivo de uma mensagem (AttachmentView). Nunca traz caminho, identificador do provedor nem URL: o conteúdo só sai pela rota autenticada do atendimento. */
+export interface Attachment {
+  id: string;
+  status: AttachmentStatus;
+  /** O tipo VERIFICADO contra o conteúdo (só com o arquivo disponível). */
+  mimeType: string | null;
+  fileName: string | null;
+  sizeBytes: number | null;
+  /** O motivo quando o arquivo não está disponível (`expired`, `download-failed`, `too-large`, `type-not-allowed`, `content-mismatch`, `hash-mismatch`, `empty`...). */
+  failureCode: string | null;
+  /** A legenda que o cliente escreveu junto, já saneada. */
+  caption: string | null;
+}
+
 /** Uma mensagem do histórico (MessageView). `text` é nulo para mídia ou conteúdo ainda não interpretado. */
 export interface Message {
   id: string;
@@ -278,6 +299,8 @@ export interface Message {
   localeOrigin?: string | null;
   /** O nome do modelo de mensagem aprovado, quando a mensagem saiu por modelo (o `text` é o que o cliente leu, já com os parâmetros). */
   templateName?: string | null;
+  /** O arquivo da mensagem de mídia (imagem, áudio ou documento) com o estado dele; ausente nas demais mensagens. */
+  attachment?: Attachment | null;
 }
 
 /** Página de resultados; `nextCursor` é opaco e nulo na última página. */

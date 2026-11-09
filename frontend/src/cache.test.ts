@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { QueueItem } from './api/types';
 import { ArmazemLocal } from './armazem';
 import { CacheDeConversas, aplicarPaginaAnterior, aplicarPaginaRecente, mesclarMensagens, type EntradaDeConversa } from './cache';
-import { item, mensagem } from './test/helpers';
+import { anexo, item, mensagem } from './test/helpers';
 
 const ANA = { tenant: 'demo-a', usuarioId: '11111111-1111-4111-8111-111111111111' };
 const PEDRO = { tenant: 'demo-a', usuarioId: '22222222-2222-4222-8222-222222222222' };
@@ -265,5 +265,33 @@ describe('CacheDeConversas', () => {
     expect(cache.lerRascunho('a')).toBe('');
     expect(cache.lerRascunho('b')).toBe('2');
     expect(cache.lerRascunho('c')).toBe('3');
+  });
+});
+
+describe('mídia no histórico: o estado do arquivo chega pela releitura periódica', () => {
+  it('a mesma mensagem com o arquivo pendente e depois disponível é uma mudança (a tela se atualiza)', () => {
+    const pendente = mensagem({ messageSeq: 1, kind: 'Image', text: null, contentState: 'Pending', attachment: anexo({ status: 'Pending', mimeType: null, fileName: null, sizeBytes: null }) });
+    const disponivel = { ...pendente, attachment: { ...pendente.attachment!, status: 'Available' as const, mimeType: 'image/png', fileName: 'a.png', sizeBytes: 10 } };
+
+    const atuais = [pendente];
+    const resultado = mesclarMensagens(atuais, [disponivel]);
+
+    expect(resultado).not.toBe(atuais);
+    expect(resultado[0]?.attachment?.status).toBe('Available');
+  });
+
+  it('sem mudança no arquivo, devolve o mesmo array (a tela não se redesenha nem rola)', () => {
+    const m = mensagem({ messageSeq: 1, kind: 'Image', text: null, attachment: anexo() });
+    const atuais = [m];
+
+    expect(mesclarMensagens(atuais, [{ ...m }])).toBe(atuais);
+  });
+
+  it('o motivo da falha também conta como mudança', () => {
+    const a = mensagem({ messageSeq: 1, kind: 'Image', text: null, attachment: anexo({ status: 'Unavailable', failureCode: 'expired' }) });
+    const b = { ...a, attachment: { ...a.attachment!, failureCode: 'download-failed' } };
+    const atuais = [a];
+
+    expect(mesclarMensagens(atuais, [b])).not.toBe(atuais);
   });
 });
