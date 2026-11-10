@@ -62,7 +62,8 @@ Diagnóstico: `status` (`OPERACAO-E-SUPERVISAO.md`) e a lista de mensagens sem d
 - Na **pasta privada** do servidor (`Conversations:Attachments:RootPath`, a mesma do arquivo recebido; **Api e Worker apontam para a mesma pasta**), em `{tenant}/{arquivo}.bin`. Não existe URL pública nem permanente; o atendente abre pelo Api com a sessão dele.
 - **Prazo de guarda:** **30 dias** (`Retention:Days:OutboundAttachments`; por empresa em `Retention:Tenants:<slug>`). Passado o prazo, o **expurgo técnico** (`retention purge --confirm` ou o agendamento do Worker, `RETENCAO-DE-DADOS.md`) **apaga o objeto**; o histórico mantém a mensagem, o **nome** e a **legenda** e diz que o arquivo foi apagado.
 - A mesma rotina recolhe **objetos órfãos** (gravados, sem linha de arquivo, mais antigos que o prazo), que só nascem se o processo cair no meio de um envio.
-- O arquivo **recebido do cliente** não tem prazo de guarda ainda (pendência do ADR 0028). A pasta continua **fora do backup do banco** (`BACKUP-E-RESTAURACAO.md`).
+- O arquivo **recebido do cliente** tem o mecanismo de prazo de guarda (`InboundAttachments`, ADR 0032), **desligado até o proprietário decidir o prazo**. A pasta entra no backup com `Backup-Banco.ps1 -PastaDeAnexos` (`BACKUP-E-RESTAURACAO.md`).
+- **Segurança do arquivo enviado (ADR 0032):** com a verificação exigida, o arquivo do atendente só é guardado e enviado se o verificador o declarou limpo (infectado: `422` com o motivo `malware`; verificador fora do ar: `503` com `scanner-unavailable`, sem guardar nem enviar nada e repetindo o mesmo pedido com segurança); conta na **cota da empresa** (`quota-exceeded`); fica **cifrado em disco**. Configuração e operação em `SEGURANCA-DOS-ARQUIVOS.md`.
 
 Configuração (todas as chaves já existiam, exceto a categoria de retenção):
 

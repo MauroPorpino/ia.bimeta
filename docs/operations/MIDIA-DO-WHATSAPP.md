@@ -46,11 +46,11 @@ Tipos permitidos por padrão: **imagem** JPEG, PNG, WebP; **áudio** AAC, AMR, M
 
 **Garantido (com teste):** isolamento por tenant (o banco recusa arquivo ligado à mensagem de outro tenant; o armazenamento confere o tenant em toda leitura; chave adulterada não sai da raiz); o token da conta só em cabeçalho e só para a Graph API ou um domínio da Meta, sem redirecionamento; limite de tamanho medido durante a leitura; tipo conferido pela **assinatura** do conteúdo e pelo resumo; nome saneado; o arquivo só é guardado **depois** de aprovado; entrega ao navegador com o tipo verificado, `nosniff`, `Content-Security-Policy: sandbox`, `no-store`, e `attachment` para o que não é imagem nem áudio; sem URL pública; nada de arquivo para a IA; nenhum texto do provedor em log, resposta ou tela.
 
-**Não garantido (pendente):** **não há antivírus** (o ponto de ligação existe, sem mecanismo); um arquivo do tipo permitido e com a assinatura certa, mas malicioso por dentro, é guardado e pode ser baixado; a pasta de arquivos **não é cifrada** nem entra no backup do banco.
+**Atualização (ADR 0032, 10/11/2026):** o antivírus (`clamd`, exigível), a cifra em repouso, a cota por empresa, o prazo de guarda dos recebidos (desligado até decisão do proprietário) e o backup da pasta **agora existem** e se ligam por configuração (`docs/operations/SEGURANCA-DOS-ARQUIVOS.md`). **Não garantido (pendente):** com a verificação **não exigida** (o padrão do desenvolvimento), um arquivo do tipo permitido e com a assinatura certa, mas malicioso por dentro, é guardado e pode ser baixado; o cliente do `clamd` ainda não foi exercitado contra um ClamAV real.
 
 ## 5. Operação
 
-- **Backup:** `Backup-Banco.ps1` copia o **banco**, **não** a pasta de arquivos. Sem a cópia da pasta, uma restauração deixa mensagens com o arquivo "disponível" que não abre (o Api responde 404). Faça a cópia da pasta `RootPath` junto com o backup do banco (cifrar a cópia é decisão sua, como a do backup).
+- **Backup:** `Backup-Banco.ps1 -PastaDeAnexos <RootPath>` copia a pasta de arquivos **no mesmo backup** (depois do dump, com manifesto de SHA-256); sem o parâmetro só o banco é copiado, e uma restauração deixaria mensagens com o arquivo "disponível" que não abre. Depois de restaurar, rode `attachments check` (ADR 0032, `BACKUP-E-RESTAURACAO.md`).
 - **Retenção:** a tabela `conversations.message_attachments` é classificada como **dado pessoal** (só relatório); **nenhuma rotina apaga** os arquivos do disco ainda (`RETENCAO-DE-DADOS.md`).
 - **Mídia que não chega:** abra o item e veja o motivo na tela. "Expirou": o identificador da mídia vale **7 dias** na Meta; peça ao cliente para enviar de novo. "Depois de várias tentativas": a Meta ou a rede falhou todas as vezes; o evento morreu no relay (veja `Status-Ambiente.ps1`). Credencial recusada pela Meta: o job **repete com espera** (o administrador pode corrigir o token a tempo); esgotadas as tentativas, o arquivo fica indisponível.
 - **Worker derrubado no meio do download:** o novo Worker reassume o job quando o lease vence e conclui, sem duplicar arquivo.
@@ -77,4 +77,4 @@ Sem `-Arquivo`, o script gera um arquivo sintético (PNG, MP3 **silencioso** de 
 3. Confirme o **formato do `sha256`** (hexadecimal ou Base64): se for outro, o arquivo é aceito sem conferir o resumo.
 4. Confirme o **tipo** que a Meta informa para a nota de voz (`audio/ogg; codecs=opus`) e para o PDF.
 5. Mande um arquivo **maior que o limite** configurado e confirme "bloqueado: grande demais"; espere o identificador **expirar** (7 dias) e confirme "expirou".
-6. Decida sobre **antivírus**, **cópia e criptografia da pasta** e o **prazo de guarda** dos arquivos antes de operar com clientes reais.
+6. Ligue as proteções do ADR 0032 (**antivírus exigido**, **cifra**, **cota**, **backup com a pasta**) e decida o **prazo de guarda dos arquivos recebidos** antes de operar com clientes reais: checklist em `SEGURANCA-DOS-ARQUIVOS.md`, seção 8.
