@@ -4,6 +4,9 @@ using IaBimeta.AiGateway.Infrastructure;
 using IaBimeta.Audit.Infrastructure;
 using IaBimeta.Channels.Infrastructure;
 using IaBimeta.ContactCenter.Infrastructure;
+using IaBimeta.Conversations.Application;
+using IaBimeta.Conversations.Contracts;
+using IaBimeta.Conversations.Domain;
 using IaBimeta.Conversations.Infrastructure;
 using IaBimeta.Identity.Infrastructure;
 using IaBimeta.Messaging;
@@ -107,6 +110,7 @@ internal static class StatusCollector
         }
 
         await CheckFaqSavingsAsync(root, agora, so, linhas, slugs, cancellationToken);
+        await CheckAttachmentsAsync(root, so, linhas, slugs, cancellationToken);
 
         // A retenção é do ambiente todo: numa conferência de UMA empresa não entra.
         if (so is null)
@@ -189,6 +193,60 @@ internal static class StatusCollector
             // A mensagem das falhas de configuração é nossa (cita o slug da configuração, nunca segredo); a de banco, só o tipo.
             var detalhe = ex is InvalidOperationException ? ex.Message : ex.GetType().Name;
             linhas.Add(new StatusLine(secao, HealthSeverity.Warning, $"a política de retenção não pôde ser avaliada: {detalhe}", "Corrija a seção Retention da configuração (docs/operations/RETENCAO-DE-DADOS.md) e rode de novo."));
+        }
+    }
+
+
+    /// <summary>
+    /// O armazenamento de arquivos (ADR 0032): a cota usada por empresa (atenção a 80%, falha ao atingir 100%), os arquivos não verificados quando a varredura é exigida e, no ambiente, se o verificador configurado responde
+    /// (falha se é exigido e não responde). A cifra desligada e a ausência de verificador são informadas, sem mudar a severidade (o ambiente de desenvolvimento roda assim). Só números: nunca nome de arquivo nem conteúdo.
+    /// </summary>
+    private static async Task CheckAttachmentsAsync(IServiceProvider root, Guid? so, List<StatusLine> linhas, Dictionary<Guid, string> slugs, CancellationToken cancellationToken)
+    {
+        const string secao = "Arquivos";
+        try
+        {
+            var opcoes = root.GetRequiredService<AttachmentOptions>();
+            await using var escopo = root.CreateAsyncScope();
+            var uso = await escopo.ServiceProvider.GetRequiredService<AttachmentMaintenanceService>().UsageAsync(cancellationToken);
+
+            if (so is null)
+            {
+                var cota = opcoes.TenantQuotaBytes == 0 ? "sem cota" : $"cota de {Attachments.AttachmentsCommand.Bytes(opcoes.TenantQuotaBytes)} por empresa";
+                var cifra = opcoes.Encryption.Enabled ? "cifra em repouso ligada" : "cifra em repouso DESLIGADA (texto claro)";
+                var verificador = opcoes.Scanner.Mode == AttachmentScannerMode.None ? "sem verificador (só a amostra EICAR)" : $"verificador ClamAV {(opcoes.Scanner.Required ? "exigido" : "não exigido")}";
+                linhas.Add(new StatusLine(secao, HealthSeverity.Ok, $"{cota}; {cifra}; {verificador}."));
+
+                if (opcoes.Scanner.Mode != AttachmentScannerMode.None)
+                {
+                    var responde = await root.GetRequiredService<IAttachmentScanner>().ScanAsync(MessageKind.Document, "text/plain", "verificacao de rotina"u8.ToArray(), cancellationToken) == ScanVerdict.Clean;
+                    if (!responde)
+                    {
+                        linhas.Add(new StatusLine(
+                            secao,
+                            opcoes.Scanner.Required ? HealthSeverity.Critical : HealthSeverity.Warning,
+                            "o verificador de arquivos NÃO responde" + (opcoes.Scanner.Required ? ": arquivos recebidos ficam pendentes e os enviados são recusados." : "."),
+                            "Confira o clamd (Conversations:Attachments:Scanner) e rode 'attachments report'."));
+                    }
+                }
+            }
+
+            foreach (var linha in uso.Where(l => so is null || l.TenantId == so))
+            {
+                var slug = await SlugOfAsync(root, slugs, linha.TenantId, cancellationToken);
+                var porcentagem = linha.QuotaBytes == 0 ? 0 : 100.0 * linha.Bytes / linha.QuotaBytes;
+                var texto = $"{linha.Files} arquivo(s), {Attachments.AttachmentsCommand.Bytes(linha.Bytes)}" + (linha.QuotaBytes == 0 ? "." : $" de {Attachments.AttachmentsCommand.Bytes(linha.QuotaBytes)} ({porcentagem:0.0}%).");
+                var severidade = linha.QuotaBytes > 0 && porcentagem >= 100 ? HealthSeverity.Critical : linha.QuotaBytes > 0 && porcentagem >= 80 ? HealthSeverity.Warning : HealthSeverity.Ok;
+                linhas.Add(new StatusLine(secao, severidade, texto, severidade == HealthSeverity.Ok ? null : "A cota está acabando: libere espaço (retenção, 'attachments report') ou amplie Conversations:Attachments:TenantQuotaBytes.", slug));
+                if (opcoes.Scanner.Required && linha.NotScanned > 0)
+                {
+                    linhas.Add(new StatusLine(secao, HealthSeverity.Warning, $"{linha.NotScanned} arquivo(s) guardado(s) sem verificação: não abrem enquanto a varredura é exigida.", "Rode 'attachments rescan --confirm'.", slug));
+                }
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            linhas.Add(new StatusLine(secao, HealthSeverity.Warning, $"o armazenamento de arquivos não pôde ser avaliado ({ex.GetType().Name}).", "Confira o banco e a configuração Conversations:Attachments; rode de novo."));
         }
     }
 

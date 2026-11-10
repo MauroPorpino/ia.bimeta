@@ -143,6 +143,7 @@ public static class WorkerHost
         builder.Services.AddIdentityRetention();
         builder.Services.AddOutboxRetention<ConversationsDbContext>("conversations");
         builder.Services.AddAttachmentRetention();
+        builder.Services.AddSingleton<IRetentionAuditSink, RetentionAuditSink>();
         builder.Services.AddOutboxRetention<ChannelsDbContext>("channels");
         builder.Services.AddInboxRetention<ChannelsDbContext>("channels");
         builder.Services.AddInboxRetention<AgentsDbContext>("agents");

@@ -515,9 +515,16 @@ public sealed class HandlingService : IHandlingCommands
         string? chave = null;
         if (veredito is not null)
         {
+            // A cota da empresa (ADR 0032), sob a trava dela e ANTES de gravar o objeto: o arquivo que não cabe é recusado sem deixar nada.
+            if (!_outboundFiles.FitsInQuota(await trabalho.LockAttachmentQuotaAsync(cancellationToken), conteudo.Attachment!.Content.Length))
+            {
+                return new RegisterHumanReplyResult(RegisterHumanReplyOutcome.ContentRejected, RejectionCode: "quota-exceeded");
+            }
+
             var arquivoId = Guid.CreateVersion7();
-            chave = await _outboundFiles.StoreAsync(contexto.TenantId, arquivoId, conteudo.Attachment!.Content, cancellationToken);
-            trabalho.Add(MessageAttachment.CreateOutbound(contexto.TenantId, arquivoId, mensagem.Id, sessao.Id, veredito, conteudo.Attachment.Content.Length, chave, agora));
+            chave = await _outboundFiles.StoreAsync(contexto.TenantId, arquivoId, conteudo.Attachment.Content, cancellationToken);
+            trabalho.Add(MessageAttachment.CreateOutbound(
+                contexto.TenantId, arquivoId, mensagem.Id, sessao.Id, veredito, conteudo.Attachment.Content.Length, chave, agora, veredito.ScanClean ? AttachmentScanStatus.Clean : AttachmentScanStatus.NotScanned));
         }
 
         try

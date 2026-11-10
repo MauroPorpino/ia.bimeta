@@ -135,6 +135,12 @@ public interface IConversationUnitOfWork : IAsyncDisposable
     /// <summary>O arquivo da mensagem, rastreado para alteração (a mensagem e a sessão já devem estar travadas por <see cref="LockMessageAsync"/>), ou nulo.</summary>
     Task<MessageAttachment?> FindAttachmentForUpdateAsync(Guid messageId, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// A cota de armazenamento por empresa (ADR 0032): toma a trava consultiva DA EMPRESA até o fim da transação e devolve os bytes dos arquivos disponíveis dela (recebidos e enviados). Quem vai ocupar espaço chama
+    /// isto, confere a cota e só então grava: duas operações da mesma empresa nunca passam do limite juntas.
+    /// </summary>
+    Task<long> LockAttachmentQuotaAsync(CancellationToken cancellationToken);
+
     /// <exception cref="DuplicateProviderEventException">Outra transação gravou o mesmo evento do provedor no mesmo instante.</exception>
     Task CommitAsync(CancellationToken cancellationToken);
 

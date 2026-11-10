@@ -71,6 +71,12 @@ public sealed class MediaFetchRequestedHandler : EventHandlerBase<ChannelMediaFe
         {
             case ProviderMediaOutcome.Downloaded:
                 var entrega = await _attachments.CompleteAsync(new CompleteAttachmentCommand(payload.MessageId, resultado.Content!, resultado.MimeType, resultado.Sha256), cancellationToken);
+                if (entrega.Outcome is AttachmentChangeOutcome.ScanUnavailable)
+                {
+                    // A varredura é exigida e o verificador não respondeu (ADR 0032): o arquivo NUNCA é liberado sem verificação. Repete com espera; se esgotar, o arquivo fica indisponível (HandleDeadAsync).
+                    return HandlerResult.Retry(TimeSpan.FromMinutes(2), "scanner-unavailable");
+                }
+
                 if (entrega.Outcome is AttachmentChangeOutcome.Changed)
                 {
                     ChannelsMetrics.MediaDownloaded.Add(1);
@@ -103,7 +109,8 @@ public sealed class MediaFetchRequestedHandler : EventHandlerBase<ChannelMediaFe
     /// <summary>O evento morreu (tentativas esgotadas): o arquivo não pode ficar "processando" para sempre, então vira "indisponível". Idempotente (só sai de Pending).</summary>
     protected override async Task<HandlerResult> HandleDeadAsync(EventEnvelope envelope, ChannelMediaFetchRequestedV1 payload, string deadReason, CancellationToken cancellationToken)
     {
-        var resultado = await _attachments.FailAsync(new FailAttachmentCommand(payload.MessageId, AttachmentStatus.Unavailable, "download-failed"), cancellationToken);
+        var codigo = deadReason.Contains("scanner-unavailable", StringComparison.Ordinal) ? "scan-unavailable" : "download-failed";
+        var resultado = await _attachments.FailAsync(new FailAttachmentCommand(payload.MessageId, AttachmentStatus.Unavailable, codigo), cancellationToken);
         if (resultado.Outcome == AttachmentChangeOutcome.Changed)
         {
             ChannelsMetrics.MediaFailed.Add(1);

@@ -380,6 +380,16 @@ internal sealed class ConversationUnitOfWork : IConversationUnitOfWork
     public Task<MessageAttachment?> FindAttachmentForUpdateAsync(Guid messageId, CancellationToken cancellationToken) =>
         _db.Attachments.FirstOrDefaultAsync(a => a.MessageId == messageId, cancellationToken);
 
+    public async Task<long> LockAttachmentQuotaAsync(CancellationToken cancellationToken)
+    {
+        // A trava consultiva é da TRANSAÇÃO e da empresa: quem quer ocupar espaço espera o anterior terminar, então a conta abaixo nunca é feita sobre um valor que outra operação está prestes a mudar. Só o armazenamento
+        // das EMPRESAS DIFERENTES corre em paralelo.
+        var tenant = _db.CurrentTenantValue;
+        var chave = $"attachments-quota:{tenant:N}";
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({chave}, 0))", cancellationToken);
+        return await _db.Attachments.AsNoTracking().Where(a => a.Status == AttachmentStatus.Available).SumAsync(a => a.SizeBytes ?? 0, cancellationToken);
+    }
+
     public Task CommitAsync(CancellationToken cancellationToken) => CommitAsync(Array.Empty<EventEnvelope>(), cancellationToken);
 
     public async Task CommitAsync(IReadOnlyCollection<EventEnvelope> events, CancellationToken cancellationToken)

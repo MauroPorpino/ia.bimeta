@@ -23,6 +23,12 @@ public enum RetentionCategory
 
     /// <summary>O CONTEÚDO dos arquivos que o atendente enviou ao cliente (ADR 0031): guardado só pelo prazo de guarda (padrão 30 dias, o mesmo do identificador do arquivo no provedor); passado o prazo o objeto é apagado e o arquivo fica "indisponível" no histórico. Também recolhe objetos sem linha (gravação que não se completou). O arquivo do cliente não entra aqui.</summary>
     OutboundAttachments = 6,
+
+    /// <summary>
+    /// O CONTEÚDO dos arquivos que o CLIENTE enviou (ADR 0032). Conteúdo de cliente: <b>sem prazo por padrão</b> (<c>0</c> = não expurga), porque o prazo é decisão do negócio; quando definido (por exemplo, 90 dias), o objeto é apagado e o
+    /// arquivo fica "indisponível" no histórico, e a mensagem, o nome e a legenda ficam. Configurável por empresa. Só objetos de arquivos disponíveis; nunca a mensagem.
+    /// </summary>
+    InboundAttachments = 7,
 }
 
 /// <summary>
@@ -44,6 +50,7 @@ public sealed class RetentionOptions
         [RetentionCategory.ProcessedEvents] = 7,
         [RetentionCategory.InboxMarkers] = 30,
         [RetentionCategory.OutboundAttachments] = 30,
+        [RetentionCategory.InboundAttachments] = 0,
     };
 
     /// <summary>Sobrescritas por empresa (o slug do tenant), só das categorias citadas.</summary>
@@ -51,6 +58,9 @@ public sealed class RetentionOptions
 
     /// <summary>O agendamento do expurgo técnico pelo Worker (ADR 0026). Desligado por padrão: ligar é uma decisão de quem opera.</summary>
     public RetentionScheduleOptions Schedule { get; set; } = new();
+
+    /// <summary>O menor prazo aceito: 1 dia, exceto nos arquivos recebidos, onde 0 significa "sem expurgo" (a política ainda não foi definida).</summary>
+    public static int MinimumDaysOf(RetentionCategory category) => category == RetentionCategory.InboundAttachments ? 0 : 1;
 
     public int DaysFor(RetentionCategory category, string? tenantSlug = null)
     {
@@ -91,9 +101,9 @@ public sealed class RetentionOptions
             foreach (var categoria in Enum.GetValues<RetentionCategory>())
             {
                 var dias = DaysFor(categoria, slug);
-                if (dias is < 1 or > MaximumDays)
+                if (dias < MinimumDaysOf(categoria) || dias > MaximumDays)
                 {
-                    throw new InvalidOperationException($"A retenção de {categoria} ({nome}) deve ficar entre 1 e {MaximumDays} dias.");
+                    throw new InvalidOperationException($"A retenção de {categoria} ({nome}) deve ficar entre {MinimumDaysOf(categoria)} e {MaximumDays} dias.");
                 }
             }
 
@@ -226,4 +236,19 @@ public interface IDeadLetterProbe
     string Name { get; }
 
     Task<(int Count, DateTimeOffset? Oldest)> DeadAsync(RetentionPass pass, CancellationToken cancellationToken = default);
+}
+
+/// <summary>Um fato a registrar na trilha de auditoria depois de um expurgo: o que foi removido (nunca o conteúdo), de qual empresa.</summary>
+/// <param name="Operation">A operação auditada (por exemplo, <c>conversations.attachment.expired</c>).</param>
+/// <param name="ResourceType">O tipo do recurso removido.</param>
+/// <param name="ResourceId">O identificador do recurso (nunca nome, legenda nem conteúdo).</param>
+public sealed record RetentionAuditItem(Guid TenantId, string Operation, string ResourceType, string ResourceId);
+
+/// <summary>
+/// Quem registra, na trilha de auditoria, o que um expurgo removeu (ADR 0032). O host o implementa (ele cria o contexto de sistema de cada empresa e usa o <c>IAuditWriter</c>): um expurgo roda sem requisição, e só o
+/// host pode abrir o contexto de uma empresa. Um expurgo sem auditoria registrada é um expurgo que nunca devia ter apagado: a tarefa registra ANTES de apagar cada lote, e uma falha aqui interrompe tudo (nada é apagado).
+/// </summary>
+public interface IRetentionAuditSink
+{
+    Task RecordAsync(IReadOnlyCollection<RetentionAuditItem> items, CancellationToken cancellationToken = default);
 }

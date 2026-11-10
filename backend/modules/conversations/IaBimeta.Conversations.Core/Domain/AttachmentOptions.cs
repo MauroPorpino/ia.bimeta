@@ -39,6 +39,18 @@ public sealed class AttachmentOptions
 
     public long MaxDocumentBytes { get; set; } = 20L * 1024 * 1024;
 
+    /// <summary>
+    /// A cota de armazenamento por EMPRESA (ADR 0032): a soma do tamanho dos arquivos disponíveis, recebidos e enviados. Acima dela, o arquivo recebido fica indisponível (<c>quota-exceeded</c>) e o enviado é recusado.
+    /// Padrão 5 GiB; <c>0</c> desliga a cota. Aplicada sob trava por empresa (nunca passa de uma vez por concorrência).
+    /// </summary>
+    public long TenantQuotaBytes { get; set; } = 5L * 1024 * 1024 * 1024;
+
+    /// <summary>A varredura de código malicioso (ADR 0032).</summary>
+    public AttachmentScannerSettings Scanner { get; set; } = new();
+
+    /// <summary>A cifra em repouso (ADR 0032).</summary>
+    public AttachmentEncryptionSettings Encryption { get; set; } = new();
+
     /// <summary>Tipos de imagem aceitos. Vazio ou nulo, os padrões.</summary>
     public List<string>? AllowedImageTypes { get; set; }
 
@@ -81,6 +93,14 @@ public sealed class AttachmentOptions
     /// <exception cref="InvalidOperationException">Algum limite ou tipo é inválido.</exception>
     public void Validate()
     {
+        if (TenantQuotaBytes < 0)
+        {
+            throw new InvalidOperationException("Conversations:Attachments:TenantQuotaBytes não pode ser negativa (0 desliga a cota).");
+        }
+
+        Scanner.Validate();
+        Encryption.Validate();
+
         foreach (var (nome, valor) in new[] { ("MaxImageBytes", MaxImageBytes), ("MaxAudioBytes", MaxAudioBytes), ("MaxDocumentBytes", MaxDocumentBytes) })
         {
             if (valor is < 1 or > HardMaxBytes)

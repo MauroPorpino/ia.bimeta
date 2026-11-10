@@ -113,8 +113,22 @@ public sealed partial class FileSystemAttachmentContentStore : IAttachmentConten
             return Task.FromResult<Stream?>(null);
         }
 
-        Stream fluxo = new FileStream(caminho, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
-        return Task.FromResult<Stream?>(fluxo);
+        try
+        {
+            Stream fluxo = new FileStream(caminho, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
+            return Task.FromResult<Stream?>(fluxo);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            // Apagado entre a conferência e a abertura (por exemplo, pelo prazo de guarda): é inexistente.
+            return Task.FromResult<Stream?>(null);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // O sistema operacional recusou a leitura (por exemplo, o antivírus do servidor pôs o arquivo em quarentena, ou a pasta perdeu a permissão): o objeto existe e NÃO pode ser lido. Quem chama trata como
+            // indisponível, nunca como erro do servidor, e a mensagem não leva o caminho.
+            throw new AttachmentContentUnreadableException("O sistema operacional recusou a leitura do objeto.");
+        }
     }
 
     public Task DeleteAsync(TenantId tenant, string key, CancellationToken cancellationToken)
@@ -164,9 +178,10 @@ public sealed partial class FileSystemAttachmentContentStore : IAttachmentConten
                     continue;
                 }
 
-                if (new DateTimeOffset(File.GetLastWriteTimeUtc(arquivo), TimeSpan.Zero) < cutoff)
+                var gravadoEm = new DateTimeOffset(File.GetLastWriteTimeUtc(arquivo), TimeSpan.Zero);
+                if (gravadoEm < cutoff)
                 {
-                    yield return new StoredAttachmentObject(tenant, anexo, chave);
+                    yield return new StoredAttachmentObject(tenant, anexo, chave, gravadoEm);
                 }
             }
 

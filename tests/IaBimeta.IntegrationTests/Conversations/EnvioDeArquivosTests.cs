@@ -308,7 +308,7 @@ public sealed class EnvioDeArquivosTests(PostgresFixture banco)
 
     // Prazo de guarda
 
-    private OutboundAttachmentRetentionTask Tarefa(IServiceProvider sp) => new(
+    private AttachmentObjectsRetentionTask Tarefa(IServiceProvider sp) => AttachmentObjectsRetentionTask.ForOutbound(
         sp.GetRequiredService<IServiceScopeFactory>(), sp.GetRequiredService<IAttachmentContentStore>(), TimeProvider.System);
 
     private static RetentionPass Passada(CenarioDeConversas c, int dias = 30) =>

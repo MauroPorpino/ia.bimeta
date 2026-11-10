@@ -391,6 +391,14 @@ namespace IaBimeta.Conversations.Infrastructure.Migrations
                         .HasColumnType("character varying(256)")
                         .HasColumnName("provider_media_id");
 
+                    b.Property<short>("ScanStatus")
+                        .HasColumnType("smallint")
+                        .HasColumnName("scan_status");
+
+                    b.Property<DateTimeOffset?>("ScannedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("scanned_at");
+
                     b.Property<Guid>("SessionId")
                         .HasColumnType("uuid")
                         .HasColumnName("session_id");
@@ -439,6 +447,8 @@ namespace IaBimeta.Conversations.Infrastructure.Migrations
                             t.HasCheckConstraint("ck_message_attachments_outbound_stored", "direction = 1 OR status <> 1");
 
                             t.HasCheckConstraint("ck_message_attachments_provider_media", "(direction = 1 AND provider_media_id IS NOT NULL) OR (direction = 2 AND provider_media_id IS NULL)");
+
+                            t.HasCheckConstraint("ck_message_attachments_scan_status", "scan_status IN (0, 1)");
 
                             t.HasCheckConstraint("ck_message_attachments_status", "status IN (1, 2, 3, 4)");
                         });

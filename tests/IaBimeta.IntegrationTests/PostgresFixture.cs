@@ -10,6 +10,7 @@ using IaBimeta.Channels.Infrastructure;
 using IaBimeta.ContactCenter.Application;
 using IaBimeta.ContactCenter.Infrastructure;
 using IaBimeta.Conversations.Application;
+using IaBimeta.Conversations.Domain;
 using IaBimeta.Conversations.Infrastructure;
 using IaBimeta.Identity.Application;
 using IaBimeta.Identity.Domain;
@@ -104,7 +105,8 @@ public sealed class PostgresFixture : IAsyncLifetime
     /// que o cadastro autoriza. No de "canais indisponíveis", é a mesma implementação do host, mas o banco do Channels não responde
     /// (um banco que não existe), enquanto o do Conversations e os demais funcionam: a falha da consulta de autorização, de verdade.
     /// </summary>
-    private ServiceProvider Compor(bool canaisReais, bool canaisIndisponiveis = false, bool mensageria = false, bool agentes = false)
+    private ServiceProvider Compor(
+        bool canaisReais, bool canaisIndisponiveis = false, bool mensageria = false, bool agentes = false, Action<AttachmentOptions>? configurarAnexos = null, IAttachmentScanner? verificador = null)
     {
         var colecao = new ServiceCollection();
         if (mensageria)
@@ -156,7 +158,17 @@ public sealed class PostgresFixture : IAsyncLifetime
             colecao.AddEventHandler<ManipuladorDeTeste>();
         }
 
-        colecao.AddConversations(_ => ConnectionString, anexos => anexos.RootPath = PastaDeAnexos);
+        // Um verificador próprio do teste (se houver) é registrado ANTES: o AddConversations só acrescenta o dele quando não há nenhum.
+        if (verificador is not null)
+        {
+            colecao.AddSingleton(verificador);
+        }
+
+        colecao.AddConversations(_ => ConnectionString, anexos =>
+        {
+            anexos.RootPath = PastaDeAnexos;
+            configurarAnexos?.Invoke(anexos);
+        });
 
         // Como no host: o ContactCenter chama o Conversations pela porta que age com o contexto de sistema do mesmo tenant.
         colecao.AddScoped<IConversationGateway, ElevatedConversationGateway>();
@@ -358,6 +370,15 @@ public sealed class PostgresFixture : IAsyncLifetime
     /// falha. Serve para provar que a falha não vira "sim" nem "não" e que nada é gravado por causa dela.
     /// </summary>
     public AsyncServiceScope NovoEscopoComCanaisIndisponiveis(RequestContext? contexto = null) => Abrir(_servicosComCanaisIndisponiveis!, contexto);
+
+    /// <summary>
+    /// Uma composição do Conversations com opções de ARQUIVO próprias do teste (ADR 0032: cota, verificador, cifra e a pasta), sobre o mesmo banco. Quem a pede a descarta no fim. A pasta padrão continua sendo
+    /// <see cref="PastaDeAnexos"/>; os testes que mexem no disco usam uma pasta própria para não se misturar.
+    /// </summary>
+    public ServiceProvider ComporComAnexos(Action<AttachmentOptions>? configurar = null, IAttachmentScanner? verificador = null) => Compor(canaisReais: false, configurarAnexos: configurar, verificador: verificador);
+
+    /// <summary>Abre um escopo numa composição criada por <see cref="ComporComAnexos"/>.</summary>
+    public static AsyncServiceScope NovoEscopoDe(ServiceProvider composicao, RequestContext? contexto = null) => Abrir(composicao, contexto);
 
     private static AsyncServiceScope Abrir(ServiceProvider provedor, RequestContext? contexto)
     {

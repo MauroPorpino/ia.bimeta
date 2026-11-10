@@ -472,7 +472,7 @@ public sealed class EnvioDeMidiaTests(PostgresFixture banco)
 
             // O armazenamento do Api e do Worker deste ensaio (a pasta própria dele): é nele que o expurgo apaga o objeto.
             var armazenamento = new FileSystemAttachmentContentStore(new AttachmentOptions { RootPath = Path.Combine(banco.PastaDeAnexos, "envmidiaprazo") });
-            var tarefa = new OutboundAttachmentRetentionTask(sp.GetRequiredService<IServiceScopeFactory>(), armazenamento, TimeProvider.System);
+            var tarefa = AttachmentObjectsRetentionTask.ForOutbound(sp.GetRequiredService<IServiceScopeFactory>(), armazenamento, TimeProvider.System);
             var tenant = (await db.Messages.IgnoreQueryFilters().AsNoTracking().FirstAsync(m => m.Id == mensagem)).TenantId.Value;
             var resultado = await tarefa.RunAsync(new RetentionPass(tenant, Array.Empty<Guid>(), 30, DateTimeOffset.UtcNow.AddDays(-30), "teste"), dryRun: false);
             Assert.Equal((1, 1), (resultado.Eligible, resultado.Deleted));

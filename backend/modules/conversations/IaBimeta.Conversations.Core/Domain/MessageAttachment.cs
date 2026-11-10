@@ -60,6 +60,11 @@ public sealed class MessageAttachment : ITenantOwned
 
     public string? FailureCode { get; private set; }
 
+    /// <summary>Se o conteúdo passou pela varredura de código malicioso (ADR 0032). Com a varredura exigida, só o arquivo <see cref="AttachmentScanStatus.Clean"/> abre ou é enviado.</summary>
+    public AttachmentScanStatus ScanStatus { get; private set; }
+
+    public DateTimeOffset? ScannedAt { get; private set; }
+
     public DateTimeOffset CreatedAt { get; private set; }
 
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -104,7 +109,8 @@ public sealed class MessageAttachment : ITenantOwned
     /// O arquivo que o atendente enviou (ADR 0031): já validado pela <see cref="OutboundAttachmentPolicy"/> e guardado em <paramref name="storageKey"/>, então nasce <c>Available</c>, com o tipo REAL, o nome e a legenda
     /// saneados e o resumo. Não há identificador no provedor (o envio sobe o arquivo e usa o que o provedor devolver, sem guardá-lo).
     /// </summary>
-    public static MessageAttachment CreateOutbound(TenantId tenantId, Guid id, Guid messageId, Guid sessionId, OutboundAttachmentVerdict verdict, long sizeBytes, string storageKey, DateTimeOffset now)
+    public static MessageAttachment CreateOutbound(
+        TenantId tenantId, Guid id, Guid messageId, Guid sessionId, OutboundAttachmentVerdict verdict, long sizeBytes, string storageKey, DateTimeOffset now, AttachmentScanStatus scan = AttachmentScanStatus.NotScanned)
     {
         ArgumentNullException.ThrowIfNull(tenantId);
         ArgumentNullException.ThrowIfNull(verdict);
@@ -135,6 +141,8 @@ public sealed class MessageAttachment : ITenantOwned
             SizeBytes = sizeBytes,
             Sha256 = verdict.Sha256,
             StorageKey = storageKey,
+            ScanStatus = scan,
+            ScannedAt = scan == AttachmentScanStatus.Clean ? now : null,
             CreatedAt = now,
             UpdatedAt = now,
         };
@@ -146,7 +154,7 @@ public sealed class MessageAttachment : ITenantOwned
     /// </summary>
     public bool MarkExpired(DateTimeOffset now)
     {
-        if (Direction != MessageDirection.Outbound || Status != AttachmentStatus.Available)
+        if (Status != AttachmentStatus.Available)
         {
             return false;
         }
@@ -162,7 +170,7 @@ public sealed class MessageAttachment : ITenantOwned
     }
 
     /// <summary>O arquivo passou na política e foi guardado. Só de <c>Pending</c>.</summary>
-    public bool MarkAvailable(string mimeType, string fileName, long sizeBytes, string sha256, string storageKey, DateTimeOffset now)
+    public bool MarkAvailable(string mimeType, string fileName, long sizeBytes, string sha256, string storageKey, DateTimeOffset now, AttachmentScanStatus scan = AttachmentScanStatus.NotScanned)
     {
         if (Status != AttachmentStatus.Pending)
         {
@@ -175,10 +183,49 @@ public sealed class MessageAttachment : ITenantOwned
         SizeBytes = sizeBytes;
         Sha256 = sha256;
         StorageKey = storageKey;
+        ScanStatus = scan;
+        ScannedAt = scan == AttachmentScanStatus.Clean ? now : null;
         FailureCode = null;
         UpdatedAt = now;
         return true;
     }
+
+    /// <summary>
+    /// O arquivo disponível foi verificado pelo mecanismo de varredura (a varredura posterior de um arquivo guardado antes de ela existir, ADR 0032). Só vale para o disponível ainda não verificado.
+    /// </summary>
+    public bool MarkScanned(DateTimeOffset now)
+    {
+        if (Status != AttachmentStatus.Available || ScanStatus == AttachmentScanStatus.Clean)
+        {
+            return false;
+        }
+
+        ScanStatus = AttachmentScanStatus.Clean;
+        ScannedAt = now;
+        UpdatedAt = now;
+        return true;
+    }
+
+    /// <summary>O objeto do arquivo disponível sumiu do armazenamento (a verificação de consistência o achou faltando): passa a <c>Unavailable</c> com o motivo <c>lost</c>, para ninguém tentar abri-lo. Só do disponível.</summary>
+    public bool MarkLost(DateTimeOffset now)
+    {
+        if (Status != AttachmentStatus.Available)
+        {
+            return false;
+        }
+
+        Status = AttachmentStatus.Unavailable;
+        FailureCode = LostFailureCode;
+        MimeType = null;
+        SizeBytes = null;
+        Sha256 = null;
+        StorageKey = null;
+        UpdatedAt = now;
+        return true;
+    }
+
+    /// <summary>O motivo gravado quando o objeto do arquivo foi perdido.</summary>
+    public const string LostFailureCode = "lost";
 
     /// <summary>O arquivo não ficou disponível (<see cref="AttachmentStatus.Unavailable"/> ou <see cref="AttachmentStatus.Rejected"/>). Só de <c>Pending</c>.</summary>
     public bool MarkFailed(AttachmentStatus status, string code, DateTimeOffset now)

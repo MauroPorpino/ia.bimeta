@@ -29,7 +29,7 @@ internal static class RetentionInventory
     /// As tarefas de expurgo que agem sobre OBJETOS do armazenamento privado (e não sobre as linhas de uma tabela técnica). Cada uma é uma EXCEÇÃO nomeada e decidida: o objeto expira, mas a linha do banco (dado
     /// pessoal) nunca é apagada por prazo. Hoje: o conteúdo dos arquivos que o atendente enviou (ADR 0031). O teste de inventário exige que toda tarefa seja de uma tabela técnica OU esteja aqui.
     /// </summary>
-    public static readonly IReadOnlySet<string> ObjectStoreTasks = new HashSet<string>(StringComparer.Ordinal) { "conversations.outbound-attachment-objects" };
+    public static readonly IReadOnlySet<string> ObjectStoreTasks = new HashSet<string>(StringComparer.Ordinal) { "conversations.outbound-attachment-objects", "conversations.inbound-attachment-objects" };
 
     public static readonly IReadOnlyDictionary<string, (DataClass Class, string Note)> Tables = new Dictionary<string, (DataClass, string)>(StringComparer.Ordinal)
     {

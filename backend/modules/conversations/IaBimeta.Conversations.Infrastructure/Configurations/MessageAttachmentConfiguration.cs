@@ -27,6 +27,9 @@ internal sealed class MessageAttachmentConfiguration : IEntityTypeConfiguration<
             table.HasCheckConstraint("ck_message_attachments_direction", "direction IN (1, 2)");
             table.HasCheckConstraint("ck_message_attachments_provider_media", "(direction = 1 AND provider_media_id IS NOT NULL) OR (direction = 2 AND provider_media_id IS NULL)");
             table.HasCheckConstraint("ck_message_attachments_outbound_stored", "direction = 1 OR status <> 1");
+
+            // ADR 0032: o estado da varredura de código malicioso (0 = não verificado, 1 = limpo).
+            table.HasCheckConstraint("ck_message_attachments_scan_status", "scan_status IN (0, 1)");
         });
 
         builder.HasKey(a => new { a.TenantId, a.Id });
@@ -46,6 +49,8 @@ internal sealed class MessageAttachmentConfiguration : IEntityTypeConfiguration<
         builder.Property(a => a.Sha256).HasColumnName("sha256").HasMaxLength(64);
         builder.Property(a => a.StorageKey).HasColumnName("storage_key").HasMaxLength(MessageAttachment.StorageKeyMaxLength);
         builder.Property(a => a.FailureCode).HasColumnName("failure_code").HasMaxLength(MessageAttachment.FailureCodeMaxLength);
+        builder.Property(a => a.ScanStatus).HasColumnName("scan_status").HasConversion<short>();
+        builder.Property(a => a.ScannedAt).HasColumnName("scanned_at");
         builder.Property(a => a.CreatedAt).HasColumnName("created_at");
         builder.Property(a => a.UpdatedAt).HasColumnName("updated_at");
 

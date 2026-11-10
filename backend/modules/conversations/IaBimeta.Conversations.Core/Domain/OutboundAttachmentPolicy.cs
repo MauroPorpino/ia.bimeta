@@ -5,7 +5,7 @@ using IaBimeta.Conversations.Contracts;
 namespace IaBimeta.Conversations.Domain;
 
 /// <summary>O resultado de avaliar o arquivo que o atendente quer enviar: aceito (com o tipo REAL detectado no conteúdo, o tipo de mídia, o nome e a legenda saneados e o resumo) ou recusado com o código do motivo.</summary>
-public sealed record OutboundAttachmentVerdict(bool Accepted, string? FailureCode, MessageKind Kind, string? MimeType, string? FileName, string? Caption, string? Sha256)
+public sealed record OutboundAttachmentVerdict(bool Accepted, string? FailureCode, MessageKind Kind, string? MimeType, string? FileName, string? Caption, string? Sha256, bool ScanClean = false)
 {
     public static OutboundAttachmentVerdict Reject(string code) => new(false, code, MessageKind.Other, null, null, null, null);
 }

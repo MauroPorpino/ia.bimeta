@@ -9,55 +9,93 @@ namespace IaBimeta.Conversations.Infrastructure;
 
 public static class AttachmentRetentionExtensions
 {
-    /// <summary>Registra o expurgo do CONTEÚDO dos arquivos que o atendente enviou (ADR 0031), pela mesma rotina de retenção técnica (comando <c>retention</c> e agendamento do Worker).</summary>
+    /// <summary>
+    /// Registra o expurgo do CONTEÚDO dos arquivos (ADR 0031 e 0032), pela mesma rotina de retenção técnica (comando <c>retention</c> e agendamento do Worker): o arquivo que o atendente ENVIOU (30 dias por padrão) e o que o
+    /// cliente RECEBEU (sem prazo por padrão: <c>Retention:Days:InboundAttachments = 0</c>). Cada objeto apagado vai para a trilha de auditoria (<see cref="IRetentionAuditSink"/>, se o host o registrou).
+    /// </summary>
     public static IServiceCollection AddAttachmentRetention(this IServiceCollection services)
     {
-        services.AddSingleton<IRetentionTask>(provider => new OutboundAttachmentRetentionTask(
-            provider.GetRequiredService<IServiceScopeFactory>(), provider.GetRequiredService<IAttachmentContentStore>(), provider.GetRequiredService<TimeProvider>()));
+        services.AddSingleton<IRetentionTask>(provider => AttachmentObjectsRetentionTask.ForOutbound(
+            provider.GetRequiredService<IServiceScopeFactory>(), provider.GetRequiredService<IAttachmentContentStore>(), provider.GetRequiredService<TimeProvider>(), provider.GetService<IRetentionAuditSink>()));
+        services.AddSingleton<IRetentionTask>(provider => AttachmentObjectsRetentionTask.ForInbound(
+            provider.GetRequiredService<IServiceScopeFactory>(), provider.GetRequiredService<IAttachmentContentStore>(), provider.GetRequiredService<TimeProvider>(), provider.GetService<IRetentionAuditSink>()));
         return services;
     }
 }
 
 /// <summary>
-/// O expurgo do conteúdo dos arquivos ENVIADOS pelo atendente (ADR 0031), em duas partes e pelo prazo da categoria <see cref="RetentionCategory.OutboundAttachments"/>:
-/// (1) o arquivo disponível criado antes do corte tem o objeto apagado do armazenamento e a linha passa a <c>Unavailable</c> com o motivo <c>retention</c> (a mensagem, o nome e a legenda ficam no histórico);
-/// (2) o objeto antigo sem NENHUMA linha que o referencie (uma gravação que não se completou) é recolhido. O arquivo do cliente não é tocado: o objeto dele tem linha, e a linha dele nunca é a de um arquivo enviado.
-/// Idempotente e seguro para repetir: o objeto é apagado ANTES da linha mudar (se o processo cair no meio, a próxima rodada conclui; no intervalo, abrir ou enviar o arquivo resulta em "indisponível").
+/// O expurgo do conteúdo dos arquivos de UM sentido (enviado ou recebido), pelo prazo da categoria correspondente (ADR 0031 e 0032): o arquivo disponível criado antes do corte tem o <b>objeto apagado</b> do armazenamento e a
+/// linha passa a <c>Unavailable</c> com o motivo <c>retention</c> (sem chave, tipo, tamanho nem resumo; <b>a mensagem, o nome e a legenda ficam no histórico</b>). A tarefa dos arquivos ENVIADOS também recolhe o objeto antigo sem
+/// NENHUMA linha que o referencie (uma gravação que não se completou). Prazo <c>0</c> (política não definida) nunca apaga nada: a tarefa só o informa. Idempotente e seguro para repetir: o objeto é apagado ANTES da linha mudar
+/// (se o processo cair no meio, a próxima rodada conclui; no intervalo, abrir ou enviar o arquivo resulta em "indisponível"), e cada lote vai para a trilha de auditoria ANTES de apagado (nada é apagado sem registro; uma
+/// falha da trilha interrompe o expurgo). A passada de uma empresa nunca toca a de outra.
 /// </summary>
-public sealed class OutboundAttachmentRetentionTask : IRetentionTask
+public sealed class AttachmentObjectsRetentionTask : IRetentionTask
 {
+    /// <summary>O nome da tarefa dos arquivos enviados: age sobre OBJETOS da pasta privada, não sobre uma tabela técnica (ver <c>RetentionInventory.ObjectStoreTasks</c>).</summary>
+    public const string OutboundName = "conversations.outbound-attachment-objects";
+
+    /// <summary>O nome da tarefa dos arquivos recebidos.</summary>
+    public const string InboundName = "conversations.inbound-attachment-objects";
+
+    /// <summary>A operação auditada de cada objeto apagado pelo prazo de guarda.</summary>
+    public const string AuditOperation = "conversations.attachment.expired";
+
+    /// <summary>A operação auditada de cada objeto órfão (sem linha) removido.</summary>
+    public const string OrphanAuditOperation = "conversations.attachment.orphan-removed";
+
     private const int Batch = 200;
 
     private readonly IServiceScopeFactory _scopes;
     private readonly IAttachmentContentStore _content;
     private readonly TimeProvider _clock;
+    private readonly IRetentionAuditSink? _audit;
+    private readonly MessageDirection _direction;
+    private readonly bool _sweepOrphans;
 
-    public OutboundAttachmentRetentionTask(IServiceScopeFactory scopes, IAttachmentContentStore content, TimeProvider clock)
+    private AttachmentObjectsRetentionTask(
+        IServiceScopeFactory scopes, IAttachmentContentStore content, TimeProvider clock, IRetentionAuditSink? audit, MessageDirection direction, RetentionCategory category, string name, bool sweepOrphans)
     {
         _scopes = scopes;
         _content = content;
         _clock = clock;
+        _audit = audit;
+        _direction = direction;
+        _sweepOrphans = sweepOrphans;
+        Category = category;
+        Name = name;
     }
 
-    public string Name => ObjectName;
+    public string Name { get; }
 
-    /// <summary>O nome da tarefa: ela age sobre os OBJETOS da pasta privada de arquivos (a linha do banco só muda de estado, nunca é apagada), então não é o nome de uma tabela técnica (ver <c>RetentionInventory.ObjectStoreTasks</c>).</summary>
-    public const string ObjectName = "conversations.outbound-attachment-objects";
+    public RetentionCategory Category { get; }
 
-    public RetentionCategory Category => RetentionCategory.OutboundAttachments;
+    /// <summary>A tarefa dos arquivos que o atendente ENVIOU (e dos objetos órfãos antigos).</summary>
+    public static AttachmentObjectsRetentionTask ForOutbound(IServiceScopeFactory scopes, IAttachmentContentStore content, TimeProvider clock, IRetentionAuditSink? audit = null) =>
+        new(scopes, content, clock, audit, MessageDirection.Outbound, RetentionCategory.OutboundAttachments, OutboundName, sweepOrphans: true);
+
+    /// <summary>A tarefa dos arquivos que o CLIENTE enviou (só roda com prazo definido).</summary>
+    public static AttachmentObjectsRetentionTask ForInbound(IServiceScopeFactory scopes, IAttachmentContentStore content, TimeProvider clock, IRetentionAuditSink? audit = null) =>
+        new(scopes, content, clock, audit, MessageDirection.Inbound, RetentionCategory.InboundAttachments, InboundName, sweepOrphans: false);
 
     public async Task<RetentionTaskResult> RunAsync(RetentionPass pass, bool dryRun, CancellationToken cancellationToken = default)
     {
+        if (pass.Days <= 0)
+        {
+            return new RetentionTaskResult(Name, Category, pass.Label, pass.Days, 0, 0, $"sem prazo definido (Retention:Days:{Category} = 0): nenhum arquivo é apagado");
+        }
+
         await using var escopo = _scopes.CreateAsyncScope();
         var db = escopo.ServiceProvider.GetRequiredService<ConversationsDbContext>();
         var corte = pass.Cutoff;
+        var direcao = _direction;
         var proprio = pass.TenantId is { } guid ? new TenantId(guid) : null;
         var excluidos = pass.ExcludedTenants.Select(t => new TenantId(t)).ToList();
 
         IQueryable<MessageAttachment> Vencidos()
         {
             var vencidos = db.Attachments.IgnoreQueryFilters().AsNoTracking()
-                .Where(a => a.Direction == MessageDirection.Outbound && a.Status == AttachmentStatus.Available && a.CreatedAt < corte);
+                .Where(a => a.Direction == direcao && a.Status == AttachmentStatus.Available && a.CreatedAt < corte);
             return proprio is not null ? vencidos.Where(a => a.TenantId == proprio) : vencidos.Where(a => !excluidos.Contains(a.TenantId));
         }
 
@@ -74,6 +112,14 @@ public sealed class OutboundAttachmentRetentionTask : IRetentionTask
                 }
 
                 var agora = _clock.GetUtcNow();
+
+                // A trilha de auditoria vem ANTES de apagar o lote (só identificadores): se ela não puder ser gravada, NADA é apagado e a próxima rodada tenta de novo. Se o apagar falhar depois, a próxima rodada repete o
+                // lote e registra de novo (a trilha pode ter uma entrada repetida, nunca uma lacuna).
+                if (_audit is not null)
+                {
+                    await _audit.RecordAsync([.. lote.Select(l => new RetentionAuditItem(l.TenantId.Value, AuditOperation, "attachment", l.Id.ToString()))], cancellationToken);
+                }
+
                 foreach (var linha in lote)
                 {
                     if (linha.StorageKey is { } chave)
@@ -81,8 +127,8 @@ public sealed class OutboundAttachmentRetentionTask : IRetentionTask
                         await _content.DeleteAsync(linha.TenantId, chave, cancellationToken);
                     }
 
-                    apagados += await db.Attachments.IgnoreQueryFilters()
-                        .Where(a => a.TenantId == linha.TenantId && a.Id == linha.Id && a.Direction == MessageDirection.Outbound && a.Status == AttachmentStatus.Available)
+                    var mudou = await db.Attachments.IgnoreQueryFilters()
+                        .Where(a => a.TenantId == linha.TenantId && a.Id == linha.Id && a.Direction == direcao && a.Status == AttachmentStatus.Available)
                         .ExecuteUpdateAsync(
                             s => s
                                 .SetProperty(a => a.Status, AttachmentStatus.Unavailable)
@@ -93,29 +139,45 @@ public sealed class OutboundAttachmentRetentionTask : IRetentionTask
                                 .SetProperty(a => a.StorageKey, (string?)null)
                                 .SetProperty(a => a.UpdatedAt, agora),
                             cancellationToken);
+                    apagados += mudou;
                 }
             }
         }
 
         // Os objetos órfãos: antigos (mais que o prazo) e sem linha. Um objeto mais novo que o corte pode ser de uma gravação em andamento e nunca é tocado.
-        await foreach (var objeto in _content.ListOlderThanAsync(corte, cancellationToken))
+        if (_sweepOrphans)
         {
-            if (!pass.Includes(objeto.TenantId))
+            var orfaos = new List<StoredAttachmentObject>();
+            await foreach (var objeto in _content.ListOlderThanAsync(corte, cancellationToken))
             {
-                continue;
+                if (!pass.Includes(objeto.TenantId))
+                {
+                    continue;
+                }
+
+                var tenant = new TenantId(objeto.TenantId);
+                if (await db.Attachments.IgnoreQueryFilters().AnyAsync(a => a.TenantId == tenant && a.Id == objeto.AttachmentId, cancellationToken))
+                {
+                    continue;
+                }
+
+                elegiveis++;
+                orfaos.Add(objeto);
             }
 
-            var tenant = new TenantId(objeto.TenantId);
-            if (await db.Attachments.IgnoreQueryFilters().AnyAsync(a => a.TenantId == tenant && a.Id == objeto.AttachmentId, cancellationToken))
+            // Também aqui a trilha vem antes: nenhum objeto é apagado sem o registro gravado.
+            if (!dryRun && orfaos.Count > 0)
             {
-                continue;
-            }
+                if (_audit is not null)
+                {
+                    await _audit.RecordAsync([.. orfaos.Select(o => new RetentionAuditItem(o.TenantId, OrphanAuditOperation, "attachment", o.AttachmentId.ToString()))], cancellationToken);
+                }
 
-            elegiveis++;
-            if (!dryRun)
-            {
-                await _content.DeleteAsync(tenant, objeto.Key, cancellationToken);
-                apagados++;
+                foreach (var objeto in orfaos)
+                {
+                    await _content.DeleteAsync(new TenantId(objeto.TenantId), objeto.Key, cancellationToken);
+                    apagados++;
+                }
             }
         }
 

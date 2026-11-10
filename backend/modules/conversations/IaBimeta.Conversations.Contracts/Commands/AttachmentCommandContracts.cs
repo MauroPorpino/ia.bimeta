@@ -53,6 +53,12 @@ public enum AttachmentChangeOutcome
 
     /// <summary>O conteúdo violou a política e o arquivo ficou <see cref="AttachmentStatus.Rejected"/> (o motivo está em <see cref="AttachmentChangeResult.FailureCode"/>).</summary>
     Rejected = 4,
+
+    /// <summary>
+    /// O arquivo NÃO foi guardado porque a varredura de código malicioso é exigida e o verificador não respondeu (ADR 0032): o arquivo segue pendente e o chamador (o job do Channels) tenta de novo com espera.
+    /// Nunca libera um arquivo não verificado.
+    /// </summary>
+    ScanUnavailable = 5,
 }
 
 public sealed record AttachmentChangeResult(AttachmentChangeOutcome Outcome, AttachmentStatus? Status, string? FailureCode);

@@ -32,10 +32,26 @@ public sealed class OutboundAttachmentWriter
             return veredito;
         }
 
-        return await _scanner.ScanAsync(veredito.Kind, veredito.MimeType!, attachment.Content, cancellationToken) == ScanVerdict.Infected
-            ? OutboundAttachmentVerdict.Reject("malware")
-            : veredito;
+        // A varredura (ADR 0032): infectado é recusado; verificador que não respondeu NUNCA vale como limpo (com a varredura exigida o envio é recusado e o atendente tenta de novo; sem ela, passa como não verificado).
+        var varredura = await _scanner.ScanAsync(veredito.Kind, veredito.MimeType!, attachment.Content, cancellationToken);
+        if (varredura == ScanVerdict.Infected)
+        {
+            return OutboundAttachmentVerdict.Reject("malware");
+        }
+
+        if (_options.Scanner.Required && varredura != ScanVerdict.Clean)
+        {
+            return OutboundAttachmentVerdict.Reject("scanner-unavailable");
+        }
+
+        return veredito with { ScanClean = varredura == ScanVerdict.Clean };
     }
+
+    /// <summary>
+    /// A cota de armazenamento da empresa (ADR 0032) comporta mais <paramref name="adding"/> bytes, dado o que já está em uso? Quem chama toma a trava da empresa
+    /// (<see cref="IConversationUnitOfWork.LockAttachmentQuotaAsync"/>) antes. Cota 0: sem limite.
+    /// </summary>
+    public bool FitsInQuota(long used, long adding) => _options.TenantQuotaBytes <= 0 || used + adding <= _options.TenantQuotaBytes;
 
     /// <summary>Guarda o conteúdo e devolve a chave opaca.</summary>
     public Task<string> StoreAsync(TenantId tenant, Guid attachmentId, byte[] content, CancellationToken cancellationToken) =>

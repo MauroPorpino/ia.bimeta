@@ -343,13 +343,16 @@ public static class ContactCenterEndpoints
             "caption-not-supported" => "Áudio não aceita legenda.",
             "caption-too-long" => "A legenda passa de 1024 caracteres.",
             "malware" => "O arquivo foi bloqueado pela verificação de segurança.",
+            "quota-exceeded" => "O limite de armazenamento de arquivos da empresa foi atingido. Peça ao administrador para liberar espaço ou ampliar o limite.",
+            "scanner-unavailable" => "A verificação de segurança dos arquivos está indisponível agora. Tente enviar de novo em instantes.",
             _ => "O arquivo não é aceito.",
         };
 
+        // O verificador fora do ar não é culpa do arquivo: 503 (a interface repete com o MESMO pedido depois). As demais recusas são do arquivo: 422.
         return Results.Problem(
-            title: "Arquivo recusado",
+            title: motivo == "scanner-unavailable" ? "Verificação indisponível" : "Arquivo recusado",
             detail: mensagem,
-            statusCode: StatusCodes.Status422UnprocessableEntity,
+            statusCode: motivo == "scanner-unavailable" ? StatusCodes.Status503ServiceUnavailable : StatusCodes.Status422UnprocessableEntity,
             extensions: new Dictionary<string, object?> { ["code"] = "MediaRejected", ["reason"] = motivo });
     }
 

@@ -2,6 +2,7 @@ using IaBimeta.Conversations.Application;
 using IaBimeta.Conversations.Contracts.Commands;
 using IaBimeta.Conversations.Contracts.Queries;
 using IaBimeta.Conversations.Domain;
+using IaBimeta.SharedKernel;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -53,8 +54,14 @@ public static class ConversationsInfrastructureExtensions
         configureAttachments?.Invoke(anexos);
         anexos.Validate();
         services.AddSingleton(anexos);
-        services.TryAddSingleton<IAttachmentContentStore, FileSystemAttachmentContentStore>();
-        services.TryAddSingleton<IAttachmentScanner, NullAttachmentScanner>();
+        // O armazenamento é SEMPRE envolvido pela cifra (ADR 0032): com chave ativa grava cifrado; sem ela grava em texto claro, mas nunca entrega como arquivo um objeto cifrado (a leitura reconhece o cabeçalho).
+        services.TryAddSingleton(_ => new EncryptedAttachmentContentStore(new FileSystemAttachmentContentStore(anexos), anexos.Encryption));
+        services.TryAddSingleton<IAttachmentContentStore>(provider => provider.GetRequiredService<EncryptedAttachmentContentStore>());
+        services.AddScoped<AttachmentMaintenanceService>(provider => new AttachmentMaintenanceService(
+            provider.GetRequiredService<IServiceScopeFactory>(), provider.GetRequiredService<EncryptedAttachmentContentStore>(), anexos, provider.GetRequiredService<IAttachmentScanner>(), provider.GetRequiredService<TimeProvider>(), provider.GetService<IRetentionAuditSink>()));
+        // A varredura (ADR 0032): a detecção embutida da amostra EICAR sempre, e o ClamAV (clamd) se configurado. Com Scanner:Required, só o arquivo verificado como limpo é liberado.
+        services.TryAddSingleton<IAttachmentScanner>(_ => new ConfiguredAttachmentScanner(
+            anexos.Scanner.Mode == AttachmentScannerMode.ClamAv ? new ClamAvAttachmentScanner(anexos.Scanner.Host, anexos.Scanner.Port, anexos.Scanner.Timeout) : null));
         services.AddScoped<AttachmentService>();
         services.AddScoped<IAttachmentCommands>(provider => provider.GetRequiredService<AttachmentService>());
         services.AddScoped<IAttachmentQueries>(provider => provider.GetRequiredService<AttachmentService>());

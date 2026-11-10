@@ -14,6 +14,11 @@ if (args.Length > 0 && string.Equals(args[0], IaBimeta.Api.Retention.RetentionCo
     return await IaBimeta.Api.Retention.RetentionCommand.RunAsync(args[1..], Console.Out);
 }
 
+if (args.Length > 0 && string.Equals(args[0], IaBimeta.Api.Attachments.AttachmentsCommand.Verb, StringComparison.Ordinal))
+{
+    return await IaBimeta.Api.Attachments.AttachmentsCommand.RunAsync(args[1..], Console.Out);
+}
+
 if (args.Length > 0 && string.Equals(args[0], IaBimeta.Api.Operations.StatusCommand.Verb, StringComparison.Ordinal))
 {
     return await IaBimeta.Api.Operations.StatusCommand.RunAsync(args[1..], Console.Out);
