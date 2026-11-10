@@ -9,6 +9,12 @@ if (-not (Test-Path variable:script:PgBin) -or [string]::IsNullOrEmpty($script:P
     $script:PgBin = 'C:\Projetos\ferramentas\postgresql-17.11\bin'
 }
 
+# Grava texto em UTF-8 sem BOM (os manifestos, o estado e os alertas).
+function Write-ArquivoUtf8 {
+    param([Parameter(Mandatory)][string]$Caminho, [Parameter(Mandatory)][string]$Texto)
+    [IO.File]::WriteAllText($Caminho, $Texto, (New-Object System.Text.UTF8Encoding($false)))
+}
+
 function Get-RaizDoRepositorio {
     return (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
 }

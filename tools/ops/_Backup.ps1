@@ -6,13 +6,9 @@
 Set-StrictMode -Version Latest
 
 . (Join-Path $PSScriptRoot '_Comum.ps1')
+. (Join-Path $PSScriptRoot '_Anexos.ps1')
 
 $script:PadraoDaVersaoAgendada = '^agendado-\d{8}-\d{6}$'
-
-function Write-ArquivoUtf8 {
-    param([Parameter(Mandatory)][string]$Caminho, [Parameter(Mandatory)][string]$Texto)
-    [IO.File]::WriteAllText($Caminho, $Texto, (New-Object System.Text.UTF8Encoding($false)))
-}
 
 # Tira do texto qualquer valor das variaveis de ambiente citadas (frase de cifra, URL do webhook, conexao) e senhas de string de conexao.
 function Hide-Segredos {
@@ -119,14 +115,22 @@ function Remove-AlertaDeFalha {
     if (Test-Path $arquivo) { Remove-Item -Force -Path $arquivo }
 }
 
-# Copia a pasta do backup (dump, ou dump cifrado, e manifesto) para uma pasta EXTERNA (outro disco, compartilhamento UNC, pasta sincronizada de nuvem), sem
-# credencial alguma no script: quem autentica e o sistema operacional. Nunca sobrescreve (se a versao ja existe no destino, nao faz nada), copia para uma
-# pasta .parcial e so renomeia depois de conferir o SHA-256, nunca cria a raiz do destino e, por padrao, recusa copiar backup SEM criptografia.
+# Copia a pasta do backup (dump, ou dump cifrado, manifesto e, se houver, os anexos) para uma pasta EXTERNA (outro disco, compartilhamento UNC, pasta sincronizada de
+# nuvem), sem credencial alguma no script: quem autentica e o sistema operacional. Nunca sobrescreve (se a versao ja existe no destino, nao faz nada), copia para uma
+# pasta .parcial e so renomeia depois de conferir o SHA-256 de cada arquivo, nunca cria a raiz do destino e, por padrao, recusa copiar backup SEM criptografia: nem o
+# dump em texto claro nem anexos em texto claro (objetos sem o cabecalho de cifra do Api) saem da maquina. Os anexos ja cifrados na origem vao como estao.
 function Copy-ParaDestinoExterno {
     param([Parameter(Mandatory)][string]$Pasta, [Parameter(Mandatory)][string]$DestinoExterno, [bool]$ExigirCriptografia = $true)
     $manifesto = Get-Content -Raw -Path (Join-Path $Pasta 'manifesto.json') | ConvertFrom-Json
     if ($ExigirCriptografia -and -not (Test-ManifestoCifrado -Manifesto $manifesto)) {
         throw 'Recuso copiar para o destino externo um backup SEM criptografia (configure a chave de cifra ou use -PermitirExternoSemCriptografia).'
+    }
+    $anexos = Get-BlocoDeAnexos -Manifesto $manifesto
+    if ($null -ne $anexos) {
+        # Antes de tudo: o manifesto de anexos da pasta e o que o manifesto principal registrou, e (com cifra exigida) nenhum objeto esta em texto claro.
+        $verificacao = Test-AnexosDoBackup -Pasta $Pasta -Manifesto $manifesto -SemHash
+        if (-not $verificacao.Ok) { throw ('Os anexos do backup nao conferem: ' + (Join-ErrosDeAnexos -Erros $verificacao.Erros)) }
+        if ($ExigirCriptografia -and [long]$verificacao.Manifesto.legadosSemCifra -gt 0) { throw (Get-MensagemDeAnexosSemCifra -Quantidade ([long]$verificacao.Manifesto.legadosSemCifra)) }
     }
     if (-not (Test-Path -PathType Container -Path $DestinoExterno)) { throw 'O destino externo nao existe ou nao e uma pasta (a raiz do destino nunca e criada pela ferramenta).' }
 
@@ -136,11 +140,17 @@ function Copy-ParaDestinoExterno {
 
     $parcial = $final + '.parcial-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
     New-Item -ItemType Directory -Path $parcial | Out-Null
+    $motivo = 'copiado e conferido (SHA-256)'
     try {
         Copy-Item -Path (Join-Path $Pasta $manifesto.arquivo) -Destination $parcial
         Copy-Item -Path (Join-Path $Pasta 'manifesto.json') -Destination $parcial
         $copiado = (Get-FileHash -Algorithm SHA256 -Path (Join-Path $parcial $manifesto.arquivo)).Hash
         if ($copiado -ne $manifesto.sha256) { throw 'O SHA-256 da copia externa difere do manifesto.' }
+        if ($null -ne $anexos) {
+            $copia = Copy-AnexosDoBackup -Pasta $Pasta -DestinoDaVersao $parcial
+            if ((Get-Sha256DoArquivo -Caminho (Join-Path $parcial 'anexos-manifesto.json')) -ne [string]$anexos.sha256DoManifesto) { throw 'O SHA-256 do anexos-manifesto.json da copia externa difere do manifesto.' }
+            $motivo += '; anexos: ' + $copia.Objetos + ' objeto(s), ' + [Math]::Round($copia.TamanhoTotalEmBytes / 1MB, 2) + ' MB'
+        }
         Rename-Item -Path $parcial -NewName $nome
     }
     catch {
@@ -148,7 +158,7 @@ function Copy-ParaDestinoExterno {
         if ((Split-Path -Leaf $parcial) -like ($nome + '.parcial-*')) { Remove-Item -Recurse -Force -Path $parcial -ErrorAction SilentlyContinue }
         throw
     }
-    return [pscustomobject]@{ Copiado = $true; Motivo = 'copiado e conferido (SHA-256)' }
+    return [pscustomobject]@{ Copiado = $true; Motivo = $motivo }
 }
 
 function Get-VersoesAgendadas {
@@ -185,22 +195,45 @@ function Remove-VersoesAntigas {
     return $removidas
 }
 
+# Apaga a pasta temporaria de anexos restaurados do ensaio. So age em "<PastaDeBackups>\_ensaio-anexos-*" (a que o proprio ensaio criou).
+function Remove-AnexosDoEnsaio {
+    param([Parameter(Mandatory)][string]$Pasta, [Parameter(Mandatory)][string]$PastaDeBackups)
+    if (-not (Test-Path -LiteralPath $Pasta)) { return }
+    $completa = [IO.Path]::GetFullPath($Pasta)
+    $base = [IO.Path]::GetFullPath($PastaDeBackups).TrimEnd('\') + '\'
+    if (-not $completa.StartsWith($base, [StringComparison]::OrdinalIgnoreCase) -or -not (Split-Path -Leaf $completa).StartsWith('_ensaio-anexos-')) {
+        throw ('Recuso apagar uma pasta que nao e de anexos de ensaio: ' + $completa)
+    }
+    Remove-Item -Recurse -Force -LiteralPath $completa -ErrorAction SilentlyContinue
+}
+
 # Ensaia a restauracao de UM backup (cifrado ou nao) numa instancia PostgreSQL descartavel, sem tocar em banco algum. Devolve Aprovado, tempos e diferencas.
+# Se o backup leva anexos, restaura-os tambem numa pasta NOVA e temporaria (_ensaio-anexos-*, dentro da pasta de backups) e confere o SHA-256 de cada objeto restaurado
+# contra o manifesto; a pasta e apagada no fim. Falha dos anexos lanca excecao (o backup agendado trata como ensaio reprovado).
 function Test-RestauracaoEmInstancia {
     param([Parameter(Mandatory)][string]$Pasta, [string]$ChaveEnv, [Parameter(Mandatory)][string]$PastaDeBackups)
     $marca = Get-Date -Format 'yyyyMMddHHmmss'
     $instancia = $null
     $dump = $null
+    $pastaDosAnexos = Join-Path $PastaDeBackups ('_ensaio-anexos-' + $marca)
     try {
         $manifesto = Test-IntegridadeDoBackup -Pasta $Pasta -ChaveEnv $ChaveEnv
+        $verificacaoDosAnexos = Test-AnexosDoBackup -Pasta $Pasta -Manifesto $manifesto
+        if (-not $verificacaoDosAnexos.Ok) { throw ('Os anexos do backup nao passaram na verificacao: ' + (Join-ErrosDeAnexos -Erros $verificacaoDosAnexos.Erros)) }
         $dump = Get-DumpParaRestaurar -Pasta $Pasta -Manifesto $manifesto -ChaveEnv $ChaveEnv
         $instancia = New-InstanciaDescartavel -Pasta (Join-Path $PastaDeBackups ('_instancia-ensaio-' + $marca))
         $resultado = Restore-EmBancoNovo -Conexao $instancia.Conexao -ArquivoDoDump $dump.Arquivo -Manifesto $manifesto -BancoDeDestino ('iabimeta_ensaio_' + $marca)
+        $anexosRestaurados = 0
+        if ($verificacaoDosAnexos.TemAnexos) {
+            $restaurados = Restore-Anexos -Pasta $Pasta -Destino $pastaDosAnexos -JaVerificado
+            $anexosRestaurados = $restaurados.Objetos
+        }
         $aprovado = ($resultado.Diferencas.Count -eq 0) -and ($resultado.RestricoesNaoValidadas -eq 0)
-        return [pscustomobject]@{ Aprovado = $aprovado; SegundosDoRestore = $resultado.SegundosDoRestore; Tabelas = $resultado.Tabelas; Diferencas = @($resultado.Diferencas); Mensagem = $(if ($aprovado) { 'restauracao conferida' } else { 'contagens ou restricoes diferentes do manifesto' }) }
+        return [pscustomobject]@{ Aprovado = $aprovado; SegundosDoRestore = $resultado.SegundosDoRestore; Tabelas = $resultado.Tabelas; Diferencas = @($resultado.Diferencas); Anexos = $anexosRestaurados; TemAnexos = $verificacaoDosAnexos.TemAnexos; Mensagem = $(if ($aprovado) { 'restauracao conferida' } else { 'contagens ou restricoes diferentes do manifesto' }) }
     }
     finally {
         Remove-DumpTemporario -Dump $dump
+        try { Remove-AnexosDoEnsaio -Pasta $pastaDosAnexos -PastaDeBackups $PastaDeBackups } catch { }
         if ($null -ne $instancia) { try { Remove-InstanciaDescartavel -Instancia $instancia -PastaDeBackups $PastaDeBackups } catch { } }
     }
 }

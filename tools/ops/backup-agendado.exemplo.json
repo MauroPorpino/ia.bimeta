@@ -2,6 +2,7 @@
   "origem": "Ambiente",
   "variavelDeConexao": "IABIMETA_HML_CONNECTION",
   "pastaDeBackups": "D:\\backups\\ia.bimeta",
+  "pastaDeAnexos": "D:\\ia.bimeta\\anexos",
   "chaveEnv": "IABIMETA_BACKUP_KEY",
   "destinoExterno": "\\\\servidor-de-arquivos\\backups\\ia.bimeta",
   "manterUltimos": 14,
