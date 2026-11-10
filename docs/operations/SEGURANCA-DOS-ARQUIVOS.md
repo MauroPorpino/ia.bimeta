@@ -54,7 +54,7 @@ openssl rand -base64 32
 
 ## 3. O `clamd` (verificador)
 
-Instalar e atualizar o ClamAV é **ação do operador do servidor** (nada foi instalado por este projeto). Em Linux, pelos pacotes da distribuição (`clamav-daemon` e `clamav-freshclam` em Debian e Ubuntu), com estas decisões no `clamd.conf` (confira os nomes e padrões na página de manual da versão instalada):
+**Na implantação em VM Linux (`IMPLANTACAO-LINUX.md`, ADR 0033) o ClamAV já vem na pilha** (imagem oficial `clamav/clamav`, LTS 1.4, assinaturas num volume e atualização automática), configurado como **exigido**, e `scripts/teste-clamav.sh` prova a integração real (benigno, 20 MB e a amostra EICAR) pelo comando `attachments test-scanner`. O que segue vale para quem instala o `clamd` por conta própria. Instalar e atualizar o ClamAV fora da pilha é **ação do operador do servidor**. Em Linux, pelos pacotes da distribuição (`clamav-daemon` e `clamav-freshclam` em Debian e Ubuntu), com estas decisões no `clamd.conf` (confira os nomes e padrões na página de manual da versão instalada):
 
 - `TCPSocket 3310` e `TCPAddr 127.0.0.1`: o daemon **não tem autenticação**. Escute só no laço local ou numa rede privada, **nunca** na Internet; se o `clamd` roda em outra máquina, aponte `Scanner:Host` para ela e restrinja a porta por firewall.
 - `StreamMaxLength` **maior ou igual ao maior limite de tipo** (padrão do ia.bimeta: documento de 20 MB; teto absoluto de 100 MB). Abaixo disso o daemon responde "INSTREAM size limit exceeded" e o arquivo grande fica indisponível (sempre sem liberar).
@@ -75,6 +75,7 @@ Roda na máquina de quem opera, com a mesma configuração do Api. Só identific
 | Comando | Para quê |
 |---|---|
 | `attachments report` | cota, cifra, verificador (e se responde) e o uso por empresa (arquivos, espaço, % da cota, recebidos, enviados, não verificados, indisponíveis, recusados) |
+| `attachments test-scanner [--size-mb N]` | **prova o verificador REAL falando direto com o motor** (a amostra EICAR é interceptada pela detecção embutida em qualquer outro caminho): benigno pequeno limpo, benigno de N MB limpo (padrão 1; use 20 para provar o `StreamMaxLength`) e EICAR infectada. Sai 0 só se os três derem o esperado |
 | `attachments check [--tenant ID]` | confere cada arquivo disponível contra a pasta: sem objeto, ilegível (chave ausente ou errada, adulterado), conteúdo diferente, órfãos e texto claro com a cifra ligada |
 | `attachments check --repair --confirm [--orphan-days N] [--tenant ID]` | marca como `lost` a linha sem objeto e apaga o órfão mais antigo que N dias (padrão 1). **Nunca** altera o que não decifra ou não confere. A trilha de auditoria é gravada antes. **Trava:** se **todas** as linhas conferidas estão sem objeto e a pasta não tem **nenhum** objeto para o alcance pedido (quase sempre `RootPath` errado, ou pasta ainda não restaurada), o reparo **recusa** (saída 2, nada alterado); só a perda real se confirma com `--allow-empty-folder` |
 | `attachments rescan [--confirm] [--tenant ID]` | verifica os arquivos guardados antes de o verificador existir: limpo vira verificado; infectado é bloqueado e apagado. **Necessário ao ligar `Required` onde já há arquivos** (eles não abrem até lá) |

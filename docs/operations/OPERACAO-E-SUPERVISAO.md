@@ -1,5 +1,7 @@
 # Operação, supervisão e recuperação (ADR 0026)
 
+> **Implantação em VM Linux (ADR 0033):** na VM do piloto a supervisão é `deploy/scripts/status.sh` (contêineres, o comando `status` do ia.bimeta, disco e idade do backup) e o `monitor.sh` agendado por `systemd` a cada 5 minutos (alerta em arquivo e webhook, com de-duplicação, e reinício do Worker travado). Os alertas, os limites e o "o que fazer, falha por falha" abaixo valem igualmente; o Agendador e o `Status-Ambiente.ps1` são os equivalentes do Windows. Veja `IMPLANTACAO-LINUX.md`, seção 9.
+
 Como saber se o ambiente está de pé, o que cada alerta significa e o que fazer. Sem sistema de monitoramento: um comando, tarefas do Agendador e alertas em arquivo ou webhook.
 
 ## O comando que importa

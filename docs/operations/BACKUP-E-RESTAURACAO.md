@@ -1,5 +1,7 @@
 # Backup e restauração do PostgreSQL (ADR 0025 e 0026)
 
+> **Implantação em VM Linux (ADR 0033):** os scripts deste guia são do Windows (PowerShell). Na VM Linux do piloto o backup, a verificação, a restauração e o ensaio são os scripts Bash de `deploy/scripts/` (`backup.sh`, `verificar-backup.sh`, `restaurar.sh`, `ensaiar-restauracao.sh`): um arquivo `.tar.gpg` único (banco + anexos + manifesto, cifrado pelo `gpg`), com cópia externa obrigatória. Veja `IMPLANTACAO-LINUX.md`, seção 8. As regras (dump antes dos anexos, restaurar só em destino novo, `attachments check` depois) são as mesmas.
+
 Scripts em `tools\ops\` para o banco de desenvolvimento, o de teste ou o de homologação, **e para a pasta privada de anexos** (arquivos de mídia do WhatsApp, ADR 0028 e 0031) quando se informa `-PastaDeAnexos`. Servem a qualquer origem pela mesma interface: `-Origem Desenvolvimento | Teste | Ambiente` (com `-VariavelDeConexao NOME`, o nome da variável de ambiente que guarda a string de conexão da homologação). Só o PostgreSQL do projeto (porta **5433**) é aceito. Segredos nunca são impressos: a senha vive numa variável de ambiente **deste processo**, durante cada chamada.
 
 | Script | O que faz | Altera o banco? |
