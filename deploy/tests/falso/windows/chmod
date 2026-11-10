@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# CHMOD que EMULA permissoes POSIX, so para o teste (deploy/tests/testar-scripts.sh) e so onde o sistema de arquivos nao as guarda (Git Bash em
+# NTFS montado com "noacl"): chama o chmod de verdade (REAL_CHMOD) e registra o modo pedido por caminho em FALSO_MODOS; o stat desta pasta o devolve.
+set -euo pipefail
+
+REAL="${REAL_CHMOD:?REAL_CHMOD nao definido}"
+MODOS="${FALSO_MODOS:?FALSO_MODOS nao definido}"
+MODO="$1"
+"$REAL" "$@"
+shift
+case "$MODO" in
+  [0-7][0-7][0-7]|[0-7][0-7][0-7][0-7]) ;;
+  *) exit 0 ;;
+esac
+for f in "$@"; do
+  [ -e "$f" ] || continue
+  D="$(cd "$(dirname "$f")" && pwd -P)"
+  K="$(printf '%s' "$D/$(basename "$f")" | sha256sum | cut -c1-40)"
+  printf '%s\n' "$MODO" >"$MODOS/$K"
+done
+exit 0

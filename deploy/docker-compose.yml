@@ -1,0 +1,157 @@
+# ia.bimeta: implantacao em UMA maquina Linux (Ubuntu Server 24.04) com Docker Compose. ADR 0033, docs/operations/IMPLANTACAO-LINUX.md.
+#
+# Servicos: web (Caddy: HTTPS, interface e proxy), api, worker, db (PostgreSQL 17) e clamav (clamd). SO o web publica portas (80 e 443);
+# db, clamav, api e worker nunca ficam expostos. Dois arquivos de segredos, ambos fora do repositorio e com permissao 600:
+#   .env     : variaveis do proprio Compose (dominio, senhas do banco, versoes)      -> gerado por scripts/gerar-segredos.sh
+#   app.env  : chaves e segredos DA APLICACAO (Api e Worker)                         -> gerado por scripts/gerar-segredos.sh
+# A frase do backup e o destino dos alertas ficam em backup.env, que SO os scripts do host leem (nenhum contêiner a ve).
+#
+# Este arquivo NAO foi executado na maquina de desenvolvimento (sem Docker): use scripts/aceitacao.sh na VM antes de qualquer uso real.
+
+name: iabimeta
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-app-environment: &app-environment
+  ASPNETCORE_ENVIRONMENT: Production
+  ConnectionStrings__Default: "Host=db;Port=5432;Database=iabimeta;Username=iabimeta;Password=${APP_DB_PASSWORD:?defina APP_DB_PASSWORD no .env}"
+  Channels__Webhook__PublicBaseUrl: "https://${DOMAIN:?defina DOMAIN no .env}"
+  Conversations__Attachments__RootPath: /var/lib/iabimeta/anexos
+  Conversations__Attachments__Scanner__Mode: ClamAv
+  Conversations__Attachments__Scanner__Host: clamav
+  Conversations__Attachments__Scanner__Port: "3310"
+  Conversations__Attachments__Scanner__Timeout: "00:00:30"
+  Conversations__Attachments__Scanner__Required: "true"
+  Conversations__Attachments__Encryption__Required: "true"
+
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?defina APP_DB_PASSWORD no .env}
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    networks: [back]
+    healthcheck:
+      # Por TCP (-h 127.0.0.1): durante a inicializacao do volume o servidor TEMPORARIO do entrypoint escuta so no socket local, e um pg_isready pelo socket
+      # diria "saudavel" antes de o banco e o papel da aplicacao existirem e de o servidor definitivo aceitar conexoes de rede.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d iabimeta"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    logging: *logging
+
+  clamav:
+    image: ${CLAMAV_IMAGE:-clamav/clamav:1.4_base-debian13-slim}
+    restart: unless-stopped
+    environment:
+      CLAMAV_NO_FRESHCLAMD: "false"
+      CLAMD_STARTUP_TIMEOUT: "1800"
+    volumes:
+      - clamdb:/var/lib/clamav
+    networks: [back]
+    healthcheck:
+      # O proprio protocolo do clamd (nPING responde PONG), sem depender de um HEALTHCHECK da imagem. A primeira inicializacao baixa as assinaturas: start_period longo.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/3310 && printf 'nPING\\n' >&3 && head -n1 <&3 | grep -q PONG"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 600s
+    logging: *logging
+
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: api
+    image: iabimeta/api:${IABIMETA_VERSAO:-local}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: [app.env]
+    environment:
+      <<: *app-environment
+      ASPNETCORE_URLS: http://+:8080
+      # Atras do proxy (Caddy): confia nos cabecalhos de encaminhamento SO da rede "edge" (onde vivem o web e o api).
+      ForwardedHeaders__Enabled: "true"
+      ForwardedHeaders__KnownNetworks__0: ${EDGE_SUBNET:-172.29.89.0/24}
+    volumes:
+      - anexos:/var/lib/iabimeta/anexos
+    networks: [edge, back]
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /health HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && head -n1 <&3 | grep -q ' 200 '"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    logging: *logging
+
+  worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: worker
+    image: iabimeta/worker:${IABIMETA_VERSAO:-local}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: [app.env]
+    environment:
+      <<: *app-environment
+      # O expurgo tecnico diario fica LIGADO no piloto (so dado tecnico; prazo dos arquivos recebidos continua 0 = nao apaga).
+      Retention__Schedule__Enabled: "true"
+    volumes:
+      - anexos:/var/lib/iabimeta/anexos
+    networks: [back]
+    logging: *logging
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/web/Dockerfile
+    image: iabimeta/web:${IABIMETA_VERSAO:-local}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      DOMAIN: ${DOMAIN:?defina DOMAIN no .env}
+      ACME_EMAIL: ${ACME_EMAIL:?defina ACME_EMAIL no .env}
+      ACME_CA: ${ACME_CA:-https://acme-v02.api.letsencrypt.org/directory}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      edge:
+        ipv4_address: ${EDGE_WEB_IP:-172.29.89.2}
+    logging: *logging
+
+networks:
+  # Onde o proxy fala com o Api. Sub-rede FIXA para o Api confiar nos cabecalhos de encaminhamento so dela (mude no .env se colidir com a sua rede).
+  edge:
+    ipam:
+      config:
+        - subnet: ${EDGE_SUBNET:-172.29.89.0/24}
+  # Onde vivem o banco, o verificador, o Api e o Worker. Sem nenhuma porta publicada.
+  back: {}
+
+volumes:
+  pgdata: {}
+  anexos: {}
+  clamdb: {}
+  caddy_data: {}
+  caddy_config: {}

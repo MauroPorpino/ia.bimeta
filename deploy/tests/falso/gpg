@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# GPG "espiao", so para o teste (deploy/tests/testar-scripts.sh): registra os ARGUMENTOS em GPG_ARGV_LOG (para provar que a frase nunca vai na linha de
+# comando) e executa o gpg de verdade (GPG_REAL), preservando stdin, stdout e o descritor 3 da frase.
+set -euo pipefail
+
+printf '%s\n' "$*" >>"${GPG_ARGV_LOG:-/dev/null}"
+exec "${GPG_REAL:?GPG_REAL nao definido}" "$@"

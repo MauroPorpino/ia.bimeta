@@ -1,0 +1,11 @@
+# Contexto de build da interface: so o frontend e o Caddyfile.
+**/node_modules
+**/dist
+.git
+.github
+.claude
+backend
+tests
+docs
+tools
+*.md

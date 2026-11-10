@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# STAT que devolve o modo EMULADO pelo chmod desta pasta (so "stat -c %a <arquivo>"); tudo o mais vai para o stat de verdade (REAL_STAT).
+# So para o teste (deploy/tests/testar-scripts.sh), onde o sistema de arquivos nao guarda permissoes POSIX (Git Bash em NTFS "noacl").
+set -euo pipefail
+
+REAL="${REAL_STAT:?REAL_STAT nao definido}"
+MODOS="${FALSO_MODOS:?FALSO_MODOS nao definido}"
+if [ $# -eq 3 ] && [ "$1" = "-c" ] && [ "$2" = "%a" ] && [ -e "$3" ]; then
+  D="$(cd "$(dirname "$3")" && pwd -P)"
+  K="$(printf '%s' "$D/$(basename "$3")" | sha256sum | cut -c1-40)"
+  if [ -f "$MODOS/$K" ]; then
+    cat "$MODOS/$K"
+    exit 0
+  fi
+fi
+exec "$REAL" "$@"

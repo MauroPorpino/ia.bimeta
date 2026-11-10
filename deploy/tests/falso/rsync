@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# RSYNC FALSO, so para o teste (deploy/tests/testar-scripts.sh): registra os argumentos em FALSO_ESTADO/rsync.log e copia os arquivos de origem
+# para a pasta local FALSO_RSYNC_DEST (o destino "usuario@servidor:/pasta" e ignorado). FALSO_RSYNC_FALHA=1 simula falha (codigo 12).
+set -euo pipefail
+
+printf '%s\n' "$*" >>"${FALSO_ESTADO:?FALSO_ESTADO nao definido}/rsync.log"
+if [ "${FALSO_RSYNC_FALHA:-0}" != 0 ]; then
+  echo "rsync: connection unexpectedly closed" >&2
+  exit 12
+fi
+
+ARGS=()
+FIM_OPCOES=0
+while [ $# -gt 0 ]; do
+  if [ "$FIM_OPCOES" = 0 ]; then
+    case "$1" in
+      --) FIM_OPCOES=1; shift; continue ;;
+      -e) shift 2; continue ;;
+      -*) shift; continue ;;
+    esac
+  fi
+  ARGS+=("$1")
+  shift
+done
+
+DESTINO="${FALSO_RSYNC_DEST:?FALSO_RSYNC_DEST nao definido}"
+mkdir -p "$DESTINO"
+N=${#ARGS[@]}
+for ((i = 0; i < N - 1; i++)); do
+  cp -- "${ARGS[$i]}" "$DESTINO/"
+done
+exit 0

@@ -1,0 +1,17 @@
+# Contexto de build do Api e do Worker: so o que o dotnet publish precisa.
+**/bin
+**/obj
+**/node_modules
+.git
+.github
+.claude
+tests
+docs
+tools
+frontend
+deploy
+global.json
+dotnet-tools.json
+*.md
+**/*.user
+**/.vs

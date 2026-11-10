@@ -1,0 +1,9 @@
+[Unit]
+Description=ia.bimeta: monitor (conteineres, status, disco, backup, HTTPS local) com alerta
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=@DEPLOY_DIR@/scripts/monitor.sh
+TimeoutStartSec=10min

@@ -1,0 +1,194 @@
+#!/usr/bin/env bash
+# DOCKER FALSO, so para o teste dos scripts de backup e restauracao (deploy/tests/testar-scripts.sh). NAO e um Docker: imita APENAS os comandos
+# que os scripts usam, com ferramentas reais (tar, sha256sum) e um diretorio de estado (FALSO_ESTADO) no lugar do daemon:
+#   volumes/<projeto>_<nome>/   = um volume (pgdata guarda dados.bin = o "banco"; anexos guarda os objetos)
+#   rodando/<projeto>/<svc>     = marca de servico rodando
+#   chamadas.log                = TODAS as chamadas, uma por linha: "<projeto>|<subcomando e argumentos> [EDGE_SUBNET=...]" (ou "docker|...")
+#   registro-dump / registro-restore = "sha256 bytes" do que o pg_dump falso emitiu e do que o pg_restore falso leu
+# Comandos desconhecidos ou com argumentos diferentes do contrato saem com erro (125 ou 2): o teste pega qualquer desvio do contrato.
+# Falhas injetaveis por variavel de ambiente: FALSO_FALHAR_PGDUMP, FALSO_PGDUMP_SLEEP, FALSO_FALHAR_PGRESTORE, FALSO_FALHAR_LISTA,
+#   FALSO_FALHAR_TAR=<codigo>, FALSO_TAR_SAIDA_1, FALSO_CHECK_SAIDA=<codigo>, FALSO_SAUDE_DEMORA=<n>, FALSO_CONFIG_FALHA.
+set -euo pipefail
+
+ESTADO="${FALSO_ESTADO:?FALSO_ESTADO nao definido}"
+mkdir -p "$ESTADO/volumes" "$ESTADO/rodando"
+LOG="$ESTADO/chamadas.log"
+
+erro() { printf 'falso-docker: %s\n' "$*" >&2; }
+registrar() { printf '%s\n' "$*" >>"$LOG"; }
+
+if [ "${1:-}" = "compose" ]; then
+  shift
+  PROJETO="iabimeta"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --project-directory|-f) shift 2 ;;
+      -p) PROJETO="$2"; shift 2 ;;
+      *) break ;;
+    esac
+  done
+  SUB="${1:-}"
+  [ $# -eq 0 ] || shift
+  registrar "$PROJETO|$SUB $* [EDGE_SUBNET=${EDGE_SUBNET:-}] [EDGE_WEB_IP=${EDGE_WEB_IP:-}]"
+  VOLP="$ESTADO/volumes/${PROJETO}_pgdata"
+  VOLA="$ESTADO/volumes/${PROJETO}_anexos"
+  MARCAS="$ESTADO/rodando/$PROJETO"
+
+  case "$SUB" in
+    exec)
+      [ "${1:-}" = "-T" ] || { erro "exec sem -T"; exit 2; }
+      shift
+      [ "${1:-}" = "db" ] || { erro "exec so imita o servico db"; exit 2; }
+      shift
+      [ -f "$MARCAS/db" ] || { erro "service \"db\" is not running"; exit 1; }
+      CMD="${1:-}"
+      [ $# -eq 0 ] || shift
+      case "$CMD" in
+        pg_dump)
+          [ "$*" = "-U postgres -Fc iabimeta" ] || { erro "argumentos do pg_dump fora do contrato: $*"; exit 2; }
+          if [ "${FALSO_FALHAR_PGDUMP:-0}" != 0 ]; then
+            echo "pg_dump: error: connection to server failed" >&2
+            exit 1
+          fi
+          [ -z "${FALSO_PGDUMP_SLEEP:-}" ] || sleep "$FALSO_PGDUMP_SLEEP"
+          [ -f "$VOLP/dados.bin" ] || { echo "pg_dump: error: no data" >&2; exit 1; }
+          T="$(mktemp)"
+          { printf 'PGDMP\001\016\000'; cat "$VOLP/dados.bin"; } >"$T"
+          printf '%s %s\n' "$(sha256sum "$T" | cut -d' ' -f1)" "$(wc -c <"$T" | tr -d ' ')" >>"$ESTADO/registro-dump"
+          cat "$T"
+          rm -f "$T"
+          ;;
+        pg_restore)
+          T="$(mktemp)"
+          cat >"$T"
+          if [ "${1:-}" = "-l" ] && [ $# -eq 1 ]; then
+            if [ "${FALSO_FALHAR_LISTA:-0}" != 0 ] || [ "$(head -c 5 "$T")" != "PGDMP" ]; then
+              rm -f "$T"
+              echo "pg_restore: error: input file does not appear to be a valid archive" >&2
+              exit 1
+            fi
+            rm -f "$T"
+            printf ';\n; Archive created at 2026-01-01 00:00:00 UTC\n;     dbname: iabimeta\n; Selected TOC Entries:\n'
+            exit 0
+          fi
+          [ "$*" = "-U postgres -d iabimeta --no-owner --no-privileges --role=iabimeta --exit-on-error" ] || { rm -f "$T"; erro "argumentos do pg_restore fora do contrato: $*"; exit 2; }
+          if [ "${FALSO_FALHAR_PGRESTORE:-0}" != 0 ] || [ "$(head -c 5 "$T")" != "PGDMP" ]; then
+            rm -f "$T"
+            echo "pg_restore: error: could not execute query" >&2
+            exit 1
+          fi
+          mkdir -p "$VOLP"
+          printf '%s %s\n' "$(sha256sum "$T" | cut -d' ' -f1)" "$(wc -c <"$T" | tr -d ' ')" >>"$ESTADO/registro-restore"
+          mv "$T" "$VOLP/restaurado.dump"
+          ;;
+        psql)
+          printf '2026-01-01 00:00:00+00\n'
+          ;;
+        *) erro "exec: comando nao imitado: $CMD"; exit 125 ;;
+      esac
+      ;;
+    up)
+      [ "$*" = "-d db" ] || { erro "up so imita '-d db'"; exit 2; }
+      mkdir -p "$VOLP" "$MARCAS"
+      : >"$MARCAS/db"
+      echo "Container ${PROJETO}-db-1  Started" >&2
+      ;;
+    ps)
+      [ "${1:-}" = "-q" ] || { erro "ps so imita -q"; exit 2; }
+      shift
+      for s in "$@"; do
+        if [ -f "$MARCAS/$s" ]; then echo "falso-$s-$PROJETO"; fi
+      done
+      ;;
+    config)
+      [ "$*" = "--images" ] || { erro "config so imita --images"; exit 2; }
+      [ "${FALSO_CONFIG_FALHA:-0}" = 0 ] || { echo "config falhou" >&2; exit 1; }
+      printf 'postgres:17\nclamav/clamav:1.4_base-debian13-slim\niabimeta/api:local\niabimeta/worker:local\niabimeta/web:local\n'
+      ;;
+    down)
+      case "$*" in
+        "-v"|"") ;;
+        *) erro "down so imita '-v' ou sem argumentos"; exit 2 ;;
+      esac
+      rm -rf "$MARCAS"
+      if [ "${1:-}" = "-v" ]; then
+        for v in "$ESTADO/volumes/${PROJETO}_"*; do
+          [ -e "$v" ] && rm -rf "$v"
+        done
+      fi
+      ;;
+    run)
+      ENTRY=""
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --rm|--no-deps|-T) shift ;;
+          --entrypoint) ENTRY="$2"; shift 2 ;;
+          *) break ;;
+        esac
+      done
+      [ "${1:-}" = "api" ] || { erro "run so imita o servico api"; exit 2; }
+      shift
+      if [ "$ENTRY" = "tar" ]; then
+        [ "${1:-}" = "-C" ] && [ "${2:-}" = "/var/lib/iabimeta/anexos" ] || { erro "tar fora do contrato: $*"; exit 2; }
+        shift 2
+        mkdir -p "$VOLA"
+        case "${1:-}" in
+          -cf)
+            [ "$*" = "-cf - ." ] || { erro "tar -cf fora do contrato: $*"; exit 2; }
+            [ "${FALSO_FALHAR_TAR:-0}" = 0 ] || { echo "tar: erro simulado" >&2; exit "$FALSO_FALHAR_TAR"; }
+            tar -C "$VOLA" -cf - .
+            if [ "${FALSO_TAR_SAIDA_1:-0}" != 0 ]; then
+              echo "tar: ./x: file changed as we read it" >&2
+              exit 1
+            fi
+            ;;
+          -xf)
+            [ "$*" = "-xf -" ] || { erro "tar -xf fora do contrato: $*"; exit 2; }
+            tar -C "$VOLA" -xf -
+            ;;
+          *) erro "tar: modo nao imitado: $*"; exit 125 ;;
+        esac
+      else
+        [ -z "$ENTRY" ] && [ "${1:-}" = "attachments" ] && [ "${2:-}" = "check" ] && [ $# -eq 2 ] || { erro "run: comando nao imitado: $ENTRY $*"; exit 125; }
+        mkdir -p "$VOLA"
+        N="$(find "$VOLA" -name '*.bin' | wc -l | tr -d ' ')"
+        printf 'Verificacao de consistencia (somente leitura: nada foi alterado).\n'
+        printf '  Linhas disponiveis conferidas : %s\n' "$N"
+        printf '  Integras                      : %s\n' "$N"
+        exit "${FALSO_CHECK_SAIDA:-0}"
+      fi
+      ;;
+    *) erro "compose: subcomando nao imitado: $SUB"; exit 125 ;;
+  esac
+  exit 0
+fi
+
+registrar "docker|$*"
+case "${1:-}" in
+  inspect)
+    [ "${2:-}" = "-f" ] && [ "${3:-}" = "{{.State.Health.Status}}" ] && [ $# -eq 4 ] || { erro "inspect fora do contrato: $*"; exit 2; }
+    CONT="$ESTADO/saude-contador"
+    N=0
+    [ ! -f "$CONT" ] || N="$(cat "$CONT")"
+    N=$((N + 1))
+    printf '%s\n' "$N" >"$CONT"
+    if [ "$N" -le "${FALSO_SAUDE_DEMORA:-0}" ]; then echo "starting"; else echo "healthy"; fi
+    ;;
+  volume)
+    case "${2:-}" in
+      inspect)
+        [ -d "$ESTADO/volumes/${3:-}" ] || { echo "Error response from daemon: get ${3:-}: no such volume" >&2; exit 1; }
+        echo "[]"
+        ;;
+      ls)
+        [ "${3:-}" = "-q" ] || { erro "volume ls so imita -q"; exit 2; }
+        for v in "$ESTADO/volumes/"*; do
+          [ -d "$v" ] && basename "$v"
+        done
+        ;;
+      *) erro "volume: subcomando nao imitado: ${2:-}"; exit 125 ;;
+    esac
+    ;;
+  *) erro "comando nao imitado: $*"; exit 125 ;;
+esac
+exit 0

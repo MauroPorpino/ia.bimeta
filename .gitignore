@@ -5,6 +5,10 @@
 
 # dotenv files
 .env
+# Segredos da implantacao Linux (ADR 0033): so os modelos *.example vao para o repositorio
+deploy/app.env
+deploy/backup.env
+deploy/.versao-anterior
 
 # User-specific files
 *.rsuser

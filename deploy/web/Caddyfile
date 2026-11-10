@@ -1,0 +1,51 @@
+# Proxy HTTPS do ia.bimeta (Caddy). ADR 0033, docs/operations/IMPLANTACAO-LINUX.md.
+# O Caddy obtem e RENOVA sozinho o certificado (Let's Encrypt) para o dominio: exige o DNS apontando para o IP publico e as portas 80 e 443
+# chegando ate este contêiner. O estado (certificados e chaves) vive no volume caddy_data: nunca o apague sem necessidade.
+# Variaveis (vindas do .env pelo Compose): DOMAIN, ACME_EMAIL, ACME_CA (padrao: producao; para TESTAR use o ambiente de homologacao do Let's Encrypt).
+
+{
+	email {$ACME_EMAIL}
+	acme_ca {$ACME_CA}
+	admin off
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	# O webhook da Meta: o corpo passa INTEIRO e sem alteracao ao Api, que valida a assinatura HMAC dele (ADR 0011). Corpo pequeno por desenho.
+	handle /webhooks/whatsapp/* {
+		request_body {
+			max_size 2MB
+		}
+		reverse_proxy api:8080
+	}
+
+	# A API da interface. O prefixo /api e removido (o Api atende na raiz). O teto cobre o envio de arquivo do atendente (o Api tem o dele, por tipo).
+	handle /api/* {
+		request_body {
+			max_size 30MB
+		}
+		uri strip_prefix /api
+		reverse_proxy api:8080
+	}
+
+	# A interface React (arquivos estaticos). Qualquer outro caminho cai na pagina inicial (o React cuida das telas).
+	handle {
+		root * /srv/frontend
+		try_files {path} /index.html
+		file_server
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		-Server
+	}
+
+	# Registro de acesso em JSON na saida padrao (docker compose logs web); sem corpo nem cabecalho de autorizacao.
+	log {
+		output stdout
+		format json
+	}
+}

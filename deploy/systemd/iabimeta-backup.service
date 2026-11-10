@@ -1,0 +1,11 @@
+[Unit]
+Description=ia.bimeta: backup do banco e dos anexos (cifrado, com copia externa)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=@DEPLOY_DIR@/scripts/backup.sh
+TimeoutStartSec=3h
+Nice=10
+IOSchedulingClass=idle
