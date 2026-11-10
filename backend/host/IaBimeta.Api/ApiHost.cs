@@ -8,6 +8,7 @@ using IaBimeta.Api.Channels;
 using IaBimeta.Api.ContactCenter;
 using IaBimeta.Api.Development;
 using IaBimeta.Api.Operations;
+using IaBimeta.Api.Proxy;
 using IaBimeta.Api.RequestContexts;
 using IaBimeta.Api.Retention;
 using IaBimeta.Audit.Infrastructure;
@@ -26,6 +27,7 @@ using IaBimeta.Messaging;
 using IaBimeta.SharedKernel;
 using IaBimeta.Tenancy.Infrastructure;
 using IaBimeta.Tenancy.Presentation;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using System.Text.Json.Serialization;
@@ -167,8 +169,8 @@ public static class ApiHost
         }
 
         // Limite de taxa do login por origem (IP), antes de qualquer consulta ao banco. Vale para quem insiste em tenant ou
-        // e-mail inexistente, que não têm contagem própria. Atrás de proxy a origem é a do proxy: confiar em cabeçalho de
-        // encaminhamento exige configuração explícita de proxies confiáveis, que não existe ainda.
+        // e-mail inexistente, que não têm contagem própria. Atrás de proxy a origem é a do proxy: só com ForwardedHeaders ligado
+        // (ADR 0033, proxies e redes confiáveis explícitos) o endereço usado aqui é o do cliente de verdade.
         var limiteDeLogin = builder.Configuration.GetSection("Identity:LoginRateLimit").Get<LoginRateLimitOptions>() ?? new LoginRateLimitOptions();
         builder.Services.AddRateLimiter(opcoes =>
         {
@@ -186,7 +188,21 @@ public static class ApiHost
 
         var ingressoPublico = builder.Configuration.GetSection("Channels:Webhook").Get<PublicIngressOptions>() ?? new PublicIngressOptions();
 
+        // Atrás de um proxy reverso (ADR 0033): confia nos cabeçalhos de encaminhamento SÓ dos proxies e redes configurados. Desligado por padrão.
+        var encaminhamento = builder.Configuration.GetSection("ForwardedHeaders").Get<ForwardedHeadersSettings>() ?? new ForwardedHeadersSettings();
+        encaminhamento.Validate();
+        if (encaminhamento.Enabled)
+        {
+            builder.Services.Configure<ForwardedHeadersOptions>(encaminhamento.Apply);
+        }
+
         var app = builder.Build();
+
+        // Primeiro da fila: o guarda do ingresso, o limite de login e o resto já veem o endereço REAL do cliente (e o esquema https do proxy).
+        if (encaminhamento.Enabled)
+        {
+            app.UseForwardedHeaders();
+        }
 
         // O ingresso PÚBLICO (túnel HTTPS) só alcança o webhook do provedor: nada de login, simulador nem cabeçalho de desenvolvimento pela internet. Primeiro da fila, antes de qualquer outra coisa.
         app.UseMiddleware<PublicIngressGuard>(ingressoPublico);

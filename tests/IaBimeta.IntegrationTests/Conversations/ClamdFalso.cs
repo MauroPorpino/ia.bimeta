@@ -16,6 +16,9 @@ public enum ModoDoClamd
     OkNoMeioDoTexto,
     RespostaVazia,
     NaoResponde,
+
+    /// <summary>Como um clamd de verdade para a amostra de teste: FOUND se o conteúdo recebido contém a amostra EICAR, OK em qualquer outro caso.</summary>
+    ComoOClamd,
 }
 
 /// <summary>O que o <c>clamd</c> falso recebeu numa conexão: o comando, o conteúdo reunido, o tamanho de cada bloco e se terminou com o bloco de tamanho zero.</summary>
@@ -111,6 +114,11 @@ internal sealed class ClamdFalso : IAsyncDisposable
                 }
 
                 var modo = Modo;
+                if (modo == ModoDoClamd.ComoOClamd)
+                {
+                    modo = IaBimeta.Conversations.Infrastructure.EicarTestSample.IsPresentIn(conteudo.ToArray()) ? ModoDoClamd.Found : ModoDoClamd.Ok;
+                }
+
                 switch (modo)
                 {
                     case ModoDoClamd.NaoResponde:

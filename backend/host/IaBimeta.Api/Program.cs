@@ -1,4 +1,4 @@
-// Os comandos de operação ("provision", que coloca uma empresa em funcionamento, e "reset-password", que emite o token de redefinição de senha) rodam e terminam, sem subir o Api.
+// Os comandos de operação ("migrate", que aplica as migrations; "provision", que coloca uma empresa em funcionamento; "reset-password", que emite o token de redefinição de senha; "retention"; "attachments"; "status") rodam e terminam, sem subir o Api.
 if (args.Length > 0 && string.Equals(args[0], IaBimeta.Api.Provisioning.ProvisionCommand.Verb, StringComparison.Ordinal))
 {
     return await IaBimeta.Api.Provisioning.ProvisionCommand.RunAsync(args[1..], Console.Out);
@@ -7,6 +7,11 @@ if (args.Length > 0 && string.Equals(args[0], IaBimeta.Api.Provisioning.Provisio
 if (args.Length > 0 && string.Equals(args[0], IaBimeta.Api.Provisioning.ResetPasswordCommand.Verb, StringComparison.Ordinal))
 {
     return await IaBimeta.Api.Provisioning.ResetPasswordCommand.RunAsync(args[1..], Console.Out);
+}
+
+if (args.Length > 0 && string.Equals(args[0], IaBimeta.Api.Provisioning.MigrateCommand.Verb, StringComparison.Ordinal))
+{
+    return await IaBimeta.Api.Provisioning.MigrateCommand.RunAsync(args[1..], Console.Out);
 }
 
 if (args.Length > 0 && string.Equals(args[0], IaBimeta.Api.Retention.RetentionCommand.Verb, StringComparison.Ordinal))

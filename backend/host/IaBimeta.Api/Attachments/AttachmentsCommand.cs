@@ -19,11 +19,11 @@ internal static class AttachmentsCommand
 {
     public const string Verb = "attachments";
 
-    internal const string Usage = "Uso: attachments report | check [--repair --confirm [--allow-empty-folder]] [--orphan-days N] [--tenant ID] | rescan [--confirm] [--tenant ID] | encrypt-existing [--confirm] [--tenant ID]";
+    internal const string Usage = "Uso: attachments report | test-scanner [--size-mb N] | check [--repair --confirm [--allow-empty-folder]] [--orphan-days N] [--tenant ID] | rescan [--confirm] [--tenant ID] | encrypt-existing [--confirm] [--tenant ID]";
 
     public static async Task<int> RunAsync(string[] args, TextWriter output)
     {
-        if (args.Length == 0 || args[0] is not ("report" or "check" or "rescan" or "encrypt-existing"))
+        if (args.Length == 0 || args[0] is not ("report" or "test-scanner" or "check" or "rescan" or "encrypt-existing"))
         {
             await output.WriteLineAsync(Usage);
             return 2;
@@ -33,6 +33,7 @@ internal static class AttachmentsCommand
         var reparar = false;
         var diasDeOrfao = 1;
         var aceitarPastaVazia = false;
+        var tamanhoDoTesteEmMb = 1;
         Guid? empresa = null;
         for (var i = 1; i < args.Length; i++)
         {
@@ -50,6 +51,10 @@ internal static class AttachmentsCommand
                     break;
                 case "--allow-empty-folder" when args[0] == "check":
                     aceitarPastaVazia = true;
+                    break;
+                case "--size-mb" when args[0] == "test-scanner" && i + 1 < args.Length && int.TryParse(args[i + 1], NumberStyles.None, CultureInfo.InvariantCulture, out var megas) && megas is >= 1 and <= 100:
+                    tamanhoDoTesteEmMb = megas;
+                    i++;
                     break;
                 case "--orphan-days" when args[0] == "check" && i + 1 < args.Length && int.TryParse(args[i + 1], NumberStyles.None, CultureInfo.InvariantCulture, out var dias) && dias is >= 0 and <= 3650:
                     diasDeOrfao = dias;
@@ -76,13 +81,14 @@ internal static class AttachmentsCommand
 
         // A mesma composição do Api, sem abrir porta nem iniciar serviço algum, com só avisos e erros no console.
         await using var app = ApiHost.Build(Array.Empty<string>(), builder => OperationsLogging.Quiet(builder.Logging));
-        return await ExecuteAsync(app.Services, args[0], confirmado, reparar, TimeSpan.FromDays(diasDeOrfao), output, empresa, aceitarPastaVazia);
+        return await ExecuteAsync(app.Services, args[0], confirmado, reparar, TimeSpan.FromDays(diasDeOrfao), output, empresa, aceitarPastaVazia, tamanhoDoTesteEmMb);
     }
 
     /// <param name="tenantId">Limita a verificação, a varredura posterior ou a conversão a UMA empresa (o alcance do reparo fica só nela). Sem ele, todas.</param>
     /// <param name="allowEmptyFolder">Só com o reparo: aceita marcar tudo como perdido mesmo com a pasta sem nenhum objeto (a trava contra <c>RootPath</c> errado).</param>
+    /// <param name="scannerTestMb">Só com <c>test-scanner</c>: o tamanho (em MB) do arquivo benigno grande que prova o limite de fluxo do daemon (<c>StreamMaxLength</c>).</param>
     internal static async Task<int> ExecuteAsync(
-        IServiceProvider root, string verb, bool confirmed, bool repair, TimeSpan orphanMinAge, TextWriter output, Guid? tenantId = null, bool allowEmptyFolder = false, CancellationToken cancellationToken = default)
+        IServiceProvider root, string verb, bool confirmed, bool repair, TimeSpan orphanMinAge, TextWriter output, Guid? tenantId = null, bool allowEmptyFolder = false, int scannerTestMb = 1, CancellationToken cancellationToken = default)
     {
         await using var escopo = root.CreateAsyncScope();
         var servico = escopo.ServiceProvider.GetRequiredService<AttachmentMaintenanceService>();
@@ -92,6 +98,7 @@ internal static class AttachmentsCommand
             return verb switch
             {
                 "report" => await ReportAsync(root, servico, opcoes, output, cancellationToken),
+                "test-scanner" => await TestScannerAsync(opcoes, scannerTestMb, output, cancellationToken),
                 "check" => await CheckAsync(servico, repair, orphanMinAge, tenantId, allowEmptyFolder, output, cancellationToken),
                 "rescan" => await RescanAsync(servico, confirmed, tenantId, output, cancellationToken),
                 _ => await EncryptAsync(servico, confirmed, tenantId, output, cancellationToken),
@@ -138,6 +145,49 @@ internal static class AttachmentsCommand
         }
 
         return atencao ? 1 : 0;
+    }
+
+    /// <summary>
+    /// Prova a integração com o verificador REAL (ADR 0033), falando direto com o motor (sem a detecção embutida da amostra EICAR, que a pegaria antes e o verificador nunca a veria): (1) um arquivo benigno pequeno
+    /// precisa voltar LIMPO; (2) um benigno do tamanho pedido precisa voltar limpo (prova o <c>StreamMaxLength</c> do daemon); (3) a amostra de teste EICAR, inofensiva por desenho, precisa voltar INFECTADA. Só sai 0 se os três
+    /// derem o resultado esperado. Nenhum arquivo é criado em disco.
+    /// </summary>
+    private static async Task<int> TestScannerAsync(AttachmentOptions opcoes, int megas, TextWriter output, CancellationToken cancellationToken)
+    {
+        if (opcoes.Scanner.Mode != AttachmentScannerMode.ClamAv)
+        {
+            await output.WriteLineAsync("Operação não executada: não há verificador configurado (Conversations:Attachments:Scanner:Mode = ClamAv).");
+            return 2;
+        }
+
+        var motor = new ClamAvAttachmentScanner(opcoes.Scanner.Host, opcoes.Scanner.Port, opcoes.Scanner.Timeout);
+        var grande = new byte[(long)megas * 1024 * 1024];
+        for (var i = 0; i < grande.Length; i++)
+        {
+            grande[i] = (byte)('a' + (i % 26));
+        }
+
+        var testes = new (string Nome, byte[] Conteudo, ScanVerdict Esperado)[]
+        {
+            ("arquivo benigno pequeno", "documento de teste benigno do ia.bimeta"u8.ToArray(), ScanVerdict.Clean),
+            ($"arquivo benigno de {megas} MB (limite de fluxo do daemon)", grande, ScanVerdict.Clean),
+            ("amostra de teste EICAR (inofensiva)", EicarTestSample.Bytes(), ScanVerdict.Infected),
+        };
+
+        await output.WriteLineAsync($"Verificador em {opcoes.Scanner.Host}:{opcoes.Scanner.Port} (prazo {opcoes.Scanner.Timeout.TotalSeconds:0} s). Falando direto com o motor.");
+        var tudoCerto = true;
+        foreach (var (nome, conteudo, esperado) in testes)
+        {
+            var veredito = await motor.ScanAsync(MessageKind.Document, "text/plain", conteudo, cancellationToken);
+            var certo = veredito == esperado;
+            tudoCerto &= certo;
+            await output.WriteLineAsync($"  {(certo ? "OK    " : "FALHOU")} {nome}: veredito {veredito} (esperado {esperado})");
+        }
+
+        await output.WriteLineAsync(tudoCerto
+            ? "Integração com o verificador confirmada: o benigno passa e a amostra de teste é detectada."
+            : "A integração NÃO está correta: confira o clamd (porta, assinaturas atualizadas, StreamMaxLength) e a configuração do Scanner.");
+        return tudoCerto ? 0 : 1;
     }
 
     private static async Task<int> CheckAsync(AttachmentMaintenanceService servico, bool repair, TimeSpan orphanMinAge, Guid? tenantId, bool allowEmptyFolder, TextWriter output, CancellationToken cancellationToken)

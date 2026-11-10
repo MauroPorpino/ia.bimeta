@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Net;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using IaBimeta.Api.Attachments;
 using IaBimeta.Api.Operations;
 using IaBimeta.Conversations.Contracts;
@@ -253,6 +254,54 @@ public sealed class ComandoDeAnexosTests(PostgresFixture banco) : IAsyncDisposab
     }
 
     [Fact]
+    public async Task O_teste_do_verificador_prova_o_benigno_o_tamanho_e_a_amostra_EICAR_falando_direto_com_o_motor_e_reprova_o_daemon_que_nao_detecta_ou_nao_responde()
+    {
+        var clamd = new ClamdFalso(ModoDoClamd.ComoOClamd);
+        _clamds.Add(clamd);
+        var configuracao = ApiServer.ConfiguracaoDeProducao();
+        configuracao["Conversations:Attachments:RootPath"] = Pasta("cmdscanner");
+        configuracao["Conversations:Attachments:Scanner:Mode"] = "ClamAv";
+        configuracao["Conversations:Attachments:Scanner:Port"] = clamd.Porta.ToString(CultureInfo.InvariantCulture);
+        configuracao["Conversations:Attachments:Scanner:Timeout"] = "00:00:05";
+        await using var api = await ApiServer.StartAsync("Production", configuracao);
+
+        // Um daemon que se comporta como o real: o benigno (pequeno e de 2 MB) passa, a amostra EICAR é detectada e CHEGOU ao daemon (a detecção embutida não a intercepta aqui).
+        var saida = new StringWriter();
+        var codigo = await AttachmentsCommand.ExecuteAsync(api.Services, "test-scanner", false, false, TimeSpan.Zero, saida, scannerTestMb: 2);
+        Assert.Equal(0, codigo);
+        Assert.Contains("Integração com o verificador confirmada", saida.ToString(), StringComparison.Ordinal);
+        Assert.Equal(3, Regex.Matches(saida.ToString(), "OK     ").Count);
+        Assert.Equal(3, clamd.Recebidos.Count);
+        Assert.Contains(clamd.Recebidos, r => r.Conteudo.Length == 2 * 1024 * 1024);
+        Assert.Contains(clamd.Recebidos, r => EicarTestSample.IsPresentIn(r.Conteudo));
+
+        // Um daemon que diz "limpo" para tudo (assinaturas ausentes) é reprovado: a amostra não foi detectada.
+        clamd.Modo = ModoDoClamd.Ok;
+        var semDeteccao = new StringWriter();
+        Assert.Equal(1, await AttachmentsCommand.ExecuteAsync(api.Services, "test-scanner", false, false, TimeSpan.Zero, semDeteccao));
+        Assert.Contains("FALHOU amostra de teste EICAR", semDeteccao.ToString(), StringComparison.Ordinal);
+        Assert.Contains("A integração NÃO está correta", semDeteccao.ToString(), StringComparison.Ordinal);
+
+        // Um daemon fora do ar é reprovado, nunca "limpo".
+        clamd.Modo = ModoDoClamd.FecharSemResponder;
+        var foraDoAr = new StringWriter();
+        Assert.Equal(1, await AttachmentsCommand.ExecuteAsync(api.Services, "test-scanner", false, false, TimeSpan.Zero, foraDoAr));
+        Assert.Contains("Unavailable", foraDoAr.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task O_teste_do_verificador_recusa_rodar_sem_verificador_configurado()
+    {
+        await using var api = await ApiServer.StartAsync("Production", ApiServer.ConfiguracaoDeProducao());
+        var saida = new StringWriter();
+
+        var codigo = await AttachmentsCommand.ExecuteAsync(api.Services, "test-scanner", false, false, TimeSpan.Zero, saida);
+
+        Assert.Equal(2, codigo);
+        Assert.Contains("não há verificador configurado", saida.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Os_argumentos_invalidos_do_comando_saem_com_codigo_2_sem_subir_o_Api_e_o_reparo_exige_confirmacao()
     {
         string[][] uso =
@@ -263,6 +312,10 @@ public sealed class ComandoDeAnexosTests(PostgresFixture banco) : IAsyncDisposab
             ["check", "--repair"], // reparo sem --confirm
             ["check", "--allow-empty-folder"], // a permissão só vale com o reparo
             ["rescan", "--allow-empty-folder"],
+            ["test-scanner", "--size-mb", "0"], // o tamanho do teste vai de 1 a 100 MB
+            ["test-scanner", "--size-mb", "101"],
+            ["test-scanner", "--size-mb"],
+            ["check", "--size-mb", "2"], // só o test-scanner tem esta opção
             ["check", "--tenant", "nao-e-um-guid"],
             ["check", "--tenant", Guid.Empty.ToString()],
             ["report", "--tenant", Guid.NewGuid().ToString()], // o relatório não tem alcance por empresa

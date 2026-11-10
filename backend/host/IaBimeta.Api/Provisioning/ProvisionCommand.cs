@@ -92,15 +92,11 @@ internal static class ProvisionCommand
     private static async Task ApplyMigrationsAsync(IServiceProvider services, TextWriter output)
     {
         await using var escopo = services.CreateAsyncScope();
-        var sp = escopo.ServiceProvider;
-        await sp.GetRequiredService<TenancyDbContext>().Database.MigrateAsync();
-        await sp.GetRequiredService<AuditDbContext>().Database.MigrateAsync();
-        await sp.GetRequiredService<IdentityDbContext>().Database.MigrateAsync();
-        await sp.GetRequiredService<ConversationsDbContext>().Database.MigrateAsync();
-        await sp.GetRequiredService<ChannelsDbContext>().Database.MigrateAsync();
-        await sp.GetRequiredService<ContactCenterDbContext>().Database.MigrateAsync();
-        await sp.GetRequiredService<AiGatewayDbContext>().Database.MigrateAsync();
-        await sp.GetRequiredService<AgentsDbContext>().Database.MigrateAsync();
+        foreach (var (_, contexto) in MigrateCommand.Modules(escopo.ServiceProvider))
+        {
+            await contexto.Database.MigrateAsync();
+        }
+
         await output.WriteLineAsync("Migrations aplicadas (nada a fazer se o banco já estava atualizado).");
     }
 
