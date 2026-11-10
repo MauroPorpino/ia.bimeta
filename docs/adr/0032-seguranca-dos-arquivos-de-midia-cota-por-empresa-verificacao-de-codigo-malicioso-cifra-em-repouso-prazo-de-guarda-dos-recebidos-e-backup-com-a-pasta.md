@@ -1,6 +1,6 @@
 # ADR 0032 — Segurança dos arquivos de mídia para o primeiro piloto: cota por empresa, verificação de código malicioso, cifra em repouso, prazo de guarda dos recebidos e backup junto da pasta
 
-- **Status:** **Proposto** (implementado em 10/11/2026 sob a autorização do decisor, depois da ratificação do ADR 0031; aguarda ratificação). Nenhuma chamada real à Meta ou à OpenAI; a migração só **acrescenta** duas colunas e uma restrição (backup do banco de teste feito antes: `pre-migracao-varredura-20261109-220605`); `main` intocada; sem push.
+- **Status:** **Aceito para o MVP** (implementado em 10/11/2026 sob a autorização do decisor, depois da ratificação do ADR 0031; **ratificado pelo decisor em 10/11/2026**, com os commits `8f9b46e`, `9230c4e`, `f9145c3` e `beb33f8`). Nenhuma chamada real à Meta ou à OpenAI; a migração só **acrescenta** duas colunas e uma restrição (backup do banco de teste feito antes: `pre-migracao-varredura-20261109-220605`); `main` intocada; sem push.
 - **Data:** 10/11/2026
 - **Decisor:** Mauro Porpino
 - **Referências:** ADR 0005 e `BOUNDARIES.md`, 0009 (ligações mediadas pelo host), 0025 (retenção e backup), 0026 (operação e recuperação), 0028 (mídia recebida), 0031 (envio de arquivos, aceito), `docs/operations/SEGURANCA-DOS-ARQUIVOS.md`, `BACKUP-E-RESTAURACAO.md`, `RETENCAO-DE-DADOS.md`
