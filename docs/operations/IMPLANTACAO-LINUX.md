@@ -2,6 +2,8 @@
 
 Guia passo a passo para instalar **uma pilha única** do ia.bimeta (proxy HTTPS com a interface, Api, Worker, PostgreSQL 17 e ClamAV) numa máquina virtual Linux na infraestrutura própria, com um IP público fixo. Decisão e justificativas: `docs/adr/0033-*.md`. Todos os arquivos estão em `deploy/`.
 
+> **Papel desta VM:** a VM em servidor físico da empresa é o ambiente de **homologação e testes** (ADR 0033, aceito com a ressalva de homologar em Linux real); a **produção futura** será em nuvem com **os mesmos artefatos**. Nada é instalado no Windows de desenvolvimento.
+
 > **Estado de validação (leia antes de usar):** os arquivos de implantação foram escritos e conferidos **por texto e por compilação** (o `dotnet publish` que os Dockerfiles executam, o build da interface, a sintaxe de todos os scripts, as invariantes de segurança do Compose, do Caddyfile e dos modelos, e os scripts de backup e restauração contra um `docker` falso). **Nada foi executado com Docker de verdade**: a máquina de desenvolvimento não tem Docker, WSL nem virtualização habilitada. **O primeiro uso REAL é o teste de aceitação na VM (seção 6)**, que prova o comportamento (subida, exposição, ClamAV real, persistência, queda de serviço, backup e restauração). Não coloque atendimento real antes de ele passar.
 
 ## 1. O que vai rodar e o que fica exposto
