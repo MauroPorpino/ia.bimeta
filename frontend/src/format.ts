@@ -114,8 +114,17 @@ export function motivoDoAnexo(status: 'Unavailable' | 'Rejected', codigo: string
     case 'malware':
       return 'O arquivo foi bloqueado pela verificação de segurança.';
     case 'retention':
-      // Arquivo ENVIADO pelo atendente (ADR 0031): o servidor o apaga depois do prazo de guarda.
+      // Arquivo apagado pelo servidor depois do prazo de guarda (enviado: ADR 0031; recebido, se a empresa definiu prazo: ADR 0032).
       return 'O arquivo foi apagado do servidor depois do prazo de guarda; o nome e a legenda continuam aqui.';
+    case 'quota-exceeded':
+      // ADR 0032: o arquivo recebido não coube na cota de armazenamento da empresa.
+      return 'O arquivo não foi guardado porque o limite de armazenamento da empresa foi atingido. Avise o administrador e peça ao cliente para enviar de novo depois.';
+    case 'scan-unavailable':
+      // ADR 0032: a verificação de segurança é exigida e não respondeu a tempo.
+      return 'O arquivo não pôde ser verificado pela segurança (o verificador ficou indisponível) e não foi liberado. Peça ao cliente para enviar de novo.';
+    case 'lost':
+      // ADR 0032: a conferência de consistência não achou o arquivo guardado.
+      return 'O arquivo guardado foi perdido e não pode mais ser aberto. Peça ao cliente para enviar de novo.';
     default:
       return status === 'Rejected' ? 'O arquivo foi recusado pela política de segurança e não pode ser aberto.' : 'O arquivo não está disponível.';
   }

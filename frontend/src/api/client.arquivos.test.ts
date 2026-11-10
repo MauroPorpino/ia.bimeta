@@ -59,6 +59,18 @@ describe('cliente da API: envio de arquivo do atendente (reply-media)', () => {
     expect(erro).toMatchObject({ status: 422, code: 'MediaRejected', motivo: 'too-large', detail: 'O arquivo passa do tamanho máximo.' });
   });
 
+  it('o 503 da verificação de segurança fora do ar chega com o código e o motivo, e o pedido pode ser repetido com o mesmo requestId', async () => {
+    const f = criarFetch({
+      [ROTA]: json({ title: 'Verificação indisponível', status: 503, code: 'MediaRejected', reason: 'scanner-unavailable', detail: 'A verificação de segurança dos arquivos está indisponível agora.' }, 503),
+    });
+    vi.stubGlobal('fetch', f);
+
+    const erro = await createApi().responderComArquivo('i1', arquivo(), null).catch((e: unknown) => e as ApiError);
+
+    expect(erro).toMatchObject({ status: 503, code: 'MediaRejected', motivo: 'scanner-unavailable' });
+    expect(ehRejeicaoDefinitiva(erro)).toBe(false); // nada foi guardado, mas o cliente trata 5xx como incerto: o MESMO requestId é reaproveitado, e isso é inofensivo
+  });
+
   it('os demais erros ficam sem motivo (o campo é aditivo)', async () => {
     vi.stubGlobal('fetch', criarFetch({ [ROTA]: problema(422, 'Regra não atendida', 'A janela fechou.', 'ReplyWindowClosed') }));
 

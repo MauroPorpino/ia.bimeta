@@ -82,6 +82,8 @@ describe('texto da recusa do servidor', () => {
     ['caption-too-long', '1024 caracteres'],
     ['empty', 'está vazio'],
     ['malware', 'verificação de segurança'],
+    ['quota-exceeded', 'limite de armazenamento'],
+    ['scanner-unavailable', 'indisponível agora'],
     ['invalid-shape', 'formato esperado'],
   ])('%s explica o motivo em português', (motivo, trecho) => {
     expect(textoDaRecusaDoArquivo(motivo, 'detalhe do servidor')).toContain(trecho);

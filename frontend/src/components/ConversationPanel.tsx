@@ -347,7 +347,8 @@ export function ConversationPanel({
   /** Erros do envio de arquivo que o cartão explica ao lado do arquivo (recusa do servidor, arquivo grande demais para o pedido); os demais seguem o caminho da resposta de texto (a janela fechou) ou a faixa de erro. */
   function tratarErroDeArquivo(erro: unknown): boolean {
     if (erro instanceof ApiError) {
-      if (erro.status === 422 && erro.code === 'MediaRejected') {
+      // 422: o arquivo foi recusado. 503 com o mesmo código: a verificação de segurança está fora do ar (ADR 0032); nada foi guardado nem enviado e repetir o mesmo pedido é seguro.
+      if ((erro.status === 422 || erro.status === 503) && erro.code === 'MediaRejected') {
         setRecusaDoArquivo(textoDaRecusaDoArquivo(erro.motivo, erro.detail));
         return true;
       }

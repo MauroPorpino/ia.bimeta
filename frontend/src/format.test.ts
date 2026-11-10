@@ -28,6 +28,10 @@ describe('motivoDoAnexo', () => {
     expect(motivoDoAnexo('Unavailable', 'expired')).toContain('expirou');
     expect(motivoDoAnexo('Unavailable', 'download-failed')).toContain('depois de várias tentativas');
     expect(motivoDoAnexo('Rejected', 'malware')).toContain('verificação de segurança');
+    expect(motivoDoAnexo('Unavailable', 'quota-exceeded')).toContain('limite de armazenamento');
+    expect(motivoDoAnexo('Unavailable', 'scan-unavailable')).toContain('verificador ficou indisponível');
+    expect(motivoDoAnexo('Unavailable', 'lost')).toContain('foi perdido');
+    expect(motivoDoAnexo('Unavailable', 'retention')).toContain('prazo de guarda');
     expect(motivoDoAnexo('Unavailable', 'algo-novo')).toBe('O arquivo não está disponível.');
     expect(motivoDoAnexo('Rejected', null)).toContain('política de segurança');
   });

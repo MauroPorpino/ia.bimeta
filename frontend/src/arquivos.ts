@@ -141,6 +141,10 @@ export function textoDaRecusaDoArquivo(motivo: string | null, detalhe: string | 
       return 'O arquivo está vazio. Escolha outro arquivo.';
     case 'malware':
       return 'O arquivo foi bloqueado pela verificação de segurança e não pode ser enviado.';
+    case 'quota-exceeded':
+      return 'O limite de armazenamento de arquivos da empresa foi atingido. Peça ao administrador para liberar espaço ou ampliar o limite.';
+    case 'scanner-unavailable':
+      return 'A verificação de segurança dos arquivos está indisponível agora. Tente enviar de novo em instantes.';
     case 'invalid-shape':
       return 'O envio foi recusado porque o arquivo ou a legenda não estão no formato esperado. Escolha o arquivo de novo.';
     default:
