@@ -6,13 +6,17 @@ import type { CurrentUser, SendingAlert } from './api/types';
 import { AlertasDeEnvio } from './components/AlertasDeEnvio';
 import { ConexaoBanner } from './components/ConexaoBanner';
 import { Conhecimento } from './components/Conhecimento';
+import { Integracoes } from './components/Integracoes';
 import { ConversationPanel } from './components/ConversationPanel';
 import { ErrorBanner, type Aviso } from './components/ErrorBanner';
 import { LoginScreen } from './components/LoginScreen';
 import { QueuePanel } from './components/QueuePanel';
 import { TrocarSenha } from './components/TrocarSenha';
 import { ehAdministradorDoTenant } from './conhecimento';
+import { podeVerIntegracoes } from './integracao';
 import { useCacheDeConversas, useEstadoDaConexao, useNomesDosContatos, usePolling } from './hooks';
+
+type Area = 'atendimento' | 'conhecimento' | 'integracoes';
 
 interface AppProps {
   /** Para testes. Por padrão, o cliente real (via proxy `/api`). */
@@ -84,8 +88,10 @@ function Atendimento({ api, saidaManual, intervaloFilaMs, intervaloConversaMs, i
   const [tentativa, setTentativa] = useState(0);
   const [trocandoSenha, setTrocandoSenha] = useState(false);
   // A área "Conhecimento" (ADR 0030) é só do administrador do tenant. Aberta uma vez, fica montada (escondida) ao voltar ao Atendimento, para não perder o que ele escrevia.
-  const [area, setArea] = useState<'atendimento' | 'conhecimento'>('atendimento');
+  const [area, setArea] = useState<Area>('atendimento');
   const [conhecimentoAberto, setConhecimentoAberto] = useState(false);
+  // A área "Integrações" (ADR 0035) é de administradores e gerentes; também fica montada depois de aberta.
+  const [integracoesAberta, setIntegracoesAberta] = useState(false);
   const [itemSelecionado, setItemSelecionado] = useState<string | null>(null);
   const [versaoDaLista, setVersaoDaLista] = useState(0);
   const [errosDeRede, setErrosDeRede] = useState<Record<string, ErroDeRede>>({});
@@ -222,27 +228,40 @@ function Atendimento({ api, saidaManual, intervaloFilaMs, intervaloConversaMs, i
   }
 
   const podeVerConhecimento = me !== null && ehAdministradorDoTenant(me);
+  const podeVerIntegracao = me !== null && podeVerIntegracoes(me);
   const naAreaDeConhecimento = podeVerConhecimento && area === 'conhecimento';
+  const naAreaDeIntegracoes = podeVerIntegracao && area === 'integracoes';
+  const foraDoAtendimento = naAreaDeConhecimento || naAreaDeIntegracoes;
 
-  function irParaArea(destino: 'atendimento' | 'conhecimento') {
+  function irParaArea(destino: Area) {
     setArea(destino);
     if (destino === 'conhecimento') {
       setConhecimentoAberto(true);
+    }
+    if (destino === 'integracoes') {
+      setIntegracoesAberta(true);
     }
   }
 
   return (
     <div className="app">
       <header className="topo">
-        <h1>{naAreaDeConhecimento ? 'ia.bimeta - Conhecimento' : 'ia.bimeta - Atendimento'}</h1>
-        {podeVerConhecimento && (
+        <h1>{naAreaDeConhecimento ? 'ia.bimeta - Conhecimento' : naAreaDeIntegracoes ? 'ia.bimeta - Integrações' : 'ia.bimeta - Atendimento'}</h1>
+        {(podeVerConhecimento || podeVerIntegracao) && (
           <nav className="areas" aria-label="Áreas do sistema">
-            <button type="button" className="area-aba" aria-current={!naAreaDeConhecimento ? 'page' : undefined} onClick={() => irParaArea('atendimento')}>
+            <button type="button" className="area-aba" aria-current={!foraDoAtendimento ? 'page' : undefined} onClick={() => irParaArea('atendimento')}>
               Atendimento
             </button>
-            <button type="button" className="area-aba" aria-current={naAreaDeConhecimento ? 'page' : undefined} onClick={() => irParaArea('conhecimento')}>
-              Conhecimento
-            </button>
+            {podeVerConhecimento && (
+              <button type="button" className="area-aba" aria-current={naAreaDeConhecimento ? 'page' : undefined} onClick={() => irParaArea('conhecimento')}>
+                Conhecimento
+              </button>
+            )}
+            {podeVerIntegracao && (
+              <button type="button" className="area-aba" aria-current={naAreaDeIntegracoes ? 'page' : undefined} onClick={() => irParaArea('integracoes')}>
+                Integrações
+              </button>
+            )}
           </nav>
         )}
         <div className="topo-usuario">
@@ -273,7 +292,7 @@ function Atendimento({ api, saidaManual, intervaloFilaMs, intervaloConversaMs, i
           )}
         </main>
       ) : (
-        <main className={itemSelecionado ? 'colunas com-selecao' : 'colunas'} hidden={naAreaDeConhecimento}>
+        <main className={itemSelecionado ? 'colunas com-selecao' : 'colunas'} hidden={foraDoAtendimento}>
           <QueuePanel
             api={api}
             me={me}
@@ -312,6 +331,7 @@ function Atendimento({ api, saidaManual, intervaloFilaMs, intervaloConversaMs, i
       )}
 
       {podeVerConhecimento && conhecimentoAberto && <Conhecimento api={api} oculto={!naAreaDeConhecimento} />}
+      {podeVerIntegracao && integracoesAberta && me && <Integracoes api={api} me={me} oculto={!naAreaDeIntegracoes} />}
     </div>
   );
 }

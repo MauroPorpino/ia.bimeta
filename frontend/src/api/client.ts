@@ -16,6 +16,17 @@ import type {
   FaqSuggestionPage,
   FaqSuggestionStatus,
   HistoryOrder,
+  IntegrationConnection,
+  IntegrationConnectionRequest,
+  IntegrationConnectionStats,
+  IntegrationConnectionTest,
+  IntegrationConnectionUpdate,
+  IntegrationDefinition,
+  IntegrationDefinitionRequest,
+  IntegrationExecutionPage,
+  IntegrationExecutionStatus,
+  IntegrationParameterProblem,
+  IntegrationResult,
   ItemActionRequest,
   KnowledgeGapDetail,
   KnowledgeGapPage,
@@ -56,6 +67,8 @@ export class ApiError extends Error {
   readonly erros: TemplateParameterError[];
   /** O motivo curto de uma recusa de arquivo (422 `MediaRejected`: `too-large`, `type-not-allowed`, `content-mismatch`...); nulo nos demais erros. */
   readonly motivo: string | null;
+  /** Os problemas de validação do motor de integração (400 `problems`): uma frase fixa por campo, nunca o valor digitado; vazio nos demais erros. */
+  readonly problemas: string[];
 
   constructor(
     status: number,
@@ -65,6 +78,7 @@ export class ApiError extends Error {
     semCorpo = false,
     erros: TemplateParameterError[] = [],
     motivo: string | null = null,
+    problemas: string[] = [],
   ) {
     super(detail ?? title);
     this.name = 'ApiError';
@@ -75,6 +89,7 @@ export class ApiError extends Error {
     this.semCorpo = semCorpo;
     this.erros = erros;
     this.motivo = motivo;
+    this.problemas = problemas;
   }
 }
 
@@ -135,6 +150,15 @@ export interface ListKnowledgeGapsParams {
 export interface ListFaqSuggestionsParams {
   status?: FaqSuggestionStatus;
   kind?: FaqSuggestionKind;
+  take?: number;
+  skip?: number;
+}
+
+export interface ListExecutionsParams {
+  connectionId?: string;
+  key?: string;
+  status?: IntegrationExecutionStatus;
+  isTest?: boolean;
   take?: number;
   skip?: number;
 }
@@ -268,7 +292,8 @@ export function createApi(opcoes: ApiOptions = {}) {
     const erros = Array.isArray(problema?.errors)
       ? problema.errors.filter((e): e is TemplateParameterError => !!e && typeof e.key === 'string' && typeof e.message === 'string')
       : [];
-    return new ApiError(status, titulo, detalhe, typeof problema?.code === 'string' ? problema.code : null, problema === null, erros, typeof problema?.reason === 'string' ? problema.reason : null);
+    const problemas = Array.isArray(problema?.problems) ? problema.problems.filter((p): p is string => typeof p === 'string') : [];
+    return new ApiError(status, titulo, detalhe, typeof problema?.code === 'string' ? problema.code : null, problema === null, erros, typeof problema?.reason === 'string' ? problema.reason : null, problemas);
   }
 
   /**
@@ -295,6 +320,8 @@ export function createApi(opcoes: ApiOptions = {}) {
 
   const rotaItem = (itemId: string) => `/contact-center/items/${encodeURIComponent(itemId)}`;
   const rotaLacuna = (lacunaId: string) => `/agents/knowledge-gaps/${encodeURIComponent(lacunaId)}`;
+  const rotaConexao = (id: string) => `/capabilities/connections/${encodeURIComponent(id)}`;
+  const rotaOperacao = (id: string) => `/capabilities/definitions/${encodeURIComponent(id)}`;
 
   /** Uma versão da definição que pode não existir: o 404 do servidor ("não há rascunho" ou "não há publicada") vira `null`; qualquer outro erro continua erro. */
   async function versaoOuNula(caminho: string): Promise<AgentDefinition | null> {
@@ -412,6 +439,31 @@ export function createApi(opcoes: ApiOptions = {}) {
     editarSugestaoDaIa: (id: string, edicao: FaqSuggestionEdit) => requisitar<FaqSuggestion>('PUT', `/agents/faq-suggestions/${encodeURIComponent(id)}`, { corpo: edicao }),
     aceitarSugestaoDaIa: (id: string) => requisitar<FaqSuggestion>('POST', `/agents/faq-suggestions/${encodeURIComponent(id)}/approve`),
     rejeitarSugestaoDaIa: (id: string) => requisitar<FaqSuggestion>('POST', `/agents/faq-suggestions/${encodeURIComponent(id)}/reject`),
+
+    // ---- Motor de Integração Empresarial (ADR 0035). Tenant e usuário vêm da sessão, nunca de parâmetro. O segredo de uma conexão só ENTRA (definirSegredoDaConexao) e nunca volta por nenhuma resposta.
+    listarConexoes: () => requisitar<IntegrationConnection[]>('GET', '/capabilities/connections'),
+    criarConexao: (pedido: IntegrationConnectionRequest) => requisitar<IntegrationConnection>('POST', '/capabilities/connections', { corpo: pedido }),
+    atualizarConexao: (id: string, pedido: IntegrationConnectionUpdate) => requisitar<IntegrationConnection>('PUT', rotaConexao(id), { corpo: pedido }),
+    definirSegredoDaConexao: (id: string, valores: Record<string, string>, revisaoEsperada: number) =>
+      requisitar<IntegrationConnection>('PUT', `${rotaConexao(id)}/secret`, { corpo: { values: valores, expectedRevision: revisaoEsperada } }),
+    habilitarConexao: (id: string) => requisitar<IntegrationConnection>('POST', `${rotaConexao(id)}/enable`),
+    desabilitarConexao: (id: string) => requisitar<IntegrationConnection>('POST', `${rotaConexao(id)}/disable`),
+    testarConexao: (id: string) => requisitar<IntegrationConnectionTest>('POST', `${rotaConexao(id)}/test`),
+    listarOperacoes: (conexaoId?: string) => requisitar<IntegrationDefinition[]>('GET', '/capabilities/definitions', { consulta: { connectionId: conexaoId } }),
+    versoesDaOperacao: (chave: string) => requisitar<IntegrationDefinition[]>('GET', `/capabilities/definitions/by-key/${encodeURIComponent(chave)}/versions`),
+    salvarRascunhoDaOperacao: (pedido: IntegrationDefinitionRequest) => requisitar<IntegrationDefinition>('POST', '/capabilities/definitions', { corpo: pedido }),
+    publicarOperacao: (id: string) => requisitar<IntegrationDefinition>('POST', `${rotaOperacao(id)}/publish`),
+    aposentarOperacao: (id: string) => requisitar<IntegrationDefinition>('POST', `${rotaOperacao(id)}/retire`),
+    ligarOperacao: (id: string) => requisitar<IntegrationDefinition>('POST', `${rotaOperacao(id)}/enable`),
+    desligarOperacao: (id: string) => requisitar<IntegrationDefinition>('POST', `${rotaOperacao(id)}/disable`),
+    testarOperacao: (id: string, parametros: Record<string, unknown>) => requisitar<IntegrationResult>('POST', `${rotaOperacao(id)}/test`, { corpo: { parameters: parametros } }),
+    validarParametrosDaOperacao: (id: string, parametros: Record<string, unknown>) =>
+      requisitar<{ valid: boolean; problems: IntegrationParameterProblem[] }>('POST', `${rotaOperacao(id)}/validate`, { corpo: { parameters: parametros } }),
+    listarExecucoes: (p: ListExecutionsParams = {}) =>
+      requisitar<IntegrationExecutionPage>('GET', '/capabilities/executions', { consulta: { connectionId: p.connectionId, key: p.key, status: p.status, isTest: p.isTest, take: p.take, skip: p.skip } }),
+    resumoDasExecucoes: (dias = 7) => requisitar<IntegrationConnectionStats[]>('GET', '/capabilities/executions/stats', { consulta: { days: dias } }),
+    confirmarExecucao: (id: string) => requisitar<IntegrationResult>('POST', `/capabilities/executions/${encodeURIComponent(id)}/confirm`),
+    cancelarExecucao: (id: string) => requisitar<IntegrationResult>('POST', `/capabilities/executions/${encodeURIComponent(id)}/cancel`),
   };
 }
 

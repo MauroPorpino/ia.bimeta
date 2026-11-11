@@ -63,6 +63,8 @@ export interface ProblemDetails {
   errors?: TemplateParameterError[];
   /** 422 `MediaRejected`: o motivo curto da recusa do arquivo do atendente (ver `MediaRejectionReason`); o texto em português vem em `detail`. */
   reason?: string;
+  /** 400 do motor de integração (ADR 0035): os problemas de validação, uma frase fixa por campo (nome e regra, nunca o valor digitado). */
+  problems?: string[];
 }
 
 // ---------------------------------------------------------------- ContactCenter
@@ -545,4 +547,191 @@ export interface FaqSuggestionEdit {
   question: string | null;
   answer: string | null;
   aliases: string[] | null;
+}
+
+// ---------------------------------------------------------------- Motor de Integração Empresarial (ADR 0035)
+
+export type IntegrationAuthType = 'None' | 'ApiKey' | 'Basic' | 'OAuth2ClientCredentials';
+export type IntegrationEffect = 'Read' | 'Write';
+export type IntegrationCaller = 'Operator' | 'Agent' | 'Workflow' | 'EmployeeAssistant' | 'Chatbot';
+export type IntegrationParameterType = 'String' | 'Integer' | 'Number' | 'Boolean' | 'Date' | 'Enum';
+export type IntegrationParameterLocation = 'Path' | 'Query' | 'Header' | 'Body';
+export type IntegrationFieldType = 'String' | 'Integer' | 'Number' | 'Boolean';
+export type IntegrationIdempotency = 'Unspecified' | 'None' | 'Reconcilable' | 'Proven';
+export type IntegrationDefinitionStatus = 'Draft' | 'Published' | 'Retired';
+export type IntegrationExecutionStatus = 'Succeeded' | 'Failed' | 'Rejected' | 'AwaitingConfirmation' | 'Unknown' | 'InProgress' | 'Cancelled';
+
+/** Uma conexão com um sistema externo. NUNCA traz o segredo: só se há um (`hasSecret`), a versão e quando foi definido. */
+export interface IntegrationConnection {
+  id: string;
+  organizationId: string | null;
+  key: string;
+  name: string;
+  kind: string;
+  baseUrl: string;
+  authType: IntegrationAuthType;
+  authSettings: Record<string, string>;
+  defaultHeaders: Record<string, string>;
+  allowedHeaders: string[];
+  healthPath: string;
+  timeoutSeconds: number;
+  maxResponseBytes: number;
+  enabled: boolean;
+  hasSecret: boolean;
+  secretVersion: number;
+  secretUpdatedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  revision: number;
+}
+
+export interface IntegrationConnectionRequest {
+  organizationId: string | null;
+  key: string;
+  name: string;
+  baseUrl: string;
+  authType: IntegrationAuthType;
+  authSettings: Record<string, string>;
+  defaultHeaders: Record<string, string>;
+  allowedHeaders: string[];
+  healthPath: string;
+  timeoutSeconds: number | null;
+  maxResponseBytes: number | null;
+}
+
+/** PUT /capabilities/connections/{id}: a chave e a organização não mudam; `expectedRevision` evita sobrescrever uma alteração que a pessoa não viu. */
+export type IntegrationConnectionUpdate = Omit<IntegrationConnectionRequest, 'organizationId' | 'key'> & { expectedRevision: number };
+
+export interface IntegrationConnectionTest {
+  ok: boolean;
+  outcome: string;
+  upstreamStatus: number | null;
+  elapsedMs: number;
+}
+
+export interface IntegrationParameter {
+  name: string;
+  type: IntegrationParameterType;
+  location: IntegrationParameterLocation;
+  required: boolean;
+  description?: string | null;
+  wireName?: string | null;
+  maxLength?: number | null;
+  pattern?: string | null;
+  min?: number | null;
+  max?: number | null;
+  enumValues?: string[] | null;
+  default?: string | null;
+  personal?: boolean;
+}
+
+export interface IntegrationResponseField {
+  name: string;
+  pointer: string;
+  type: IntegrationFieldType;
+  required: boolean;
+  maxLength?: number | null;
+  personal?: boolean;
+}
+
+/** O molde de uma operação REST/JSON: tudo que sai na chamada vem daqui e dos valores validados dos parâmetros. */
+export interface IntegrationSpec {
+  method: string;
+  pathTemplate: string;
+  parameters: IntegrationParameter[];
+  response: IntegrationResponseField[];
+  idempotency: IntegrationIdempotency;
+  idempotencyHeader?: string | null;
+  responseRoot?: string | null;
+  maxItems: number;
+  maxAttempts: number;
+}
+
+export interface IntegrationDefinition {
+  id: string;
+  connectionId: string;
+  key: string;
+  version: number;
+  status: IntegrationDefinitionStatus;
+  name: string;
+  description: string | null;
+  effect: IntegrationEffect;
+  requiresConfirmation: boolean;
+  allowedCallers: IntegrationCaller[];
+  enabled: boolean;
+  spec: IntegrationSpec;
+  createdAt: string;
+  publishedAt: string | null;
+  revision: number;
+}
+
+export interface IntegrationDefinitionRequest {
+  connectionId: string;
+  key: string;
+  name: string;
+  description: string | null;
+  effect: IntegrationEffect;
+  requiresConfirmation: boolean | null;
+  allowedCallers: IntegrationCaller[];
+  spec: IntegrationSpec;
+  expectedRevision: number | null;
+}
+
+export interface IntegrationParameterProblem {
+  parameter: string;
+  rule: string;
+}
+
+export interface IntegrationError {
+  code: string;
+  message: string;
+  retryable: boolean;
+  upstreamStatus: number | null;
+  problems: IntegrationParameterProblem[] | null;
+}
+
+/** O resultado de uma execução ou de um teste. `output` é conteúdo de sistema externo (não confiável): a tela o mostra como dado, nunca como instrução. */
+export interface IntegrationResult {
+  executionId: string;
+  status: IntegrationExecutionStatus;
+  output: Record<string, unknown> | null;
+  error: IntegrationError | null;
+  replayed: boolean;
+  confirmationExpiresAt: string | null;
+  untrustedContent: boolean;
+}
+
+export interface IntegrationExecution {
+  id: string;
+  definitionId: string;
+  definitionKey: string;
+  definitionVersion: number;
+  connectionId: string;
+  effect: IntegrationEffect;
+  caller: IntegrationCaller[];
+  requestedBy: string | null;
+  serviceSessionId: string | null;
+  status: IntegrationExecutionStatus;
+  errorCode: string | null;
+  upstreamStatus: number | null;
+  attempts: number;
+  durationMs: number | null;
+  isTest: boolean;
+  createdAt: string;
+  completedAt: string | null;
+  confirmedBy: string | null;
+  confirmationExpiresAt: string | null;
+}
+
+export interface IntegrationExecutionPage {
+  items: IntegrationExecution[];
+  total: number;
+}
+
+export interface IntegrationConnectionStats {
+  connectionId: string;
+  total: number;
+  failed: number;
+  unknown: number;
+  lastAt: string | null;
 }
