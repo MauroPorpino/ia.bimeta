@@ -115,6 +115,12 @@ public sealed class RestJsonConnector : ICapabilityConnector
             switch (parametro.Location)
             {
                 case CapabilityParameterLocation.Path:
+                    // Defesa em profundidade (o validador já recusa): um valor de caminho nunca leva separador, escape ou segmento de travessia.
+                    if (texto is "." or ".." || texto.IndexOfAny(['/', (char)92, '?', '#', '%']) >= 0)
+                    {
+                        throw new InvalidOperationException("path-value");
+                    }
+
                     caminho = caminho.Replace("{" + parametro.Name + "}", Uri.EscapeDataString(texto), StringComparison.Ordinal);
                     break;
                 case CapabilityParameterLocation.Query:
