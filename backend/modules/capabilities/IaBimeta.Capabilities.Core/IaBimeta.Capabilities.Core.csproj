@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <!-- Os testes de unidade exercitam o validador, o mapeador, a politica de destino e o motor direto nos componentes. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="IaBimeta.Capabilities.Tests" />
+    <InternalsVisibleTo Include="IaBimeta.IntegrationTests" />
+    <InternalsVisibleTo Include="IaBimeta.Capabilities.Infrastructure" />
+    <InternalsVisibleTo Include="IaBimeta.Capabilities.Presentation" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\building-blocks\IaBimeta.SharedKernel\IaBimeta.SharedKernel.csproj" />
+    <ProjectReference Include="..\IaBimeta.Capabilities.Contracts\IaBimeta.Capabilities.Contracts.csproj" />
+    <ProjectReference Include="..\..\audit\IaBimeta.Audit.Contracts\IaBimeta.Audit.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -54,4 +54,19 @@ public enum Permission
 
     /// <summary>Criar filas, pausá-las ou retomá-las e gerir os atendentes de cada fila de uma organização.</summary>
     QueueManage = 15,
+
+    /// <summary>Ler as conexões, as operações e o histórico de execuções do motor de integração de uma organização. Nunca dá acesso ao valor de um segredo.</summary>
+    IntegrationRead = 16,
+
+    /// <summary>Cadastrar e configurar conexões, definir segredos, criar e publicar operações e habilitar ou desabilitar integrações (ADR 0035).</summary>
+    IntegrationManage = 17,
+
+    /// <summary>Testar uma conexão e executar, como teste, operações de LEITURA. Nunca executa escrita.</summary>
+    IntegrationTest = 18,
+
+    /// <summary>Executar operações de LEITURA de integração em nome de uma pessoa.</summary>
+    IntegrationExecute = 19,
+
+    /// <summary>Executar e confirmar operações de integração que ALTERAM dados no sistema externo. Distinta de <see cref="IntegrationExecute"/> de propósito (autorização explícita de escrita).</summary>
+    IntegrationExecuteWrite = 20,
 }

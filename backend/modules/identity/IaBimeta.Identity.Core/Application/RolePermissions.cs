@@ -27,6 +27,7 @@ public static class RolePermissions
         Permission.ConversationManage,
         Permission.ChannelRead,
         Permission.QueueRead,
+        Permission.IntegrationRead,
     };
 
     // Quem gere a organização gere os canais dela: o cadastro dos números e das unidades autorizadas muda quem pode atender.
@@ -44,6 +45,11 @@ public static class RolePermissions
         Permission.ChannelManage,
         Permission.QueueRead,
         Permission.QueueManage,
+        Permission.IntegrationRead,
+        Permission.IntegrationManage,
+        Permission.IntegrationTest,
+        Permission.IntegrationExecute,
+        Permission.IntegrationExecuteWrite,
     };
 
     private static readonly Permission[] TenantAdminExtraPermissions =
