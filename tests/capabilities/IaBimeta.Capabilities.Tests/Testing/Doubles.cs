@@ -94,8 +94,11 @@ internal sealed class InMemoryConnections : IConnectionStore
 
     public Task SaveAsync(CancellationToken cancellationToken)
     {
-        if (Rows.GroupBy(c => (c.TenantId, c.Key)).Any(g => g.Count() > 1))
+        var duplicadas = Rows.GroupBy(c => (c.TenantId, c.Key)).Where(g => g.Count() > 1).SelectMany(g => g.Skip(1)).ToList();
+        if (duplicadas.Count > 0)
         {
+            // Como o banco: a gravação que viola o índice único não persiste.
+            duplicadas.ForEach(d => Rows.Remove(d));
             throw new CapabilitiesConflictException("key-in-use", "Já existe uma conexão com esta chave.");
         }
 
@@ -159,12 +162,13 @@ internal sealed class InMemoryExecutions : IExecutionStore
     private readonly IRequestContextAccessor _context;
     private readonly object _lock = new();
 
-    public InMemoryExecutions(IRequestContextAccessor context)
+    public InMemoryExecutions(IRequestContextAccessor context, List<CapabilityExecution>? rows = null)
     {
         _context = context;
+        Rows = rows ?? [];
     }
 
-    public List<CapabilityExecution> Rows { get; } = [];
+    public List<CapabilityExecution> Rows { get; }
 
     private IEnumerable<CapabilityExecution> Mine => Rows.Where(e => e.TenantId == _context.GetRequired().TenantId);
 
@@ -218,7 +222,14 @@ internal sealed class ScriptedConnector : ICapabilityConnector
 
     public List<ConnectorCall> Calls { get; } = [];
 
-    public Func<ConnectorCall, ConnectorResult> Script { get; set; } = _ => Ok("{}");
+    /// <summary>Por padrão responde com sucesso e um corpo que satisfaz o mapeamento da operação (um valor por campo declarado).</summary>
+    public Func<ConnectorCall, ConnectorResult> Script { get; set; } = call => Ok(Synthesize(call.Operation));
+
+    private static string Synthesize(CapabilityOperationSpec spec)
+    {
+        var campos = spec.Response.Select(f => $"\"{f.Pointer.TrimStart('/')}\":{(f.Type is CapabilityFieldType.Integer or CapabilityFieldType.Number ? "1" : f.Type == CapabilityFieldType.Boolean ? "true" : "\"x\"")}");
+        return "{" + string.Join(",", campos) + "}";
+    }
 
     public Func<ConnectorConnection, ConnectorResult> Probe { get; set; } = _ => Ok("{}");
 
