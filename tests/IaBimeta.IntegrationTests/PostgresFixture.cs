@@ -215,7 +215,10 @@ public sealed class PostgresFixture : IAsyncLifetime
 
             // O adaptador REAL da OpenAI (C4), com o servidor HTTP simulado no lugar da rede: o pedido, o uso, os erros e o tempo limite são os do adaptador de produção.
             colecao.AddSingleton<IAiProvider>(_ => new IaBimeta.Adapters.Ai.OpenAI.OpenAiProvider(new HttpClient(ServidorOpenAi) { Timeout = Timeout.InfiniteTimeSpan }, new IaBimeta.Adapters.Ai.OpenAI.OpenAiOptions()));
-            colecao.AddAgents(_ => ConnectionString, opcoes => opcoes.KnowledgeGapHashKey = ChaveDeLacunasDeTeste);
+            colecao.AddAgents(_ => ConnectionString, opcoes => { opcoes.KnowledgeGapHashKey = ChaveDeLacunasDeTeste; opcoes.SemanticAnswerEnabled = true; opcoes.LocalSuggestionsEnabled = true; });
+            colecao.AddSingleton<IaBimeta.Knowledge.Contracts.ILocalGenerationProvider>(IaLocal);
+            colecao.AddSingleton(BuscaSemantica);
+            colecao.AddScoped<IaBimeta.Knowledge.Contracts.IKnowledgeSearch, IaBimeta.IntegrationTests.Agents.BuscaSemanticaSimulada>();
         }
 
         return colecao.BuildServiceProvider(validateScopes: true);
@@ -275,6 +278,12 @@ public sealed class PostgresFixture : IAsyncLifetime
 
     /// <summary>O provedor de IA dos testes dos Agents: o dublê com latência e falha injetáveis, que registra cada pedido (o contador prova, por exemplo, que um handler nunca chama o modelo).</summary>
     public FakeAiProvider ProvedorDeIA { get; } = new(ProvedorDeIADeTeste);
+
+    /// <summary>A busca semantica simulada (sem pgvector nem Ollama): um roteiro por tenant. So e consultada por tenant com o modo semantico ligado.</summary>
+    public IaBimeta.IntegrationTests.Agents.RegistroDaBuscaSemantica BuscaSemantica { get; } = new();
+
+    /// <summary>A IA local simulada (sem Ollama), unica para a fixture: cada teste a roteiriza e a limpa.</summary>
+    public IaBimeta.IntegrationTests.Agents.IaLocalSimulada IaLocal { get; } = new();
 
     /// <summary>O "servidor da OpenAI" (HTTP simulado) que o adaptador real da composição dos Agents chama: responde pelo roteiro do tenant cuja credencial chegou.</summary>
     internal IaBimeta.IntegrationTests.Agents.ServidorOpenAiSimulado ServidorOpenAi { get; } = new();
