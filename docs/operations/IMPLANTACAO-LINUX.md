@@ -182,3 +182,4 @@ A conexão do número de WhatsApp e o teste de prontidão usam os scripts PowerS
 - A preservação do IP de origem do cliente depende do roteador (item 7 da seção 5).
 - Desempenho, memória real da pilha e tempo de restauração com dados de verdade não foram medidos.
 - **Nenhuma chamada real à Meta ou à OpenAI foi feita.**
+- **Conhecimento híbrido (ADR 0034):** o banco agora usa a imagem `pgvector/pgvector:pg17` (`DB_IMAGE`), o serviço `ollama` é opcional (perfil `ia-local`) e tudo é desligado por padrão. **Banco já existente** (volume criado com `postgres:17`): crie a extensão antes de ligar o modo (`docker compose exec db psql -U postgres -d iabimeta -c "CREATE EXTENSION IF NOT EXISTS vector"`) e rode `migrate` depois de um backup. **Restauração** exige a mesma imagem com pgvector. Nada disso foi executado com Docker nem com Ollama/pgvector reais; veja `CONHECIMENTO-HIBRIDO.md` (validações pendentes e plano de homologação).
