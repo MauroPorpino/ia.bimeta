@@ -57,3 +57,10 @@ Construtor visual de chatbot; adaptadores LabNet e BImeta; SOAP, GraphQL e filas
 - Um novo ERP é **configuração** (conexão e operações), não código, enquanto falar REST/JSON.
 - Custo: a administração de operações é técnica (método, caminho, parâmetros); um assistente de criação e modelos prontos por sistema ficam para depois.
 - Riscos conhecidos: a liberação de CIDR privado é decisão do operador e precisa de revisão; o cache de token OAuth é por processo; a idempotência de ponta a ponta depende de o sistema externo honrar a chave (por isso `Proven` é uma declaração do administrador, auditada).
+
+## Registro da implementação (11/11/2026)
+
+- Entregue em cinco pacotes: contratos e núcleo, persistência e conector, governança (embutida nos serviços e provada nos testes), administração em React e testes e documentação (`docs/operations/MOTOR-DE-INTEGRACAO.md`).
+- **Portão de função:** um usuário sem nenhuma permissão de integração recebe 403 antes de qualquer consulta (descoberto ao escrever o teste de rotas: um 404 ou uma lista vazia permitiria sondar chaves e ids).
+- **Índice único da versão publicada:** o teste de invariantes do banco mostrou que o EF fundia os dois índices parciais sobre as mesmas colunas e a regra "uma versão publicada por chave" só valia na aplicação; a migration `CapabilitiesPublishedUniqueIndex` a restabelece no banco (o índice do rascunho passou a incluir o status nas colunas).
+- **Pendente de decisão (fora do escopo desta etapa):** a aresta do Agents (e do Workflows e do assistente interno) para `Capabilities` exige ADR e alteração da matriz; nenhum código do Agents foi tocado.
