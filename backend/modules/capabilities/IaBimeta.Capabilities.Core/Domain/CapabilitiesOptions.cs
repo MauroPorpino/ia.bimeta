@@ -53,6 +53,11 @@ public sealed class CapabilitiesOptions
 
     public int TestsPerConnectionPerMinute { get; set; } = 10;
 
+    /// <summary>A espera base entre tentativas (dobra a cada tentativa, até o teto). Só vale para leitura ou escrita com idempotência comprovada.</summary>
+    public int RetryBaseDelayMs { get; set; } = 200;
+
+    public int RetryMaxDelayMs { get; set; } = 2000;
+
     public void Validate()
     {
         static void Positive(string name, int value)
@@ -76,6 +81,11 @@ public sealed class CapabilitiesOptions
         Positive(nameof(PerConnectionMaxInFlight), PerConnectionMaxInFlight);
         Positive(nameof(WritesPerTenantPerMinute), WritesPerTenantPerMinute);
         Positive(nameof(TestsPerConnectionPerMinute), TestsPerConnectionPerMinute);
+
+        if (RetryBaseDelayMs < 0 || RetryMaxDelayMs < RetryBaseDelayMs)
+        {
+            throw new InvalidOperationException("Capabilities:Options: a espera entre tentativas é inválida.");
+        }
 
         if (DefaultTimeoutSeconds > MaxTimeoutSeconds || DefaultMaxResponseBytes > MaxResponseBytesCeiling)
         {

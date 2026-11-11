@@ -15,6 +15,8 @@ using IaBimeta.Api.RequestContexts;
 using IaBimeta.Api.Retention;
 using IaBimeta.Audit.Infrastructure;
 using IaBimeta.Audit.Presentation;
+using IaBimeta.Capabilities.Infrastructure;
+using IaBimeta.Capabilities.Presentation;
 using IaBimeta.Channels.Infrastructure;
 using IaBimeta.Channels.Presentation;
 using IaBimeta.ContactCenter.Application;
@@ -140,6 +142,13 @@ public static class ApiHost
             provider => ConnectionStringOf(provider, "Knowledge"),
             semantico => builder.Configuration.GetSection("Knowledge:Semantic").Bind(semantico));
 
+        // O Motor de Integração Empresarial (ADR 0035, módulo Capabilities): conexões, operações versionadas e execução governada. As opções (limites, política de destino) vêm de Capabilities:Options e as CHAVES MESTRAS
+        // dos segredos (Capabilities:Secrets: ActiveKeyId e Keys) vêm do ambiente, nunca de arquivo versionado. Nenhum sistema externo é chamado sem uma conexão habilitada por um administrador.
+        builder.Services.AddCapabilities(
+            provider => ConnectionStringOf(provider, "Capabilities"),
+            opcoes => builder.Configuration.GetSection("Capabilities:Options").Bind(opcoes),
+            segredos => builder.Configuration.GetSection("Capabilities:Secrets").Bind(segredos));
+
         // Enums saem e entram como texto (por exemplo, "HumanAssisted"), não como número.
         builder.Services.ConfigureHttpJsonOptions(opcoes => opcoes.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
@@ -226,6 +235,9 @@ public static class ApiHost
 
         // A API administrativa do agente do tenant (ADR 0030): revisão das lacunas do FAQ, rascunho e publicação da definição.
         app.MapAgentsEndpoints();
+
+        // A API do Motor de Integração Empresarial (ADR 0035): conexões, operações, execuções e histórico.
+        app.MapCapabilitiesEndpoints();
 
         // O Receiver do webhook do provedor: anônimo, autenticado pela assinatura do corpo (ADR 0011, seção C).
         app.MapChannelWebhookEndpoints();

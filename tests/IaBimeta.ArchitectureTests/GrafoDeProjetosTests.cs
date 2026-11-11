@@ -112,12 +112,13 @@ public class GrafoDeProjetosTests
         // eventos), o ContactCenter (SÓ o RequestHandoff) e o Audit (a publicação da definição do agente); a matriz também permite Identity, Tenancy, Knowledge, Capabilities e Workflows, que ele
         // não usa na 6a. Nenhuma aresta nova na matriz. O Channels passou a usar o Conversations (MVP, ADR 0011 e 0018): o processamento do Inbox chama a ingestão e o registro de status de entrega, e o Sender lê a
         // mensagem de saída; (ADR 0034) o Agents passou a usar o Knowledge (índice semântico do conhecimento publicado, só pelos Contracts): aresta Agents -> Knowledge, que a matriz já permitia; o Knowledge não usa
-        // nenhum outro módulo (só o SharedKernel; o tenant vem do RequestContext). É a aresta Channels -> Conversations que a matriz já permitia, e só pelos Contracts. Continua sem aresta Conversations -> Channels e ContactCenter -> Channels.
+        // nenhum outro módulo (só o SharedKernel; o tenant vem do RequestContext). O Capabilities (ADR 0035, motor de integração) usa só o Audit (a trilha de configuração, teste, execução e confirmação); a matriz também permite Identity e Tenancy, que ele não precisa: o RequestContext chega pronto do host. É a aresta Channels -> Conversations que a matriz já permitia, e só pelos Contracts. Continua sem aresta Conversations -> Channels e ContactCenter -> Channels.
         Assert.Equal(
             new[]
             {
                 ("Agents", "AiGateway"), ("Agents", "Audit"), ("Agents", "ContactCenter"), ("Agents", "Conversations"), ("Agents", "Knowledge"),
                 ("AiGateway", "Audit"),
+                ("Capabilities", "Audit"),
                 ("Channels", "Audit"), ("Channels", "Conversations"), ("Channels", "Tenancy"),
                 ("ContactCenter", "Audit"), ("ContactCenter", "Conversations"), ("ContactCenter", "Identity"), ("ContactCenter", "Tenancy"),
                 ("Conversations", "Audit"), ("Conversations", "Tenancy"),

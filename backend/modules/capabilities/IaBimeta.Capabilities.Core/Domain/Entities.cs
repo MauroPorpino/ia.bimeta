@@ -442,6 +442,9 @@ public sealed class CapabilityExecution : ITenantOwned
         Status = CapabilityExecutionStatus.InProgress;
         ConfirmedBy = confirmedBy;
         ConfirmedAt = now;
+        // Os parâmetros já foram lidos: a cópia cifrada some AGORA (não sobra dado pessoal guardado enquanto a chamada corre).
+        PendingCiphertext = null;
+        PendingKeyId = null;
         Revision++;
     }
 

@@ -107,4 +107,8 @@ public sealed record ConnectorResult(
     JsonElement? Body,
     int Attempts,
     long ElapsedMs,
-    bool MayHaveExecuted);
+    bool MayHaveExecuted)
+{
+    /// <summary>A espera sugerida pelo destino (Retry-After), usada só para escolher o intervalo entre tentativas.</summary>
+    public TimeSpan? RetryAfter { get; init; }
+}

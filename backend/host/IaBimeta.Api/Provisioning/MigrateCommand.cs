@@ -2,6 +2,7 @@ using IaBimeta.Agents.Infrastructure;
 using IaBimeta.AiGateway.Infrastructure;
 using IaBimeta.Api.Operations;
 using IaBimeta.Audit.Infrastructure;
+using IaBimeta.Capabilities.Infrastructure;
 using IaBimeta.Channels.Infrastructure;
 using IaBimeta.ContactCenter.Infrastructure;
 using IaBimeta.Conversations.Infrastructure;
@@ -58,6 +59,7 @@ internal static class MigrateCommand
             ("ContactCenter", services.GetRequiredService<ContactCenterDbContext>()),
             ("AiGateway", services.GetRequiredService<AiGatewayDbContext>()),
             ("Agents", services.GetRequiredService<AgentsDbContext>()),
+            ("Capabilities", services.GetRequiredService<CapabilitiesDbContext>()),
         };
 
         // O Knowledge (ADR 0034) cria a extensão pgvector: só entra quando o modo semântico está ligado (Knowledge:Semantic:Enabled), para que um PostgreSQL sem pgvector continue migrando os demais módulos.

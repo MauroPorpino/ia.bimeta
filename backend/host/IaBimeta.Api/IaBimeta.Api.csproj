@@ -26,6 +26,9 @@
     <ProjectReference Include="..\..\modules\ai-gateway\IaBimeta.AiGateway.Contracts\IaBimeta.AiGateway.Contracts.csproj" />
     <ProjectReference Include="..\..\modules\ai-gateway\IaBimeta.AiGateway.Core\IaBimeta.AiGateway.Core.csproj" />
     <ProjectReference Include="..\..\modules\ai-gateway\IaBimeta.AiGateway.Infrastructure\IaBimeta.AiGateway.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\modules\capabilities\IaBimeta.Capabilities.Core\IaBimeta.Capabilities.Core.csproj" />
+    <ProjectReference Include="..\..\modules\capabilities\IaBimeta.Capabilities.Infrastructure\IaBimeta.Capabilities.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\modules\capabilities\IaBimeta.Capabilities.Presentation\IaBimeta.Capabilities.Presentation.csproj" />
     <ProjectReference Include="..\..\modules\audit\IaBimeta.Audit.Infrastructure\IaBimeta.Audit.Infrastructure.csproj" />
     <ProjectReference Include="..\..\modules\audit\IaBimeta.Audit.Presentation\IaBimeta.Audit.Presentation.csproj" />
     <ProjectReference Include="..\..\modules\channels\IaBimeta.Channels.Contracts\IaBimeta.Channels.Contracts.csproj" />
