@@ -241,6 +241,101 @@ namespace IaBimeta.Agents.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("IaBimeta.Agents.Domain.FaqSuggestion", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int?>("AppliedDraftVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("applied_draft_version");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<DateTimeOffset?>("DecidedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("decided_at");
+
+                    b.Property<Guid?>("DecidedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("decided_by");
+
+                    b.Property<string>("DedupeKey")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("dedupe_key");
+
+                    b.Property<int>("Edits")
+                        .HasColumnType("integer")
+                        .HasColumnName("edits");
+
+                    b.Property<Guid?>("GapId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("gap_id");
+
+                    b.Property<short>("Kind")
+                        .HasColumnType("smallint")
+                        .HasColumnName("kind");
+
+                    b.Property<string>("ModelId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("model_id");
+
+                    b.Property<string>("PayloadJson")
+                        .IsRequired()
+                        .HasMaxLength(8000)
+                        .HasColumnType("character varying(8000)")
+                        .HasColumnName("payload_json");
+
+                    b.Property<int>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("revision");
+
+                    b.Property<short>("Status")
+                        .HasColumnType("smallint")
+                        .HasColumnName("status");
+
+                    b.HasKey("TenantId", "Id");
+
+                    b.HasIndex("TenantId", "DedupeKey")
+                        .IsUnique()
+                        .HasDatabaseName("ux_faq_suggestions_pending_key")
+                        .HasFilter("status = 1");
+
+                    b.HasIndex("TenantId", "Status", "CreatedAt")
+                        .HasDatabaseName("ix_faq_suggestions_tenant_id_status_created_at");
+
+                    b.ToTable("faq_suggestions", "agents", t =>
+                        {
+                            t.HasCheckConstraint("ck_faq_suggestions_applied", "applied_draft_version IS NULL OR (status = 2 AND applied_draft_version >= 1)");
+
+                            t.HasCheckConstraint("ck_faq_suggestions_decided", "(status = 1) = (decided_at IS NULL)");
+
+                            t.HasCheckConstraint("ck_faq_suggestions_kind", "kind IN (1, 2, 3, 4)");
+
+                            t.HasCheckConstraint("ck_faq_suggestions_payload", "octet_length(payload_json) <= 8000");
+
+                            t.HasCheckConstraint("ck_faq_suggestions_revision", "revision >= 1 AND edits >= 0");
+
+                            t.HasCheckConstraint("ck_faq_suggestions_status", "status IN (1, 2, 3)");
+                        });
+                });
+
             modelBuilder.Entity("IaBimeta.Agents.Domain.KnowledgeGap", b =>
                 {
                     b.Property<Guid>("TenantId")

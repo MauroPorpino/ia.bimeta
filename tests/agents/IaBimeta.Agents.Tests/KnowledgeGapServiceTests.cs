@@ -18,7 +18,7 @@ public sealed class KnowledgeGapServiceTests
 
     // Dublês
 
-    private sealed class FakeGapStore : IKnowledgeGapStore
+    internal sealed class FakeGapStore : IKnowledgeGapStore
     {
         private readonly List<(KnowledgeGap Gap, List<KnowledgeGapOccurrence> Occurrences)> _rows = new();
 
@@ -75,7 +75,7 @@ public sealed class KnowledgeGapServiceTests
     }
 
     /// <summary>O histórico do Conversations como o real o entrega: por sessão, com os filtros de mensagem e de sequência, na ordem pedida, sempre dentro do que o usuário pode ler.</summary>
-    private sealed class FakeConversations : IConversationQueries
+    internal sealed class FakeConversations : IConversationQueries
     {
         private readonly List<MessageView> _messages = new();
 

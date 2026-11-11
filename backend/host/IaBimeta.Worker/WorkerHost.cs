@@ -156,6 +156,7 @@ public static class WorkerHost
         builder.Services.AddOutboxRetention<ChannelsDbContext>("channels");
         builder.Services.AddInboxRetention<ChannelsDbContext>("channels");
         builder.Services.AddInboxRetention<AgentsDbContext>("agents");
+        builder.Services.AddAgentsRetention();
         builder.Services.AddInboxRetention<ContactCenterDbContext>("contact_center");
         builder.Services.AddHostedService<RetentionSchedulerService>();
         builder.Services.AddHostedService<ContactCenterReconciliationService>();

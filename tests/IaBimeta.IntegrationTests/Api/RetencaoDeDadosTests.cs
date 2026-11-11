@@ -392,7 +392,7 @@ public sealed class RetencaoDeDadosTests(PostgresFixture banco)
 
         // Toda tabela classificada existe de fato (sem entrada esquecida de tabela que já saiu).
         var existentes = linhas.Select(l => l.Table).ToHashSet();
-        Assert.All(RetentionInventory.Tables.Keys, tabela => Assert.Contains(tabela, existentes));
+        Assert.All(RetentionInventory.Tables.Keys.Where(t => !RetentionInventory.OptionalTables.Contains(t)), tabela => Assert.Contains(tabela, existentes));
     }
 
     [Fact]

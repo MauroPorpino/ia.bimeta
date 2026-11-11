@@ -54,6 +54,12 @@ public sealed class AgentsOptions
     public bool SemanticAnswerEnabled { get; set; }
 
     /// <summary>
+    /// Liga as sugestões da IA LOCAL para o FAQ (ADR 0034): classificar dúvidas, agrupar perguntas parecidas, sugerir aliases e entradas novas e apontar duplicatas e contradições. Desligado por padrão. A IA só propõe
+    /// (a revisão humana decide e nada é publicado por ela) e só roda quando o administrador pede.
+    /// </summary>
+    public bool LocalSuggestionsEnabled { get; set; }
+
+    /// <summary>
     /// Liga o REGISTRO DE LACUNAS do FAQ (ADR 0030): a pergunta de cliente que não teve resposta direta e vale uma revisão vira uma ocorrência (só referências e um hash, nunca o texto). Independe da resposta direta:
     /// um tenant que ainda não ligou nenhum <c>AutoReply</c> também descobre o que os clientes perguntam. Desligado, nada é gravado. Sem <see cref="KnowledgeGapHashKey"/> o registro também não roda.
     /// </summary>

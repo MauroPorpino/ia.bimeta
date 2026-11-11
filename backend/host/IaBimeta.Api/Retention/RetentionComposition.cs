@@ -44,6 +44,7 @@ internal static class RetentionComposition
         services.AddOutboxRetention<ChannelsDbContext>("channels");
         services.AddInboxRetention<ChannelsDbContext>("channels");
         services.AddInboxRetention<AgentsDbContext>("agents");
+        services.AddAgentsRetention();
         services.AddInboxRetention<ContactCenterDbContext>("contact_center");
         return services;
     }

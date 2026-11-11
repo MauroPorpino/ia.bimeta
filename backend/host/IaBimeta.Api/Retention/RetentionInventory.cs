@@ -31,6 +31,9 @@ internal static class RetentionInventory
     /// </summary>
     public static readonly IReadOnlySet<string> ObjectStoreTasks = new HashSet<string>(StringComparer.Ordinal) { "conversations.outbound-attachment-objects", "conversations.inbound-attachment-objects" };
 
+    /// <summary>Tabelas classificadas que só existem em certas configurações (o índice semântico exige o pgvector e o modo ligado): a classificação existe sempre, a tabela nem sempre.</summary>
+    public static readonly IReadOnlySet<string> OptionalTables = new HashSet<string>(StringComparer.Ordinal) { "knowledge.semantic_texts", "knowledge.__ef_migrations_history" };
+
     public static readonly IReadOnlyDictionary<string, (DataClass Class, string Note)> Tables = new Dictionary<string, (DataClass, string)>(StringComparer.Ordinal)
     {
         // Técnicas (expurgadas por política)
@@ -41,6 +44,8 @@ internal static class RetentionInventory
         ["channels.outbox_message"] = (DataClass.Technical, "o payload do evento do canal carrega o texto do cliente; mortos ficam até reenfileirar ou descartar com autorização"),
         ["channels.inbox_message"] = (DataClass.Technical, "marcas de idempotência (só identificadores)"),
         ["agents.inbox_message"] = (DataClass.Technical, "marcas de idempotência (só identificadores)"),
+        ["agents.semantic_decisions"] = (DataClass.Technical, "decisões da resposta por similaridade (ADR 0034): só números e códigos por turno (similaridade, desfecho, latência), nenhum texto de cliente"),
+        ["agents.faq_suggestions"] = (DataClass.Technical, "sugestões da IA local para o FAQ (ADR 0034), conteúdo derivado de conversas e já redigido de dados pessoais; só as JÁ DECIDIDAS expiram (90 dias); as pendentes esperam a revisão"),
         ["contact_center.inbox_message"] = (DataClass.Technical, "marcas de idempotência (só identificadores)"),
 
         // Pessoais ou conteúdo de cliente (somente relatório)
@@ -87,12 +92,15 @@ internal static class RetentionInventory
         ["contact_center.queue_schedule_windows"] = (DataClass.Configuration, "horários das filas"),
         ["contact_center.queue_closures"] = (DataClass.Configuration, "fechamentos das filas"),
         ["agents.agent_definition_versions"] = (DataClass.Configuration, "versões da definição do agente"),
+        ["agents.semantic_answer_settings"] = (DataClass.Configuration, "modo e limiares da resposta por similaridade de cada empresa (ADR 0034)"),
+        ["knowledge.semantic_texts"] = (DataClass.Configuration, "índice vetorial do conhecimento APROVADO (ADR 0034): texto de pergunta e alias publicados e seus vetores, nunca texto de cliente; derivado e reconstruível pela próxima publicação; só existe com o modo semântico ligado"),
         ["ai_gateway.ai_credentials"] = (DataClass.Configuration, "chaves de IA do tenant, cifradas"),
         ["ai_gateway.ai_tenant_settings"] = (DataClass.Configuration, "configuração de IA do tenant"),
         ["ai_gateway.usage_windows"] = (DataClass.Configuration, "janelas de consumo (limites)"),
 
         // Controle do banco
         ["agents.__ef_migrations_history"] = (DataClass.Infrastructure, "histórico de migrations"),
+        ["knowledge.__ef_migrations_history"] = (DataClass.Infrastructure, "histórico de migrations (só existe com o modo semântico ligado)"),
         ["ai_gateway.__ef_migrations_history"] = (DataClass.Infrastructure, "histórico de migrations"),
         ["audit.__ef_migrations_history"] = (DataClass.Infrastructure, "histórico de migrations"),
         ["channels.__ef_migrations_history"] = (DataClass.Infrastructure, "histórico de migrations"),

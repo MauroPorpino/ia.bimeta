@@ -53,6 +53,10 @@ public static class AgentsInfrastructureExtensions
         services.AddScoped<ISemanticMetricsStore, SemanticMetricsStore>();
         services.AddScoped<SemanticMetricsService>();
 
+        // As sugestoes da IA local para o FAQ (ADR 0034): a IA so propoe; esta e a revisao humana. Desligado por padrao (Agents:Options:LocalSuggestionsEnabled).
+        services.AddScoped<IFaqSuggestionStore, FaqSuggestionStore>();
+        services.AddScoped<FaqSuggestionService>();
+
         // Consumo durável do estado de atendimento do Conversations: o inbox do módulo e os handlers (que só gravam o AiTurn).
         services.AddInboxGate<AgentsDbContext>();
         services.AddEventHandler<InboundMessageRegisteredHandler>();

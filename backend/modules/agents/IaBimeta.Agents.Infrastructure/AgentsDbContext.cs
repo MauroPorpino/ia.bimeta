@@ -41,6 +41,8 @@ public sealed class AgentsDbContext : DbContext
 
     public DbSet<SemanticDecision> SemanticDecisions => Set<SemanticDecision>();
 
+    public DbSet<FaqSuggestion> FaqSuggestions => Set<FaqSuggestion>();
+
     // O EF reavalia esta propriedade a cada execução de consulta (membro do DbContext no filtro global).
     private TenantId TenantAtual => _contexto.GetRequired().TenantId;
 
@@ -58,6 +60,7 @@ public sealed class AgentsDbContext : DbContext
         modelBuilder.ApplyConfiguration(new KnowledgeGapOccurrenceConfiguration());
         modelBuilder.ApplyConfiguration(new SemanticAnswerSettingsConfiguration());
         modelBuilder.ApplyConfiguration(new SemanticDecisionConfiguration());
+        modelBuilder.ApplyConfiguration(new FaqSuggestionConfiguration());
 
         // Inbox do consumidor (BOUNDARIES.md §12.1): a idempotência por EventId do que este módulo consome do Conversations.
         modelBuilder.ConfigureInbox();
@@ -68,6 +71,7 @@ public sealed class AgentsDbContext : DbContext
         modelBuilder.Entity<KnowledgeGapOccurrence>().HasQueryFilter(e => e.TenantId == TenantAtual);
         modelBuilder.Entity<SemanticAnswerSettings>().HasQueryFilter(e => e.TenantId == TenantAtual);
         modelBuilder.Entity<SemanticDecision>().HasQueryFilter(e => e.TenantId == TenantAtual);
+        modelBuilder.Entity<FaqSuggestion>().HasQueryFilter(e => e.TenantId == TenantAtual);
     }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)

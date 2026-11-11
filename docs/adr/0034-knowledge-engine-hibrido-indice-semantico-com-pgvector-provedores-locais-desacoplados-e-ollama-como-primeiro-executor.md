@@ -48,9 +48,20 @@ Ordem do turno: **FAQ determinística → busca semântica → AiGateway → ate
 - **Métricas por tenant** (`agents.semantic_decisions`, chave `(tenant, turno)`, **só números e códigos, nenhum texto de cliente**): decisões por desfecho, acertos do FAQ e da busca, respostas do modelo, transferências, latência da etapa (média e p95) e "chamadas comerciais evitadas" (soma **exata** de FAQ + busca). Tokens e custo evitados são **estimativa**, só no relatório operacional, com rótulo próprio e o aviso de que o **custo da IA local não está descontado** (infraestrutura própria).
 - API administrativa (`TenantSettingsManage`): `GET|PUT /agents/semantic/settings` e `GET /agents/semantic/metrics`.
 
-### 5. O que este ADR ainda não decide
+### 5. IA generativa local e aprendizado supervisionado (Pacote 3)
 
-Classificação, agrupamento e sugestões por IA local com revisão humana (Pacote 3); interface administrativa, suíte de qualidade em pt-BR e avaliação de prontidão (Pacote 4). Serão acrescentados a este ADR conforme implementados.
+A IA local (`ILocalGenerationProvider`, saída JSON de esquema fechado, temperatura 0) **só propõe**; nunca publica, nunca decide, nunca liga `AutoReply`, nunca escreve resposta por conta própria. Desligada por padrão (`Agents:Options:LocalSuggestionsEnabled`) e **só roda quando o administrador pede** (sem tarefa em segundo plano que leia conversas).
+
+- **Tipos de sugestão** (`agents.faq_suggestions`, estados `Pending` → `Approved`/`Rejected`, concorrência otimista, uma pendente por chave de deduplicação): entrada nova de FAQ a partir de uma lacuna; **grupo** de lacunas parecidas (até 20 por pedido) que vira uma entrada; **aliases** para uma entrada existente; **duplicatas** e **contradições** entre entradas do FAQ (informativas: aceitar é só reconhecer o achado). A origem é a lacuna do ADR 0030 (que continua sendo a fonte: a pergunta e a resposta humana são lidas pelo `KnowledgeGapService`, com a autorização de quem pede e auditoria da leitura).
+- **Minimização de dados:** o texto vai ao modelo só **redigido** (`PiiRedactor`: e-mail, CPF, CNPJ, telefone, link e sequências longas de dígitos viram marcadores; falha fechada se a expressão estourar o tempo); a resposta de um atendente só vai ao modelo quando **nenhuma mensagem de cliente** veio entre a pergunta e ela (senão a associação é incerta); a **saída** é conferida de novo e descartada se copiou dado pessoal; a sugestão guarda a reformulação genérica e nunca o texto original. O modelo roda na infraestrutura do próprio tenant (Ollama local ou em máquina separada).
+- **Texto de terceiros é dado, não instrução:** o prompt delimita o conteúdo em `<dados>` e o declara não confiável; a saída é JSON de esquema fechado e cada campo é validado (ação conhecida, tamanhos, alvo que **existe** no FAQ, aliases que não colidem com o que já existe, índices de grupo válidos). Sem resposta humana, a resposta que o modelo escrever é **descartada**; aceitar uma entrada nova exige resposta escrita ou editada por uma pessoa (`answer-required`). Uma mensagem de cliente manipuladora, no limite, produz uma sugestão ruim que uma pessoa rejeita.
+- **Revisão humana:** listar, editar (limites do FAQ; contador de edições), aceitar, rejeitar. Aceitar **aplica ao RASCUNHO versionado** (`AgentDefinitionService.SaveDraftAsync` ou `PromoteAsync` do ADR 0030, com `AutoReply` desligado); as demais lacunas de um grupo aceito ficam descartadas (cobertas pela entrada nova); publicar continua sendo o passo auditado e separado. Auditoria sem conteúdo: `agents.faq-suggestion.generated|edited|approved|rejected`.
+- **Retenção:** categorias novas `SemanticDecisions` (90 dias, só números) e `FaqSuggestions` (90 dias, só as **já decididas**; as pendentes esperam a revisão), nas tarefas do Agents, com o inventário de retenção atualizado (`knowledge.semantic_texts` é tabela opcional: só existe com o modo semântico ligado).
+- API (`TenantSettingsManage`): `GET /agents/faq-suggestions`, `GET|PUT /{id}`, `POST /generate/gap/{gapId}`, `/generate/cluster`, `/generate/analysis`, `/{id}/approve`, `/{id}/reject`; IA local indisponível responde 503 com código curto fixo.
+
+### 6. O que este ADR ainda não decide
+
+Interface administrativa, suíte de qualidade em pt-BR e avaliação de prontidão (Pacote 4). Serão acrescentados a este ADR conforme implementados.
 
 ## Validação
 

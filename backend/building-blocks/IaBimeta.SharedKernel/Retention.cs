@@ -29,6 +29,15 @@ public enum RetentionCategory
     /// arquivo fica "indisponível" no histórico, e a mensagem, o nome e a legenda ficam. Configurável por empresa. Só objetos de arquivos disponíveis; nunca a mensagem.
     /// </summary>
     InboundAttachments = 7,
+
+    /// <summary>As decisões da camada semântica (ADR 0034): só números e códigos por turno (similaridade, desfecho, latência), sem texto de cliente. Servem à calibração e às métricas; passado o prazo, são apagadas.</summary>
+    SemanticDecisions = 8,
+
+    /// <summary>
+    /// As sugestões da IA local para o FAQ JÁ DECIDIDAS pelo administrador (ADR 0034): aceitas (o efeito já está no rascunho versionado e na trilha de auditoria) ou rejeitadas. Conteúdo derivado de conversas, então
+    /// não fica para sempre. As PENDENTES nunca são apagadas por prazo: esperam a revisão.
+    /// </summary>
+    FaqSuggestions = 9,
 }
 
 /// <summary>
@@ -51,6 +60,8 @@ public sealed class RetentionOptions
         [RetentionCategory.InboxMarkers] = 30,
         [RetentionCategory.OutboundAttachments] = 30,
         [RetentionCategory.InboundAttachments] = 0,
+        [RetentionCategory.SemanticDecisions] = 90,
+        [RetentionCategory.FaqSuggestions] = 90,
     };
 
     /// <summary>Sobrescritas por empresa (o slug do tenant), só das categorias citadas.</summary>

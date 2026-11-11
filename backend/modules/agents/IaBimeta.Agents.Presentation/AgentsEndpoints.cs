@@ -73,6 +73,46 @@ public static class AgentsEndpoints
 
         semantica.MapGet("/metrics", async (int? days, SemanticMetricsService servico, CancellationToken ct) => Results.Ok(await servico.GetAsync(days ?? 7, ct)));
 
+        // ADR 0034: as sugestões da IA LOCAL para o FAQ. A IA só propõe, e só quando o administrador pede; aceitar leva ao RASCUNHO (nunca publica) e AutoReply nunca é ligado por aqui.
+        var sugestoes = app.MapGroup("/agents/faq-suggestions").AddEndpointFilter(TratarErrosDoAgente);
+
+        sugestoes.MapGet("/", async (FaqSuggestionStatus? status, FaqSuggestionKind? kind, int? take, int? skip, FaqSuggestionService servico, CancellationToken ct) =>
+            Results.Ok(await servico.ListAsync(status, kind, take ?? 50, skip ?? 0, ct)));
+
+        sugestoes.MapGet("/{id:guid}", async (Guid id, FaqSuggestionService servico, CancellationToken ct) =>
+        {
+            var sugestao = await servico.GetAsync(id, ct);
+            return sugestao is null ? Results.NotFound() : Results.Ok(sugestao);
+        });
+
+        sugestoes.MapPost("/generate/gap/{gapId:guid}", async (Guid gapId, FaqSuggestionService servico, CancellationToken ct) =>
+        {
+            var resultado = await servico.GenerateForGapAsync(gapId, ct);
+            return resultado is null ? Results.NotFound() : Results.Ok(resultado);
+        });
+
+        sugestoes.MapPost("/generate/cluster", async (FaqSuggestionService servico, CancellationToken ct) => Results.Ok(await servico.ClusterOpenGapsAsync(ct)));
+
+        sugestoes.MapPost("/generate/analysis", async (FaqSuggestionService servico, CancellationToken ct) => Results.Ok(await servico.AnalyzeFaqAsync(ct)));
+
+        sugestoes.MapPut("/{id:guid}", async (Guid id, FaqSuggestionEdit corpo, FaqSuggestionService servico, CancellationToken ct) =>
+        {
+            var sugestao = await servico.EditAsync(id, corpo, ct);
+            return sugestao is null ? Results.NotFound() : Results.Ok(sugestao);
+        });
+
+        sugestoes.MapPost("/{id:guid}/approve", async (Guid id, FaqSuggestionService servico, CancellationToken ct) =>
+        {
+            var sugestao = await servico.ApproveAsync(id, ct);
+            return sugestao is null ? Results.NotFound() : Results.Ok(sugestao);
+        });
+
+        sugestoes.MapPost("/{id:guid}/reject", async (Guid id, FaqSuggestionService servico, CancellationToken ct) =>
+        {
+            var sugestao = await servico.RejectAsync(id, ct);
+            return sugestao is null ? Results.NotFound() : Results.Ok(sugestao);
+        });
+
         return app;
     }
 
@@ -96,6 +136,15 @@ public static class AgentsEndpoints
         catch (AgentsValidationException ex)
         {
             return Results.Problem(title: "Dados inválidos", detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+        catch (FaqSuggestionConflictException ex)
+        {
+            return Results.Problem(title: "Conflito", detail: ex.Message, statusCode: StatusCodes.Status409Conflict, extensions: new Dictionary<string, object?> { ["code"] = ex.Code });
+        }
+        catch (FaqSuggestionUnavailableException ex)
+        {
+            return Results.Problem(
+                title: "IA local indisponível", detail: ex.Message, statusCode: StatusCodes.Status503ServiceUnavailable, extensions: new Dictionary<string, object?> { ["code"] = ex.Code });
         }
         catch (KnowledgeGapConflictException ex)
         {
