@@ -29,12 +29,19 @@
     <Compile Include="..\ai-gateway\IaBimeta.AiGateway.Tests\Testing\FakeAiProvider.cs" Link="AiGateway\Testing\FakeAiProvider.cs" />
   </ItemGroup>
 
+  <!-- A suite de qualidade em pt-BR (ADR 0034): o mesmo conjunto rotulado e avaliador dos testes de unidade, aqui contra o modelo de embeddings REAL (so na homologacao). -->
+  <ItemGroup>
+    <Compile Include="..\quality\SemanticQuality.cs" Link="Quality\SemanticQuality.cs" />
+    <None Include="..\quality\dataset-ptbr.json" Link="Quality\dataset-ptbr.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\..\backend\host\IaBimeta.Api\IaBimeta.Api.csproj" />
     <ProjectReference Include="..\..\backend\host\IaBimeta.Worker\IaBimeta.Worker.csproj" />
     <ProjectReference Include="..\..\backend\building-blocks\IaBimeta.Messaging\IaBimeta.Messaging.csproj" />
     <ProjectReference Include="..\..\backend\building-blocks\IaBimeta.SharedKernel\IaBimeta.SharedKernel.csproj" />
     <ProjectReference Include="..\..\backend\adapters\IaBimeta.Adapters.Ai.OpenAI\IaBimeta.Adapters.Ai.OpenAI.csproj" />
+    <ProjectReference Include="..\..\backend\adapters\IaBimeta.Adapters.Ai.Ollama\IaBimeta.Adapters.Ai.Ollama.csproj" />
     <ProjectReference Include="..\..\backend\modules\knowledge\IaBimeta.Knowledge.Contracts\IaBimeta.Knowledge.Contracts.csproj" />
     <ProjectReference Include="..\..\backend\modules\knowledge\IaBimeta.Knowledge.Core\IaBimeta.Knowledge.Core.csproj" />
     <ProjectReference Include="..\..\backend\modules\knowledge\IaBimeta.Knowledge.Infrastructure\IaBimeta.Knowledge.Infrastructure.csproj" />

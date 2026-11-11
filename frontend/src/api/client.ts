@@ -9,6 +9,12 @@ import type {
   CloseRequest,
   Conversation,
   CurrentUser,
+  FaqSuggestion,
+  FaqSuggestionEdit,
+  FaqSuggestionGeneration,
+  FaqSuggestionKind,
+  FaqSuggestionPage,
+  FaqSuggestionStatus,
   HistoryOrder,
   ItemActionRequest,
   KnowledgeGapDetail,
@@ -28,6 +34,9 @@ import type {
   RedeemPasswordResetRequest,
   ReplyOptions,
   ReplyRequest,
+  SemanticMetrics,
+  SemanticSettings,
+  SemanticSettingsRequest,
   SendingAlert,
   ServiceQueue,
   TemplateParameterError,
@@ -119,6 +128,13 @@ export interface ListItemsParams {
 export interface ListKnowledgeGapsParams {
   /** Ausente = todas as situações. */
   status?: KnowledgeGapStatus;
+  take?: number;
+  skip?: number;
+}
+
+export interface ListFaqSuggestionsParams {
+  status?: FaqSuggestionStatus;
+  kind?: FaqSuggestionKind;
   take?: number;
   skip?: number;
 }
@@ -383,6 +399,19 @@ export function createApi(opcoes: ApiOptions = {}) {
     obterRascunhoDoAgente: () => versaoOuNula('/agents/definition/draft'),
     obterPublicadaDoAgente: () => versaoOuNula('/agents/definition/published'),
     publicarRascunhoDoAgente: () => requisitar<AgentDefinition>('POST', '/agents/definition/publish'),
+
+    // ---- Conhecimento híbrido (ADR 0034): configuração e métricas da resposta por similaridade e as sugestões da IA local. A IA só propõe; aceitar leva ao RASCUNHO.
+    obterConfiguracaoSemantica: () => requisitar<SemanticSettings>('GET', '/agents/semantic/settings'),
+    salvarConfiguracaoSemantica: (pedido: SemanticSettingsRequest) => requisitar<SemanticSettings>('PUT', '/agents/semantic/settings', { corpo: pedido }),
+    obterMetricasSemanticas: (dias = 7) => requisitar<SemanticMetrics>('GET', '/agents/semantic/metrics', { consulta: { days: dias } }),
+    listarSugestoesDaIa: (p: ListFaqSuggestionsParams = {}) =>
+      requisitar<FaqSuggestionPage>('GET', '/agents/faq-suggestions', { consulta: { status: p.status, kind: p.kind, take: p.take, skip: p.skip } }),
+    gerarSugestaoDaLacuna: (lacunaId: string) => requisitar<FaqSuggestionGeneration>('POST', `/agents/faq-suggestions/generate/gap/${encodeURIComponent(lacunaId)}`),
+    agruparLacunasComIa: () => requisitar<FaqSuggestionGeneration>('POST', '/agents/faq-suggestions/generate/cluster'),
+    analisarFaqComIa: () => requisitar<FaqSuggestionGeneration>('POST', '/agents/faq-suggestions/generate/analysis'),
+    editarSugestaoDaIa: (id: string, edicao: FaqSuggestionEdit) => requisitar<FaqSuggestion>('PUT', `/agents/faq-suggestions/${encodeURIComponent(id)}`, { corpo: edicao }),
+    aceitarSugestaoDaIa: (id: string) => requisitar<FaqSuggestion>('POST', `/agents/faq-suggestions/${encodeURIComponent(id)}/approve`),
+    rejeitarSugestaoDaIa: (id: string) => requisitar<FaqSuggestion>('POST', `/agents/faq-suggestions/${encodeURIComponent(id)}/reject`),
   };
 }
 

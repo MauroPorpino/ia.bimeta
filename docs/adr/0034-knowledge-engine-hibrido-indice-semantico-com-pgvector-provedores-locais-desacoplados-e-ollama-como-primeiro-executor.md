@@ -59,9 +59,17 @@ A IA local (`ILocalGenerationProvider`, saída JSON de esquema fechado, temperat
 - **Retenção:** categorias novas `SemanticDecisions` (90 dias, só números) e `FaqSuggestions` (90 dias, só as **já decididas**; as pendentes esperam a revisão), nas tarefas do Agents, com o inventário de retenção atualizado (`knowledge.semantic_texts` é tabela opcional: só existe com o modo semântico ligado).
 - API (`TenantSettingsManage`): `GET /agents/faq-suggestions`, `GET|PUT /{id}`, `POST /generate/gap/{gapId}`, `/generate/cluster`, `/generate/analysis`, `/{id}/approve`, `/{id}/reject`; IA local indisponível responde 503 com código curto fixo.
 
-### 6. O que este ADR ainda não decide
+### 6. Interface, qualidade e homologação (Pacote 4)
 
-Interface administrativa, suíte de qualidade em pt-BR e avaliação de prontidão (Pacote 4). Serão acrescentados a este ADR conforme implementados.
+- **Interface** (área Conhecimento do React, sem painel separado, recolhida até o administrador abrir): configuração do modo, limiares e métricas da busca semântica (ativar exige confirmação consciente; desligar vale já) e as sugestões da IA local (gerar para a lacuna selecionada, agrupar, procurar duplicatas e contradições; revisar, editar, aceitar, rejeitar).
+- **Suíte de qualidade em pt-BR** (`tests/quality`): conjunto sintético rotulado (~60 casos em 12 categorias) e avaliador compartilhado. Parte **determinística** (roda sempre): impõe similaridade alta à entrada errada e prova **zero falsos positivos** nas salvaguardas, sem bloquear paráfrase, sinônimo e digitação legítimos. Parte com o **modelo real** (só com `IABIMETA_TEST_OLLAMA_URL`): precisão, falsos positivos, cobertura, latência e varredura de limiares com o relatório do menor limiar sem falso positivo. **Nenhuma empresa real tem o modo ativo antes desse relatório e da avaliação em tráfego real.**
+- O cosseno em memória do avaliador é **só ferramenta de medição**; o armazenamento e a busca de produção são o pgvector.
+- Fatos do modelo conferidos nas páginas do Ollama e da Hugging Face: licença Apache-2.0; vetor de até 1024 dimensões; 639 MB em disco (tag 0.6b); "100+ idiomas" sem citar o português (qualidade em pt-BR a medir); instrução na consulta recomendada em inglês. Requisitos de RAM/CPU **não constam**: medir na homologação.
+- Plano de homologação e requisitos de infraestrutura: `docs/operations/CONHECIMENTO-HIBRIDO.md`.
+
+### 7. O que este ADR não decide
+
+Escala acima de poucas centenas de textos por tenant (índice aproximado), GPU, TLS entre as máquinas de aplicação e de IA, e a ativação em empresa real (depende da homologação). Status continua **Proposto** até a ratificação.
 
 ## Validação
 

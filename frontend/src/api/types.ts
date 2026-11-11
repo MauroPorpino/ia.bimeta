@@ -454,3 +454,95 @@ export interface Conversation {
   responderRef: string | null;
   lastMessageAt: string;
 }
+
+// ---------------------------------------------------------------- Conhecimento híbrido (ADR 0034): busca semântica e sugestões da IA local
+
+/** O modo da resposta direta por similaridade do tenant. `Off` é o interruptor de emergência (vale no próximo turno). */
+export type SemanticAnswerMode = 'Off' | 'Evaluate' | 'Active';
+
+/** GET e PUT /agents/semantic/settings. `isDefault`: o tenant nunca configurou (desligado, limiares padrão). */
+export interface SemanticSettings {
+  mode: SemanticAnswerMode;
+  minScore: number;
+  minMargin: number;
+  updatedAt: string | null;
+  isDefault: boolean;
+}
+
+/** Corpo de PUT /agents/semantic/settings. */
+export interface SemanticSettingsRequest {
+  mode: SemanticAnswerMode;
+  minScore: number;
+  minMargin: number;
+}
+
+/** GET /agents/semantic/metrics: só contagens e latências do tenant (nenhum texto). Tokens e custo evitados são ESTIMATIVA e ficam no relatório operacional, não aqui. */
+export interface SemanticMetrics {
+  windowDays: number;
+  decisions: number;
+  answered: number;
+  wouldAnswer: number;
+  noCandidates: number;
+  belowThreshold: number;
+  ambiguous: number;
+  notAutoReply: number;
+  guardRejected: number;
+  stale: number;
+  unavailable: number;
+  faqHits: number;
+  semanticHits: number;
+  modelReplies: number;
+  handoffs: number;
+  commercialCallsAvoided: number;
+  semanticShareOfAiReplies: number;
+  latencyAverageMilliseconds: number | null;
+  latencyP95Milliseconds: number | null;
+}
+
+export type FaqSuggestionKind = 'NewFaq' | 'Alias' | 'Duplicate' | 'Contradiction';
+
+export type FaqSuggestionStatus = 'Pending' | 'Approved' | 'Rejected';
+
+/** O conteúdo de uma sugestão da IA local (revisável e editável). Nunca traz o texto original do cliente. */
+export interface SuggestionPayload {
+  question: string | null;
+  answer: string | null;
+  aliases: string[] | null;
+  targetQuestion: string | null;
+  otherQuestion: string | null;
+  gapIds: string[] | null;
+  rationale: string | null;
+}
+
+export interface FaqSuggestion {
+  id: string;
+  kind: FaqSuggestionKind;
+  status: FaqSuggestionStatus;
+  gapId: string | null;
+  payload: SuggestionPayload;
+  modelId: string;
+  createdAt: string;
+  decidedAt: string | null;
+  appliedDraftVersion: number | null;
+  edits: number;
+  revision: number;
+}
+
+export interface FaqSuggestionPage {
+  items: FaqSuggestion[];
+  total: number;
+}
+
+/** O resultado de pedir sugestões à IA local: as criadas (ou a que já estava pendente) e, se o modelo não propôs nada, o motivo curto. */
+export interface FaqSuggestionGeneration {
+  suggestions: FaqSuggestion[];
+  skipped: number;
+  skipReason: string | null;
+}
+
+/** Corpo de PUT /agents/faq-suggestions/{id}: campo nulo = não muda. */
+export interface FaqSuggestionEdit {
+  question: string | null;
+  answer: string | null;
+  aliases: string[] | null;
+}

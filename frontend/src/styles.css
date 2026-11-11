@@ -1177,3 +1177,42 @@ label {
     overflow-y: visible;
   }
 }
+
+/* Conhecimento híbrido (ADR 0034): busca semântica e sugestões da IA local. */
+.hibrido,
+.semantica,
+.sugestoes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.semantica,
+.sugestoes {
+  padding: 0.75rem 1rem;
+  background: var(--superficie);
+  border: 1px solid var(--borda);
+  border-radius: 8px;
+}
+
+.metricas {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  gap: 0.25rem 1rem;
+  margin: 0;
+}
+
+.metricas dt {
+  color: var(--texto-discreto, inherit);
+}
+
+.metricas dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+@media (max-width: 720px) {
+  .metricas {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -1,5 +1,5 @@
 import { ApiError, descreverErro } from './api/client';
-import type { CurrentUser, FaqEntry, KnowledgeGapKind, KnowledgeGapStatus } from './api/types';
+import type { CurrentUser, FaqEntry, FaqSuggestionKind, FaqSuggestionStatus, KnowledgeGapKind, KnowledgeGapStatus, SemanticAnswerMode } from './api/types';
 
 /** Os limites que o servidor aplica ao FAQ (AgentDefinitionContent): a tela os mostra como dica, o servidor é quem valida. */
 export const LIMITE_PERGUNTA = 300;
@@ -113,4 +113,92 @@ export function mensagemDeErroDoConhecimento(erro: unknown): string {
     }
   }
   return descreverErro(erro);
+}
+
+// ---------------------------------------------------------------- Conhecimento híbrido (ADR 0034)
+
+export const ROTULO_MODO_SEMANTICO: Record<SemanticAnswerMode, string> = {
+  Off: 'Desligado (nenhuma busca semântica)',
+  Evaluate: 'Avaliação (mede, mas nunca responde)',
+  Active: 'Ativo (responde direto com o texto aprovado)',
+};
+
+export const ROTULO_TIPO_DA_SUGESTAO: Record<FaqSuggestionKind, string> = {
+  NewFaq: 'Entrada nova',
+  Alias: 'Novos aliases para uma entrada',
+  Duplicate: 'Possível duplicata',
+  Contradiction: 'Possível contradição',
+};
+
+export const ROTULO_SITUACAO_DA_SUGESTAO: Record<FaqSuggestionStatus, string> = {
+  Pending: 'Pendente',
+  Approved: 'Aceita',
+  Rejected: 'Rejeitada',
+};
+
+/** Por que a IA local não propôs nada (o código curto do servidor vira uma frase). */
+export function motivoSemSugestao(codigo: string | null): string {
+  switch (codigo) {
+    case 'source-unavailable':
+      return 'O texto da pergunta não pôde ser lido agora (foi removido ou fora do seu alcance).';
+    case 'skipped-by-model':
+      return 'A IA entendeu que esta pergunta não vale uma entrada de FAQ.';
+    case 'already-in-faq':
+      return 'A pergunta sugerida já existe no FAQ.';
+    case 'unknown-target':
+    case 'no-usable-alias':
+      return 'A IA não encontrou uma entrada existente para receber aliases novos.';
+    case 'pii-in-output':
+      return 'A resposta da IA continha dado pessoal e foi descartada por segurança.';
+    case 'not-enough-gaps':
+      return 'São necessárias pelo menos duas lacunas abertas com texto legível para agrupar.';
+    case 'no-groups':
+      return 'A IA não encontrou perguntas parecidas o bastante para agrupar.';
+    case 'not-enough-entries':
+      return 'O FAQ precisa de pelo menos duas entradas para ser analisado.';
+    case 'nothing-found':
+      return 'A IA não apontou duplicatas nem contradições.';
+    case 'invalid-output':
+    case 'empty-question':
+    case 'empty-after-redaction':
+      return 'A IA não devolveu uma sugestão utilizável desta vez.';
+    default:
+      return 'A IA não propôs nada desta vez.';
+  }
+}
+
+/** Erros das rotas da camada semântica e das sugestões: 503 (IA local fora do ar) e os códigos de 409 viram frases claras; o resto segue o padrão do conhecimento. */
+export function mensagemDeErroDaIa(erro: unknown): string {
+  if (erro instanceof ApiError) {
+    if (erro.status === 503) {
+      switch (erro.code) {
+        case 'disabled':
+          return 'As sugestões da IA local estão desligadas neste ambiente.';
+        case 'not-configured':
+          return 'A IA local não está configurada neste ambiente.';
+        default:
+          return 'A IA local não respondeu agora. Nada foi alterado: tente de novo mais tarde.';
+      }
+    }
+    if (erro.status === 409) {
+      switch (erro.code) {
+        case 'suggestion-decided':
+          return 'Esta sugestão já foi decidida, talvez por outra pessoa. A lista foi atualizada.';
+        case 'suggestion-changed':
+          return 'A sugestão foi alterada por outra pessoa. Releia antes de decidir.';
+        case 'answer-required':
+          return 'Escreva a resposta aprovada antes de aceitar: a IA nunca responde por conta própria.';
+        case 'target-not-found':
+          return 'A entrada que receberia os aliases não existe mais no FAQ.';
+        default:
+          break;
+      }
+    }
+  }
+  return mensagemDeErroDoConhecimento(erro);
+}
+
+/** Um percentual para a tela ("12,5%"). */
+export function percentual(valor: number): string {
+  return `${valor.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 1 })}%`;
 }

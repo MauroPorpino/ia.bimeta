@@ -18,6 +18,12 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <!-- A suite de qualidade em pt-BR (ADR 0034): o conjunto rotulado e o avaliador sao compartilhados com os testes de integracao (que o rodam contra o modelo de embeddings real, na homologacao). -->
+  <ItemGroup>
+    <Compile Include="..\..\quality\SemanticQuality.cs" Link="Quality\SemanticQuality.cs" />
+    <None Include="..\..\quality\dataset-ptbr.json" Link="Quality\dataset-ptbr.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\..\..\backend\building-blocks\IaBimeta.SharedKernel\IaBimeta.SharedKernel.csproj" />
     <ProjectReference Include="..\..\..\backend\modules\agents\IaBimeta.Agents.Core\IaBimeta.Agents.Core.csproj" />

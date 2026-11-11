@@ -86,7 +86,9 @@ public sealed class ArtefatosDeImplantacaoTests
     {
         var servicos = Servicos();
 
-        Assert.Equal(["api", "clamav", "db", "web", "worker"], servicos.Keys.Order(StringComparer.Ordinal).ToArray());
+        // Os cinco da pilha mais o servico de IA local, OPCIONAL (perfil ia-local, ADR 0034): sem o perfil ele nao sobe, e nunca publica porta.
+        Assert.Equal(["api", "clamav", "db", "ollama", "web", "worker"], servicos.Keys.Order(StringComparer.Ordinal).ToArray());
+        Assert.Contains("profiles: [\"ia-local\"]", servicos["ollama"], StringComparison.Ordinal);
         foreach (var (nome, bloco) in servicos.Where(s => s.Key != "web"))
         {
             Assert.DoesNotContain("ports:", bloco, StringComparison.Ordinal);

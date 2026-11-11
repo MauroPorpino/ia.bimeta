@@ -3,6 +3,7 @@ import { ApiError, type ApiClient } from '../api/client';
 import type { KnowledgeGapPage, KnowledgeGapStatus } from '../api/types';
 import { ROTULO_SITUACAO_DA_LACUNA, ROTULO_TIPO_DA_LACUNA, dataHora, mensagemDeErroDoConhecimento } from '../conhecimento';
 import { tempoDecorrido } from '../format';
+import { ConhecimentoHibrido } from './ConhecimentoHibrido';
 import { LacunaRevisao } from './LacunaRevisao';
 import { RascunhoDaDefinicao } from './RascunhoDaDefinicao';
 
@@ -179,6 +180,12 @@ export function Conhecimento({ api, oculto = false }: Props) {
             </section>
           )}
           <RascunhoDaDefinicao api={api} versao={versaoDoRascunho} />
+          <ConhecimentoHibrido
+            api={api}
+            lacunaSelecionada={selecionada}
+            onRascunhoAlterado={() => setVersaoDoRascunho((v) => v + 1)}
+            onLacunasAlteradas={() => setRecarga((r) => r + 1)}
+          />
         </div>
       )}
     </main>

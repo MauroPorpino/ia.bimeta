@@ -18,7 +18,7 @@ public sealed class OllamaOptions
     public string? GenerationModelId { get; set; }
 
     /// <summary>A instrução que o Qwen3-Embedding espera antes da CONSULTA (os documentos vão sem instrução). Vazio = sem instrução.</summary>
-    public string QueryInstruction { get; set; } = "Dada uma pergunta de um cliente, recupere a pergunta frequente que tem a mesma intenção";
+    public string QueryInstruction { get; set; } = "Given a customer question, retrieve the frequently asked question that has the same intent";
 
     public TimeSpan EmbeddingTimeout { get; set; } = TimeSpan.FromSeconds(20);
 
