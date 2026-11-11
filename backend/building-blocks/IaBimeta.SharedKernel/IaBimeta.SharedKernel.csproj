@@ -17,6 +17,7 @@
     <InternalsVisibleTo Include="IaBimeta.Conversations.Tests" />
     <InternalsVisibleTo Include="IaBimeta.AiGateway.Tests" />
     <InternalsVisibleTo Include="IaBimeta.Agents.Tests" />
+    <InternalsVisibleTo Include="IaBimeta.Knowledge.Tests" />
     <InternalsVisibleTo Include="IaBimeta.IntegrationTests" />
   </ItemGroup>
 

@@ -6,6 +6,8 @@ using IaBimeta.Channels.Infrastructure;
 using IaBimeta.ContactCenter.Infrastructure;
 using IaBimeta.Conversations.Infrastructure;
 using IaBimeta.Identity.Infrastructure;
+using IaBimeta.Knowledge.Domain;
+using IaBimeta.Knowledge.Infrastructure;
 using IaBimeta.Tenancy.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 
@@ -44,17 +46,28 @@ internal static class MigrateCommand
     }
 
     /// <summary>Os contextos de todos os módulos, na ordem em que as migrations são aplicadas. Um módulo novo entra AQUI (o provisionamento e o <c>migrate</c> usam a mesma lista).</summary>
-    internal static IReadOnlyList<(string Name, DbContext Context)> Modules(IServiceProvider services) =>
-    [
-        ("Tenancy", services.GetRequiredService<TenancyDbContext>()),
-        ("Audit", services.GetRequiredService<AuditDbContext>()),
-        ("Identity", services.GetRequiredService<IdentityDbContext>()),
-        ("Conversations", services.GetRequiredService<ConversationsDbContext>()),
-        ("Channels", services.GetRequiredService<ChannelsDbContext>()),
-        ("ContactCenter", services.GetRequiredService<ContactCenterDbContext>()),
-        ("AiGateway", services.GetRequiredService<AiGatewayDbContext>()),
-        ("Agents", services.GetRequiredService<AgentsDbContext>()),
-    ];
+    internal static IReadOnlyList<(string Name, DbContext Context)> Modules(IServiceProvider services)
+    {
+        var modulos = new List<(string Name, DbContext Context)>
+        {
+            ("Tenancy", services.GetRequiredService<TenancyDbContext>()),
+            ("Audit", services.GetRequiredService<AuditDbContext>()),
+            ("Identity", services.GetRequiredService<IdentityDbContext>()),
+            ("Conversations", services.GetRequiredService<ConversationsDbContext>()),
+            ("Channels", services.GetRequiredService<ChannelsDbContext>()),
+            ("ContactCenter", services.GetRequiredService<ContactCenterDbContext>()),
+            ("AiGateway", services.GetRequiredService<AiGatewayDbContext>()),
+            ("Agents", services.GetRequiredService<AgentsDbContext>()),
+        };
+
+        // O Knowledge (ADR 0034) cria a extensão pgvector: só entra quando o modo semântico está ligado (Knowledge:Semantic:Enabled), para que um PostgreSQL sem pgvector continue migrando os demais módulos.
+        if (services.GetRequiredService<KnowledgeSemanticOptions>().Enabled)
+        {
+            modulos.Add(("Knowledge", services.GetRequiredService<KnowledgeDbContext>()));
+        }
+
+        return modulos;
+    }
 
     internal static async Task<int> ExecuteAsync(IServiceProvider root, bool apply, TextWriter output, CancellationToken cancellationToken = default)
     {

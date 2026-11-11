@@ -18,6 +18,7 @@
     <ProjectReference Include="..\..\conversations\IaBimeta.Conversations.Contracts\IaBimeta.Conversations.Contracts.csproj" />
     <ProjectReference Include="..\..\contact-center\IaBimeta.ContactCenter.Contracts\IaBimeta.ContactCenter.Contracts.csproj" />
     <ProjectReference Include="..\..\audit\IaBimeta.Audit.Contracts\IaBimeta.Audit.Contracts.csproj" />
+    <ProjectReference Include="..\..\knowledge\IaBimeta.Knowledge.Contracts\IaBimeta.Knowledge.Contracts.csproj" />
   </ItemGroup>
 
 </Project>

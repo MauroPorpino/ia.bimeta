@@ -1,4 +1,6 @@
+using IaBimeta.Adapters.Ai.Ollama;
 using IaBimeta.Adapters.Ai.OpenAI;
+using IaBimeta.Knowledge.Infrastructure;
 using IaBimeta.Adapters.WhatsApp;
 using IaBimeta.Agents.Presentation;
 using IaBimeta.Agents.Infrastructure;
@@ -131,6 +133,12 @@ public static class ApiHost
         builder.Services.AddAgents(
             provider => ConnectionStringOf(provider, "Agents"),
             agentes => builder.Configuration.GetSection("Agents:Options").Bind(agentes));
+
+        // O Knowledge (ADR 0034): o índice semântico com pgvector. Desligado por padrão (Knowledge:Semantic:Enabled). O Api só grava o que deve ser vetorizado quando o conhecimento é publicado; quem vetoriza é o Worker.
+        builder.Services.AddOllamaProvider(ollama => builder.Configuration.GetSection("Knowledge:Providers:Ollama").Bind(ollama));
+        builder.Services.AddKnowledge(
+            provider => ConnectionStringOf(provider, "Knowledge"),
+            semantico => builder.Configuration.GetSection("Knowledge:Semantic").Bind(semantico));
 
         // Enums saem e entram como texto (por exemplo, "HumanAssisted"), não como número.
         builder.Services.ConfigureHttpJsonOptions(opcoes => opcoes.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));

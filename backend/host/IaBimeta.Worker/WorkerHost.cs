@@ -1,5 +1,7 @@
 using IaBimeta.Agents.Infrastructure;
+using IaBimeta.Adapters.Ai.Ollama;
 using IaBimeta.Adapters.Ai.OpenAI;
+using IaBimeta.Knowledge.Infrastructure;
 using IaBimeta.Adapters.WhatsApp;
 using IaBimeta.AiGateway.Application;
 using IaBimeta.AiGateway.Infrastructure;
@@ -129,6 +131,13 @@ public static class WorkerHost
         builder.Services.AddAgents(
             provider => ConnectionStringOf(provider, "Agents"),
             agentes => builder.Configuration.GetSection("Agents:Options").Bind(agentes));
+
+        // O Knowledge (ADR 0034): o Worker vetoriza o conhecimento publicado (SemanticIndexer) e, no Pacote 2, busca por similaridade no turno. Desligado por padrão (Knowledge:Semantic:Enabled).
+        builder.Services.AddOllamaProvider(ollama => builder.Configuration.GetSection("Knowledge:Providers:Ollama").Bind(ollama));
+        builder.Services.AddKnowledge(
+            provider => ConnectionStringOf(provider, "Knowledge"),
+            semantico => builder.Configuration.GetSection("Knowledge:Semantic").Bind(semantico));
+        builder.Services.AddHostedService<SemanticIndexerService>();
 
         // Um resumo (sem segredo) da configuração de IA que ESTE processo enxerga, na partida: um Worker sem o catálogo, sem os limites ou sem a chave mestra falha cada turno com "não configurada".
         builder.Services.AddHostedService<AiConfigurationReport>();

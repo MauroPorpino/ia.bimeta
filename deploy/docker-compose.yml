@@ -27,10 +27,16 @@ x-app-environment: &app-environment
   Conversations__Attachments__Scanner__Timeout: "00:00:30"
   Conversations__Attachments__Scanner__Required: "true"
   Conversations__Attachments__Encryption__Required: "true"
+  # O Knowledge hibrido (ADR 0034, docs/operations/CONHECIMENTO-HIBRIDO.md). DESLIGADO por padrao: ligar so depois de subir o servico de IA local e conferir a qualidade na homologacao.
+  Knowledge__Semantic__Enabled: ${KNOWLEDGE_SEMANTIC_ENABLED:-false}
+  Knowledge__Providers__Ollama__BaseUrl: ${OLLAMA_URL:-http://ollama:11434}
+  Knowledge__Providers__Ollama__EmbeddingModelId: ${OLLAMA_EMBEDDING_MODEL:-qwen3-embedding:0.6b}
+  Knowledge__Providers__Ollama__GenerationModelId: ${OLLAMA_GENERATION_MODEL:-}
 
 services:
   db:
-    image: postgres:17
+    # A imagem com a extensao pgvector (indice semantico do Knowledge, ADR 0034): e o postgres:17 oficial mais a extensao. Sem o modo semantico a extensao nao e usada.
+    image: ${DB_IMAGE:-pgvector/pgvector:pg17}
     restart: unless-stopped
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
@@ -66,6 +72,31 @@ services:
       timeout: 10s
       retries: 5
       start_period: 600s
+    logging: *logging
+
+  # O servico de IA local (Ollama): OPCIONAL, so sobe com o perfil "ia-local" (docker compose --profile ia-local up -d). Sem GPU na V1 (CPU). Na rede "back", sem porta publicada. Para rodar em OUTRA maquina,
+  # nao use este servico: aponte OLLAMA_URL para ela e veja deploy/ollama/. Os limites abaixo sao o ponto de partida (modelo de embeddings de 0,6 bi de parametros + modelo generativo pequeno);
+  # ajuste ao que a homologacao medir. Os modelos sao baixados uma vez por scripts/ia-local.sh (sem internet em tempo de execucao).
+  ollama:
+    profiles: ["ia-local"]
+    # "latest" so ate a primeira homologacao: depois FIXE a versao validada em OLLAMA_IMAGE no .env (reprodutibilidade).
+    image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
+    restart: unless-stopped
+    environment:
+      OLLAMA_KEEP_ALIVE: "30m"
+      OLLAMA_MAX_LOADED_MODELS: "2"
+      OLLAMA_NUM_PARALLEL: "2"
+    volumes:
+      - ollamadata:/root/.ollama
+    networks: [back]
+    mem_limit: ${OLLAMA_MEM_LIMIT:-6g}
+    cpus: ${OLLAMA_CPUS:-3}
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     logging: *logging
 
   api:
@@ -153,5 +184,6 @@ volumes:
   pgdata: {}
   anexos: {}
   clamdb: {}
+  ollamadata: {}
   caddy_data: {}
   caddy_config: {}

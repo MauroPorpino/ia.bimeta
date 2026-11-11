@@ -1,0 +1,54 @@
+# O servico de IA local em OUTRA maquina (ADR 0034): Ollama atras de um proxy que exige o token (Authorization: Bearer). Use quando a VM da aplicacao nao tem memoria/CPU para os modelos.
+# O Ollama NAO tem autenticacao propria: ele nunca publica porta; so o proxy (porta 11435) fala com a rede, e SO deve ser alcancavel pela rede privada (VPN, VLAN ou regra de firewall que
+# permita apenas o IP da VM da aplicacao). Sem GPU na V1. Este arquivo NAO foi executado na maquina de desenvolvimento (sem Docker): validar na homologacao.
+#
+# .env desta pasta:  OLLAMA_TOKEN=<openssl rand -base64 32>   (o MESMO valor vai em Knowledge__Providers__Ollama__BearerToken do app.env da aplicacao)
+#                    BIND_IP=<IP privado desta maquina>        OLLAMA_MEM_LIMIT=6g   OLLAMA_CPUS=3
+# Na aplicacao: OLLAMA_URL=http://<BIND_IP>:11435 no .env.
+name: iabimeta-ia
+
+services:
+  ollama:
+    image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
+    restart: unless-stopped
+    environment:
+      OLLAMA_KEEP_ALIVE: "30m"
+      OLLAMA_MAX_LOADED_MODELS: "2"
+      OLLAMA_NUM_PARALLEL: "2"
+    volumes:
+      - ollamadata:/root/.ollama
+    networks: [interna]
+    mem_limit: ${OLLAMA_MEM_LIMIT:-6g}
+    cpus: ${OLLAMA_CPUS:-3}
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  proxy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_TOKEN: ${OLLAMA_TOKEN:?defina OLLAMA_TOKEN no .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    ports:
+      - "${BIND_IP:?defina BIND_IP no .env (IP privado)}:11435:11435"
+    networks: [interna]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+networks:
+  interna: {}
+
+volumes:
+  ollamadata: {}

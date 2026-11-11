@@ -1,0 +1,18 @@
+# Proxy autenticado do servico de IA local (ADR 0034). Sem o token correto: 401, e nada chega ao Ollama. Rede privada apenas (veja o docker-compose.yml desta pasta).
+# Texto puro dentro da rede privada; para TLS entre as maquinas use VPN (WireGuard) ou um certificado interno: pendente de decisao na homologacao.
+{
+	auto_https off
+	admin off
+}
+
+:11435 {
+	@sem_token not header Authorization "Bearer {$OLLAMA_TOKEN}"
+	respond @sem_token "nao autorizado" 401
+
+	# So os caminhos que o ia.bimeta usa; o resto (inclusive baixar ou apagar modelos) e recusado.
+	@permitido path /api/embed /api/chat /api/tags
+	handle @permitido {
+		reverse_proxy ollama:11434
+	}
+	respond "nao encontrado" 404
+}

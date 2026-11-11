@@ -9,3 +9,9 @@ psql -v ON_ERROR_STOP=1 -v senha="$APP_DB_PASSWORD" --username "$POSTGRES_USER" 
 CREATE ROLE iabimeta LOGIN PASSWORD :'senha' NOSUPERUSER NOCREATEDB NOCREATEROLE;
 CREATE DATABASE iabimeta OWNER iabimeta ENCODING 'UTF8';
 SQL
+
+# O indice semantico do Knowledge (ADR 0034) usa a extensao pgvector, que SO o superusuario cria (o papel da aplicacao nao e superusuario). A imagem pgvector/pgvector:pg17 a traz; numa imagem
+# sem ela o passo e pulado (o modo semantico fica desligado e nada depende dela). Banco ja existente: docs/operations/CONHECIMENTO-HIBRIDO.md.
+if [ "$(psql -tA --username "$POSTGRES_USER" --dbname postgres -c "SELECT 1 FROM pg_available_extensions WHERE name = 'vector'")" = "1" ]; then
+  psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname iabimeta -c "CREATE EXTENSION IF NOT EXISTS vector"
+fi

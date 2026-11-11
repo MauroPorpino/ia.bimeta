@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="../tests/adapters/IaBimeta.Adapters.Ai.OpenAI.Tests/IaBimeta.Adapters.Ai.OpenAI.Tests.csproj" />
+  <Project Path="../tests/adapters/IaBimeta.Adapters.Ai.Ollama.Tests/IaBimeta.Adapters.Ai.Ollama.Tests.csproj" />
   <Project Path="../tests/adapters/IaBimeta.Adapters.WhatsApp.Tests/IaBimeta.Adapters.WhatsApp.Tests.csproj" />
   <Project Path="../tests/agents/IaBimeta.Agents.Tests/IaBimeta.Agents.Tests.csproj" />
   <Project Path="../tests/ai-gateway/IaBimeta.AiGateway.Tests/IaBimeta.AiGateway.Tests.csproj" />
@@ -12,12 +13,14 @@
   <Project Path="../tests/IaBimeta.ArchitectureTests/IaBimeta.ArchitectureTests.csproj" />
   <Project Path="../tests/IaBimeta.IntegrationTests/IaBimeta.IntegrationTests.csproj" />
   <Project Path="../tests/identity/IaBimeta.Identity.Tests/IaBimeta.Identity.Tests.csproj" />
+  <Project Path="../tests/knowledge/IaBimeta.Knowledge.Tests/IaBimeta.Knowledge.Tests.csproj" />
   <Project Path="../tests/tenancy/IaBimeta.Tenancy.Tests/IaBimeta.Tenancy.Tests.csproj" />
   <Project Path="building-blocks/IaBimeta.Messaging/IaBimeta.Messaging.csproj" />
   <Project Path="building-blocks/IaBimeta.SharedKernel/IaBimeta.SharedKernel.csproj" />
   <Project Path="host/IaBimeta.Api/IaBimeta.Api.csproj" />
   <Project Path="host/IaBimeta.Worker/IaBimeta.Worker.csproj" />
   <Project Path="adapters/IaBimeta.Adapters.Ai.OpenAI/IaBimeta.Adapters.Ai.OpenAI.csproj" />
+  <Project Path="adapters/IaBimeta.Adapters.Ai.Ollama/IaBimeta.Adapters.Ai.Ollama.csproj" />
   <Project Path="adapters/IaBimeta.Adapters.WhatsApp/IaBimeta.Adapters.WhatsApp.csproj" />
   <Project Path="modules/agents/IaBimeta.Agents.Core/IaBimeta.Agents.Core.csproj" />
   <Project Path="modules/agents/IaBimeta.Agents.Infrastructure/IaBimeta.Agents.Infrastructure.csproj" />
@@ -45,6 +48,9 @@
   <Project Path="modules/identity/IaBimeta.Identity.Core/IaBimeta.Identity.Core.csproj" />
   <Project Path="modules/identity/IaBimeta.Identity.Infrastructure/IaBimeta.Identity.Infrastructure.csproj" />
   <Project Path="modules/identity/IaBimeta.Identity.Presentation/IaBimeta.Identity.Presentation.csproj" />
+  <Project Path="modules/knowledge/IaBimeta.Knowledge.Contracts/IaBimeta.Knowledge.Contracts.csproj" />
+  <Project Path="modules/knowledge/IaBimeta.Knowledge.Core/IaBimeta.Knowledge.Core.csproj" />
+  <Project Path="modules/knowledge/IaBimeta.Knowledge.Infrastructure/IaBimeta.Knowledge.Infrastructure.csproj" />
   <Project Path="modules/tenancy/IaBimeta.Tenancy.Contracts/IaBimeta.Tenancy.Contracts.csproj" />
   <Project Path="modules/tenancy/IaBimeta.Tenancy.Core/IaBimeta.Tenancy.Core.csproj" />
   <Project Path="modules/tenancy/IaBimeta.Tenancy.Infrastructure/IaBimeta.Tenancy.Infrastructure.csproj" />

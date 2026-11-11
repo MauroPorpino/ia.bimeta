@@ -1,6 +1,7 @@
 using IaBimeta.Agents.Domain;
 using IaBimeta.Audit.Contracts;
 using IaBimeta.Audit.Contracts.Commands;
+using IaBimeta.Knowledge.Contracts;
 using IaBimeta.SharedKernel;
 
 namespace IaBimeta.Agents.Application;
@@ -21,9 +22,11 @@ public sealed class AgentDefinitionService
     private readonly IAgentDefinitionStore _store;
     private readonly IAuditWriter _audit;
     private readonly TimeProvider _clock;
+    private readonly IKnowledgeIndexing? _semantic;
 
-    public AgentDefinitionService(IRequestContextAccessor context, IAgentDefinitionStore store, IAuditWriter audit, TimeProvider clock)
+    public AgentDefinitionService(IRequestContextAccessor context, IAgentDefinitionStore store, IAuditWriter audit, TimeProvider clock, IKnowledgeIndexing? semantic = null)
     {
+        _semantic = semantic;
         _context = context;
         _store = store;
         _audit = audit;
@@ -101,7 +104,42 @@ public sealed class AgentDefinitionService
             cancellationToken);
 
         await _audit.WriteAsync(new AuditEntry("agents.definition.published", Resource, publicada.Id.ToString(), AuditOutcome.Success), cancellationToken);
+        await SyncSemanticIndexAsync(publicada, cancellationToken);
         return ToView(publicada)!;
+    }
+
+    /// <summary>
+    /// Atualiza o índice semântico com o conhecimento recém-publicado (ADR 0034): só grava o que deve ser vetorizado (a vetorização é assíncrona, no Worker). É melhor esforço: uma falha do índice NUNCA desfaz
+    /// nem falha a publicação (o conhecimento publicado é a fonte; o índice é derivado e se reconstrói na próxima publicação). Só texto aprovado vai ao índice.
+    /// </summary>
+    private async Task SyncSemanticIndexAsync(AgentDefinitionVersion publicada, CancellationToken cancellationToken)
+    {
+        if (_semantic is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var conteudo = publicada.Content;
+            var textos = new List<SemanticSourceText>();
+            for (var i = 0; i < conteudo.Faq.Count; i++)
+            {
+                var entrada = conteudo.Faq[i];
+                textos.Add(new SemanticSourceText(i, SemanticTextKind.Question, 0, entrada.Question, entrada.AutoReply));
+                var aliases = entrada.GetCleanAliases();
+                for (var a = 0; a < aliases.Count; a++)
+                {
+                    textos.Add(new SemanticSourceText(i, SemanticTextKind.Alias, a + 1, aliases[a], entrada.AutoReply));
+                }
+            }
+
+            await _semantic.SyncAsync(new SemanticSource(publicada.Number, conteudo.EffectiveFaqLocale.ToString(), textos), cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // O índice é derivado e reconstruível: a publicação já foi concluída e auditada.
+        }
     }
 
     private static AgentDefinitionView? ToView(AgentDefinitionVersion? versao) =>

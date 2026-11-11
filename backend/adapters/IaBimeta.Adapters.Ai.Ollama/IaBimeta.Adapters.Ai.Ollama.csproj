@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="IaBimeta.Adapters.Ai.Ollama.Tests" />
+  </ItemGroup>
+
+  <!-- HttpClient e System.Text.Json vêm da plataforma; o FrameworkReference só traz as abstrações de DI da extensão. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <!-- DEP-2: um adaptador referencia só o Contracts do módulo dono (Knowledge). -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\modules\knowledge\IaBimeta.Knowledge.Contracts\IaBimeta.Knowledge.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>
