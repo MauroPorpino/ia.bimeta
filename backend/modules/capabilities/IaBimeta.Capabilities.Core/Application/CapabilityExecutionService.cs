@@ -53,6 +53,7 @@ public sealed partial class CapabilityExecutionService : ICapabilityExecutor, IC
 
     public async Task<IReadOnlyList<CapabilityDescriptor>> ListAsync(CapabilityCaller caller, CancellationToken cancellationToken = default)
     {
+        _auth.RequireAny(Permission.IntegrationExecute, Permission.IntegrationExecuteWrite);
         var contexto = _auth.Context;
         var conexoes = (await _connections.ListAsync(cancellationToken)).Where(c => c.Enabled).ToDictionary(c => c.Id);
         var lista = new List<CapabilityDescriptor>();
@@ -98,6 +99,9 @@ public sealed partial class CapabilityExecutionService : ICapabilityExecutor, IC
     {
         ArgumentNullException.ThrowIfNull(invocation);
 
+        // O portão de função vem ANTES de qualquer consulta: quem não pode executar nada não sonda chaves nem recebe 404.
+        await _auth.RequireAnyAsync("capabilities.execute", CapabilitiesAuthorizer.ExecutionResource, cancellationToken, Permission.IntegrationExecute, Permission.IntegrationExecuteWrite);
+
         if (!_options.Enabled)
         {
             return await RejectAsync(null, "module-disabled", cancellationToken);
@@ -126,6 +130,7 @@ public sealed partial class CapabilityExecutionService : ICapabilityExecutor, IC
     public async Task<CapabilityResult> TestOperationAsync(Guid definitionId, IReadOnlyDictionary<string, JsonElement> parameters, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(parameters);
+        _auth.RequireAny(Permission.IntegrationTest);
         var definicao = await _definitions.FindAsync(definitionId, cancellationToken);
         if (definicao is null || parameters.Count > 40)
         {
@@ -139,6 +144,7 @@ public sealed partial class CapabilityExecutionService : ICapabilityExecutor, IC
     public async Task<IReadOnlyList<CapabilityParameterProblem>?> ValidateParametersAsync(Guid definitionId, IReadOnlyDictionary<string, JsonElement> parameters, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(parameters);
+        _auth.RequireAny(Permission.IntegrationTest);
         var definicao = await _definitions.FindAsync(definitionId, cancellationToken);
         if (definicao is null)
         {
@@ -250,6 +256,7 @@ public sealed partial class CapabilityExecutionService : ICapabilityExecutor, IC
     /// <summary>Confirma uma escrita pendente. Exige um USUÁRIO com <c>IntegrationExecuteWrite</c> sobre a organização da conexão; um contexto de sistema (agente, fluxo) nunca confirma.</summary>
     public async Task<CapabilityResult> ConfirmAsync(Guid executionId, CancellationToken cancellationToken = default)
     {
+        await _auth.RequireAnyUserAsync("capabilities.execution.confirm", CapabilitiesAuthorizer.ExecutionResource, Permission.IntegrationExecuteWrite, cancellationToken);
         var execucao = await _executions.FindAsync(executionId, cancellationToken);
         if (execucao is null)
         {
@@ -328,6 +335,7 @@ public sealed partial class CapabilityExecutionService : ICapabilityExecutor, IC
 
     public async Task<CapabilityResult> CancelAsync(Guid executionId, CancellationToken cancellationToken = default)
     {
+        await _auth.RequireAnyUserAsync("capabilities.execution.cancel", CapabilitiesAuthorizer.ExecutionResource, Permission.IntegrationExecuteWrite, cancellationToken);
         var execucao = await _executions.FindAsync(executionId, cancellationToken);
         if (execucao is null)
         {

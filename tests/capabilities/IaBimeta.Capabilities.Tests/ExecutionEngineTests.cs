@@ -412,3 +412,35 @@ public class ExecutionAuthorizationTests
         Assert.Empty(h.Rows.Executions);
     }
 }
+
+/// <summary>O portão de função: quem não tem permissão de integração em lugar nenhum é recusado antes de qualquer consulta (não sonda chaves nem ids).</summary>
+public class FunctionGateTests
+{
+    [Fact]
+    public async Task Usuario_sem_nenhuma_permissao_de_integracao_recebe_acesso_negado_e_nunca_um_404_ou_lista_vazia()
+    {
+        var admin = new Harness();
+        admin.SeedTypical();
+        var semNada = admin.As(TestContexts.User(TestContexts.TenantA, Permission.UserRead));
+        var qualquerId = Guid.NewGuid();
+
+        await Assert.ThrowsAsync<AccessDeniedException>(() => semNada.Engine.ExecuteAsync(semNada.Read("nao.existe", new { numero = 1 })));
+        await Assert.ThrowsAsync<AccessDeniedException>(() => semNada.Engine.ExecuteAsync(semNada.Read(Harness.Pedido, new { numero = 1 })));
+        await Assert.ThrowsAsync<AccessDeniedException>(() => semNada.Engine.ConfirmAsync(qualquerId));
+        await Assert.ThrowsAsync<AccessDeniedException>(() => semNada.Engine.CancelAsync(qualquerId));
+        await Assert.ThrowsAsync<AccessDeniedException>(() => semNada.Engine.ListAsync(CapabilityCaller.Operator));
+        await Assert.ThrowsAsync<AccessDeniedException>(() => semNada.Engine.TestOperationAsync(qualquerId, Harness.P(new { })));
+        await Assert.ThrowsAsync<AccessDeniedException>(() => semNada.Engine.ValidateParametersAsync(qualquerId, Harness.P(new { })));
+        await Assert.ThrowsAsync<AccessDeniedException>(() => semNada.Admin.ListAsync());
+        await Assert.ThrowsAsync<AccessDeniedException>(() => semNada.Admin.GetAsync(qualquerId));
+        await Assert.ThrowsAsync<AccessDeniedException>(() => semNada.Admin.TestAsync(qualquerId));
+        await Assert.ThrowsAsync<AccessDeniedException>(() => semNada.Defs.ListAsync(null));
+        await Assert.ThrowsAsync<AccessDeniedException>(() => semNada.Defs.GetAsync(qualquerId));
+        await Assert.ThrowsAsync<AccessDeniedException>(() => semNada.Defs.VersionsAsync("pedidos.consultar"));
+        await Assert.ThrowsAsync<AccessDeniedException>(() => semNada.History.ListAsync(null, null, null, null, 10, 0));
+        await Assert.ThrowsAsync<AccessDeniedException>(() => semNada.History.GetAsync(qualquerId));
+        await Assert.ThrowsAsync<AccessDeniedException>(() => semNada.History.StatsAsync(7));
+        Assert.Empty(admin.Connector.Calls);
+        Assert.Contains(admin.Audit.Entries, e => e.Operation == "capabilities.execute" && e.Outcome == AuditOutcome.Denied);
+    }
+}

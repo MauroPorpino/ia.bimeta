@@ -94,7 +94,8 @@ internal sealed class CapabilityDefinitionConfiguration : IEntityTypeConfigurati
 
         builder.HasIndex(d => new { d.TenantId, d.Key, d.Version }).IsUnique().HasDatabaseName(VersionIndex);
         builder.HasIndex(d => new { d.TenantId, d.Key }).IsUnique().HasFilter("status = 2").HasDatabaseName(PublishedIndex);
-        builder.HasIndex(d => new { d.TenantId, d.Key }).IsUnique().HasFilter("status = 1").HasDatabaseName(DraftIndex);
+        // O índice do rascunho inclui o status nas colunas: sem isso o EF funde os dois índices parciais (mesmas colunas) e o da versão publicada se perde.
+        builder.HasIndex(d => new { d.TenantId, d.Key, d.Status }).IsUnique().HasFilter("status = 1").HasDatabaseName(DraftIndex);
         builder.HasIndex(d => new { d.TenantId, d.ConnectionId }).HasDatabaseName("ix_capability_definitions_tenant_id_connection_id");
     }
 }

@@ -241,7 +241,7 @@ public class ConnectionAdminTests
         var testador = admin.As(TestContexts.User(TestContexts.TenantA, Permission.IntegrationTest));
         Assert.NotNull(await testador.Admin.TestAsync(v.Id));
         await Assert.ThrowsAsync<AccessDeniedException>(() => testador.Admin.SetEnabledAsync(v.Id, true));
-        Assert.Empty(await testador.Admin.ListAsync());
+        await Assert.ThrowsAsync<AccessDeniedException>(() => testador.Admin.ListAsync());
 
         var daOutraOrg = admin.As(TestContexts.User(TestContexts.TenantA, new PermissionGrant(Permission.IntegrationRead, TestContexts.OrgB), new PermissionGrant(Permission.IntegrationManage, TestContexts.OrgB)));
         Assert.Empty(await daOutraOrg.Admin.ListAsync());

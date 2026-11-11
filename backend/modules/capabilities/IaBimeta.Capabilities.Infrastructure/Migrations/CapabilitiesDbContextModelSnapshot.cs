@@ -116,6 +116,11 @@ namespace IaBimeta.Capabilities.Infrastructure.Migrations
 
                     b.HasIndex("TenantId", "Key")
                         .IsUnique()
+                        .HasDatabaseName("ux_capability_definitions_published")
+                        .HasFilter("status = 2");
+
+                    b.HasIndex("TenantId", "Key", "Status")
+                        .IsUnique()
                         .HasDatabaseName("ux_capability_definitions_draft")
                         .HasFilter("status = 1");
 

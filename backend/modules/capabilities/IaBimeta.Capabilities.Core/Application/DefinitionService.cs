@@ -32,6 +32,7 @@ public sealed partial class DefinitionService
 
     public async Task<IReadOnlyList<DefinitionView>> ListAsync(Guid? connectionId, CancellationToken cancellationToken = default)
     {
+        _auth.RequireAny(Permission.IntegrationRead);
         var visiveis = _auth.Context.OrganizationsWithPermission(Permission.IntegrationRead);
         var conexoes = (await _connections.ListAsync(cancellationToken)).Where(c => visiveis is null || (c.OrganizationId is { } o && visiveis.Contains(o))).Select(c => c.Id).ToHashSet();
         var todas = await _definitions.ListLatestAsync(connectionId, cancellationToken);
@@ -40,12 +41,14 @@ public sealed partial class DefinitionService
 
     public async Task<DefinitionView?> GetAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        _auth.RequireAny(Permission.IntegrationRead);
         var definicao = await _definitions.FindAsync(id, cancellationToken);
         return definicao is not null && await CanReadAsync(definicao, cancellationToken) ? DefinitionView.From(definicao) : null;
     }
 
     public async Task<IReadOnlyList<DefinitionView>> VersionsAsync(string key, CancellationToken cancellationToken = default)
     {
+        _auth.RequireAny(Permission.IntegrationRead);
         var versoes = await _definitions.ListVersionsAsync(key, cancellationToken);
         var lidas = new List<DefinitionView>();
         foreach (var versao in versoes)
@@ -63,6 +66,7 @@ public sealed partial class DefinitionService
     public async Task<DefinitionView> SaveDraftAsync(DefinitionRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        _auth.RequireAny(Permission.IntegrationManage);
 
         var conexao = await _connections.FindAsync(request.ConnectionId, cancellationToken)
             ?? throw new CapabilitiesValidationException("connectionId: conexão não encontrada.");
@@ -171,6 +175,7 @@ public sealed partial class DefinitionService
 
     public async Task<DefinitionView?> PublishAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        _auth.RequireAny(Permission.IntegrationManage);
         var rascunho = await _definitions.FindAsync(id, cancellationToken);
         if (rascunho is null)
         {
@@ -214,6 +219,7 @@ public sealed partial class DefinitionService
 
     public async Task<DefinitionView?> RetireAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        _auth.RequireAny(Permission.IntegrationManage);
         var definicao = await _definitions.FindAsync(id, cancellationToken);
         if (definicao is null)
         {
@@ -230,6 +236,7 @@ public sealed partial class DefinitionService
     /// <summary>Liga ou desliga a versão publicada (vale já na próxima execução). Não cria versão: é um interruptor operacional, auditado.</summary>
     public async Task<DefinitionView?> SetEnabledAsync(Guid id, bool enabled, CancellationToken cancellationToken = default)
     {
+        _auth.RequireAny(Permission.IntegrationManage);
         var definicao = await _definitions.FindAsync(id, cancellationToken);
         if (definicao is null)
         {

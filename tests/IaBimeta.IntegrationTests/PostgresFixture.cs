@@ -6,6 +6,7 @@ using IaBimeta.AiGateway.Testing;
 using IaBimeta.Api.Channels;
 using IaBimeta.Api.ContactCenter;
 using IaBimeta.Audit.Infrastructure;
+using IaBimeta.Capabilities.Infrastructure;
 using IaBimeta.Channels.Infrastructure;
 using IaBimeta.ContactCenter.Application;
 using IaBimeta.ContactCenter.Infrastructure;
@@ -120,6 +121,7 @@ public sealed class PostgresFixture : IAsyncLifetime
         colecao.AddScoped<RequestContextHolder>();
         colecao.AddScoped<IRequestContextAccessor>(provider => provider.GetRequiredService<RequestContextHolder>());
         colecao.AddAudit(_ => ConnectionString);
+        colecao.AddCapabilities(_ => ConnectionString);
         colecao.AddTenancy(_ => ConnectionString);
         colecao.AddIdentityModule(_ => ConnectionString, opcoes => opcoes.PasswordHashIterations = PasswordIterations);
         // Etapa 3: o publicador é o dublê em memória (não durável), como no host.
@@ -240,6 +242,7 @@ public sealed class PostgresFixture : IAsyncLifetime
         await escopo.ServiceProvider.GetRequiredService<ChannelsDbContext>().Database.MigrateAsync();
         await escopo.ServiceProvider.GetRequiredService<ContactCenterDbContext>().Database.MigrateAsync();
         await escopo.ServiceProvider.GetRequiredService<AiGatewayDbContext>().Database.MigrateAsync();
+        await escopo.ServiceProvider.GetRequiredService<CapabilitiesDbContext>().Database.MigrateAsync();
 
         // O esquema do Agents só existe na composição dos Agents (as demais composições não o conhecem).
         await using (var escopoDosAgentes = _servicosComAgentes.CreateAsyncScope())

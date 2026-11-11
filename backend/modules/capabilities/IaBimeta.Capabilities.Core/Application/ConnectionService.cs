@@ -62,6 +62,7 @@ public sealed partial class ConnectionService
 
     public async Task<IReadOnlyList<ConnectionView>> ListAsync(CancellationToken cancellationToken = default)
     {
+        _auth.RequireAny(Permission.IntegrationRead);
         var contexto = _auth.Context;
         var visiveis = contexto.OrganizationsWithPermission(Permission.IntegrationRead);
         var todas = await _store.ListAsync(cancellationToken);
@@ -75,6 +76,7 @@ public sealed partial class ConnectionService
     /// <summary>Uma conexão que o contexto não pode ler responde como se não existisse (404).</summary>
     public async Task<ConnectionView?> GetAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        _auth.RequireAny(Permission.IntegrationRead);
         var conexao = await _store.FindAsync(id, cancellationToken);
         return conexao is not null && _auth.Context.IsAllowed(Permission.IntegrationRead, conexao.OrganizationId) ? ConnectionView.From(conexao) : null;
     }
@@ -102,6 +104,7 @@ public sealed partial class ConnectionService
 
     public async Task<ConnectionView?> UpdateAsync(Guid id, ConnectionUpdate request, CancellationToken cancellationToken = default)
     {
+        _auth.RequireAny(Permission.IntegrationManage);
         ArgumentNullException.ThrowIfNull(request);
         var conexao = await _store.FindAsync(id, cancellationToken);
         if (conexao is null)
@@ -122,6 +125,7 @@ public sealed partial class ConnectionService
     /// <summary>Define (ou troca) o segredo. Cifrado antes de gravar; a resposta é a visão SEM segredo. Sem chave de cifra configurada: 503 e nada é gravado.</summary>
     public async Task<ConnectionView?> SetSecretAsync(Guid id, ConnectionSecretRequest request, CancellationToken cancellationToken = default)
     {
+        _auth.RequireAny(Permission.IntegrationManage);
         ArgumentNullException.ThrowIfNull(request);
         var conexao = await _store.FindAsync(id, cancellationToken);
         if (conexao is null)
@@ -175,6 +179,7 @@ public sealed partial class ConnectionService
     /// <summary>Habilitar exige o segredo definido (se o tipo de autenticação o usa). Desabilitar vale já na próxima execução.</summary>
     public async Task<ConnectionView?> SetEnabledAsync(Guid id, bool enabled, CancellationToken cancellationToken = default)
     {
+        _auth.RequireAny(Permission.IntegrationManage);
         var conexao = await _store.FindAsync(id, cancellationToken);
         if (conexao is null)
         {
@@ -203,6 +208,7 @@ public sealed partial class ConnectionService
     /// <summary>Sonda o alcance e a autenticação da conexão (uma chamada ao caminho de saúde). Não executa nenhuma operação do catálogo. Funciona mesmo com a conexão desabilitada (é como se prepara).</summary>
     public async Task<ConnectionTestResult?> TestAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        _auth.RequireAny(Permission.IntegrationTest);
         var conexao = await _store.FindAsync(id, cancellationToken);
         if (conexao is null)
         {

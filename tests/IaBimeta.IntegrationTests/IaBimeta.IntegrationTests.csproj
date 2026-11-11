@@ -45,6 +45,9 @@
     <ProjectReference Include="..\..\backend\modules\knowledge\IaBimeta.Knowledge.Contracts\IaBimeta.Knowledge.Contracts.csproj" />
     <ProjectReference Include="..\..\backend\modules\knowledge\IaBimeta.Knowledge.Core\IaBimeta.Knowledge.Core.csproj" />
     <ProjectReference Include="..\..\backend\modules\knowledge\IaBimeta.Knowledge.Infrastructure\IaBimeta.Knowledge.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\backend\modules\capabilities\IaBimeta.Capabilities.Contracts\IaBimeta.Capabilities.Contracts.csproj" />
+    <ProjectReference Include="..\..\backend\modules\capabilities\IaBimeta.Capabilities.Core\IaBimeta.Capabilities.Core.csproj" />
+    <ProjectReference Include="..\..\backend\modules\capabilities\IaBimeta.Capabilities.Infrastructure\IaBimeta.Capabilities.Infrastructure.csproj" />
     <ProjectReference Include="..\..\backend\modules\agents\IaBimeta.Agents.Core\IaBimeta.Agents.Core.csproj" />
     <ProjectReference Include="..\..\backend\modules\agents\IaBimeta.Agents.Infrastructure\IaBimeta.Agents.Infrastructure.csproj" />
     <ProjectReference Include="..\..\backend\modules\ai-gateway\IaBimeta.AiGateway.Contracts\IaBimeta.AiGateway.Contracts.csproj" />

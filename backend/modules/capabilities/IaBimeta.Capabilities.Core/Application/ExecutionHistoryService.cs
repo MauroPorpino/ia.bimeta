@@ -27,6 +27,7 @@ public sealed class ExecutionHistoryService
 
     public async Task<ExecutionPage> ListAsync(Guid? connectionId, string? key, CapabilityExecutionStatus? status, bool? isTest, int take, int skip, CancellationToken cancellationToken = default)
     {
+        _auth.RequireAny(Permission.IntegrationRead);
         if (take is < 1 or > MaxTake || skip < 0 || (status is { } s && !Enum.IsDefined(s)))
         {
             throw new CapabilitiesValidationException($"take: de 1 a {MaxTake}; skip não negativo; situação válida.");
@@ -46,6 +47,7 @@ public sealed class ExecutionHistoryService
 
     public async Task<ExecutionView?> GetAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        _auth.RequireAny(Permission.IntegrationRead);
         var execucao = await _executions.FindAsync(id, cancellationToken);
         var visiveis = _auth.Context.OrganizationsWithPermission(Permission.IntegrationRead);
         var pode = execucao is not null && (visiveis is null || (execucao.OrganizationId is { } o && visiveis.Contains(o)));
@@ -54,6 +56,7 @@ public sealed class ExecutionHistoryService
 
     public async Task<IReadOnlyList<ConnectionStatsView>> StatsAsync(int days, CancellationToken cancellationToken = default)
     {
+        _auth.RequireAny(Permission.IntegrationRead);
         if (days is < 1 or > 90)
         {
             throw new CapabilitiesValidationException("days: de 1 a 90.");
