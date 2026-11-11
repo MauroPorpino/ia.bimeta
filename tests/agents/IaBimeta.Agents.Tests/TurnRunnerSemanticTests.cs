@@ -60,6 +60,17 @@ public sealed class TurnRunnerSemanticTests
     }
 
     [Fact]
+    public async Task A_pergunta_vai_ao_servico_de_vetores_sem_dados_pessoais_por_padrao()
+    {
+        var h = Montar("preciso de jejum para glicose? meu email e ana@exemplo.com e meu cpf 123.456.789-09");
+        await h.RunAsync(h.SeedRunning());
+        var consulta = Assert.Single(h.Search.Requests).Query;
+        Assert.DoesNotContain("ana@exemplo.com", consulta);
+        Assert.DoesNotContain("123.456.789-09", consulta);
+        Assert.Contains("[email]", consulta);
+    }
+
+    [Fact]
     public async Task Modo_avaliacao_registra_o_que_teria_respondido_mas_o_modelo_responde()
     {
         var h = Montar(modo: SemanticAnswerMode.Evaluate);

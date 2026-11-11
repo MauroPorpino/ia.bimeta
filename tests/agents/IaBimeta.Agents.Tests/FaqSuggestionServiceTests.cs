@@ -135,6 +135,17 @@ public sealed class FaqSuggestionServiceTests
     }
 
     [Fact]
+    public async Task Desligada_a_IA_local_recusa_antes_de_ler_qualquer_conversa_mesmo_sem_lacunas_ou_com_FAQ_pequeno()
+    {
+        var c = new Cenario(enabled: false);
+        Assert.Equal("disabled", (await Assert.ThrowsAsync<FaqSuggestionUnavailableException>(() => c.Servico.ClusterOpenGapsAsync())).Code);
+        Assert.Equal("disabled", (await Assert.ThrowsAsync<FaqSuggestionUnavailableException>(() => c.Servico.AnalyzeFaqAsync())).Code);
+        Assert.Equal("disabled", (await Assert.ThrowsAsync<FaqSuggestionUnavailableException>(() => c.Servico.GenerateForGapAsync(Guid.NewGuid()))).Code);
+        Assert.Empty(c.Conversas.Queries); // nenhum texto de cliente foi lido
+        Assert.Empty(c.Auditoria.Entries);
+    }
+
+    [Fact]
     public async Task Sem_a_permissao_toda_operacao_e_negada_e_o_modelo_nao_e_chamado()
     {
         var c = new Cenario(context: TestContexts.User(TestContexts.TenantA, Permission.ConversationRead));

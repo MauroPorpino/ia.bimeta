@@ -138,6 +138,7 @@ public sealed class FaqSuggestionService
     {
         var contexto = _context.GetRequired();
         contexto.Require(Permission.TenantSettingsManage);
+        EnsureAvailable();
 
         var chave = $"gap:{gapId}";
         var existente = await _store.FindPendingByKeyAsync(chave, cancellationToken);
@@ -189,6 +190,7 @@ public sealed class FaqSuggestionService
     public async Task<FaqSuggestionGeneration> ClusterOpenGapsAsync(CancellationToken cancellationToken = default)
     {
         _context.GetRequired().Require(Permission.TenantSettingsManage);
+        EnsureAvailable();
         var abertas = await _gaps.ListAsync(KnowledgeGapStatus.Open, SuggestionGeneration.MaxClusterQuestions, 0, cancellationToken);
 
         var perguntas = new List<(Guid GapId, string Text)>();
@@ -232,6 +234,7 @@ public sealed class FaqSuggestionService
     public async Task<FaqSuggestionGeneration> AnalyzeFaqAsync(CancellationToken cancellationToken = default)
     {
         _context.GetRequired().Require(Permission.TenantSettingsManage);
+        EnsureAvailable();
         var faq = await CurrentFaqAsync(cancellationToken);
         if (faq.Count < 2)
         {
@@ -452,13 +455,26 @@ public sealed class FaqSuggestionService
         return conteudo?.Faq ?? [];
     }
 
-    private async Task<LocalGenerationResult> GenerateAsync(LocalGenerationRequest pedido, CancellationToken cancellationToken)
+    /// <summary>
+    /// A IA local precisa estar ligada e configurada ANTES de qualquer leitura de conversa: desligada, nada de texto de cliente e nenhuma auditoria de leitura de fonte acontecem, e a resposta é sempre a mesma
+    /// (503 com código fixo), qualquer que seja o estado das lacunas ou do FAQ.
+    /// </summary>
+    private void EnsureAvailable()
     {
         if (!_options.LocalSuggestionsEnabled)
         {
             throw new FaqSuggestionUnavailableException("disabled");
         }
 
+        if (_local is null)
+        {
+            throw new FaqSuggestionUnavailableException("not-configured");
+        }
+    }
+
+    private async Task<LocalGenerationResult> GenerateAsync(LocalGenerationRequest pedido, CancellationToken cancellationToken)
+    {
+        EnsureAvailable();
         if (_local is null)
         {
             throw new FaqSuggestionUnavailableException("not-configured");

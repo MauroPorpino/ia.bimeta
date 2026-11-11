@@ -336,7 +336,7 @@ public sealed class TurnRunner
                 return null;
             }
 
-            busca = await _search.SearchAsync(new SemanticSearchRequest(mensagem.Text!, definicao.EffectiveFaqLocale.ToString(), OnlyAutoReplyEligible: false, Limit: 5), ct);
+            busca = await _search.SearchAsync(new SemanticSearchRequest(PiiRedactor.Redact(mensagem.Text), definicao.EffectiveFaqLocale.ToString(), OnlyAutoReplyEligible: false, Limit: 5), ct);
             if (busca.Outcome == SemanticSearchOutcome.Disabled)
             {
                 return null;
