@@ -48,6 +48,12 @@ public sealed class AgentsOptions
     public bool FaqDirectAnswerEnabled { get; set; } = true;
 
     /// <summary>
+    /// O interruptor GLOBAL da resposta direta por similaridade (ADR 0034). Desligado (padrão), nenhum tenant consulta a busca semântica, qualquer que seja o modo dele. Ligado, cada tenant ainda precisa ter o
+    /// modo <c>Evaluate</c> ou <c>Active</c> (o padrão do tenant é desligado) e o <c>Knowledge:Semantic:Enabled</c> do índice. Os três são independentes: qualquer um desligado devolve o turno ao fluxo anterior.
+    /// </summary>
+    public bool SemanticAnswerEnabled { get; set; }
+
+    /// <summary>
     /// Liga o REGISTRO DE LACUNAS do FAQ (ADR 0030): a pergunta de cliente que não teve resposta direta e vale uma revisão vira uma ocorrência (só referências e um hash, nunca o texto). Independe da resposta direta:
     /// um tenant que ainda não ligou nenhum <c>AutoReply</c> também descobre o que os clientes perguntam. Desligado, nada é gravado. Sem <see cref="KnowledgeGapHashKey"/> o registro também não roda.
     /// </summary>

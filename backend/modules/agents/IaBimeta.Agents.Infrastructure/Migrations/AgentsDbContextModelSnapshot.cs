@@ -352,6 +352,117 @@ namespace IaBimeta.Agents.Infrastructure.Migrations
                     b.ToTable("knowledge_gap_occurrences", "agents");
                 });
 
+            modelBuilder.Entity("IaBimeta.Agents.Domain.SemanticAnswerSettings", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<double>("MinMargin")
+                        .HasColumnType("double precision")
+                        .HasColumnName("min_margin");
+
+                    b.Property<double>("MinScore")
+                        .HasColumnType("double precision")
+                        .HasColumnName("min_score");
+
+                    b.Property<short>("Mode")
+                        .HasColumnType("smallint")
+                        .HasColumnName("mode");
+
+                    b.Property<int>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("revision");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by");
+
+                    b.HasKey("TenantId");
+
+                    b.ToTable("semantic_answer_settings", "agents", t =>
+                        {
+                            t.HasCheckConstraint("ck_semantic_answer_settings_min_margin", "min_margin >= 0 AND min_margin <= 0.5");
+
+                            t.HasCheckConstraint("ck_semantic_answer_settings_min_score", "min_score >= 0.6 AND min_score <= 1");
+
+                            t.HasCheckConstraint("ck_semantic_answer_settings_mode", "mode IN (0, 1, 2)");
+
+                            t.HasCheckConstraint("ck_semantic_answer_settings_revision", "revision >= 1");
+                        });
+                });
+
+            modelBuilder.Entity("IaBimeta.Agents.Domain.SemanticDecision", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid>("TurnId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("turn_id");
+
+                    b.Property<DateTimeOffset>("DecidedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("decided_at");
+
+                    b.Property<int?>("DefinitionNumber")
+                        .HasColumnType("integer")
+                        .HasColumnName("definition_number");
+
+                    b.Property<int>("EmbeddingMilliseconds")
+                        .HasColumnType("integer")
+                        .HasColumnName("embedding_ms");
+
+                    b.Property<int?>("EntryOrdinal")
+                        .HasColumnType("integer")
+                        .HasColumnName("entry_ordinal");
+
+                    b.Property<string>("FailureCode")
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)")
+                        .HasColumnName("failure_code");
+
+                    b.Property<double?>("Margin")
+                        .HasColumnType("double precision")
+                        .HasColumnName("margin");
+
+                    b.Property<short>("Mode")
+                        .HasColumnType("smallint")
+                        .HasColumnName("mode");
+
+                    b.Property<short>("Outcome")
+                        .HasColumnType("smallint")
+                        .HasColumnName("outcome");
+
+                    b.Property<double?>("Score")
+                        .HasColumnType("double precision")
+                        .HasColumnName("score");
+
+                    b.Property<int>("SearchMilliseconds")
+                        .HasColumnType("integer")
+                        .HasColumnName("search_ms");
+
+                    b.HasKey("TenantId", "TurnId");
+
+                    b.HasIndex("TenantId", "DecidedAt")
+                        .HasDatabaseName("ix_semantic_decisions_tenant_id_decided_at");
+
+                    b.ToTable("semantic_decisions", "agents", t =>
+                        {
+                            t.HasCheckConstraint("ck_semantic_decisions_mode", "mode IN (1, 2)");
+
+                            t.HasCheckConstraint("ck_semantic_decisions_outcome", "outcome IN (1, 2, 3, 4, 5, 6, 7, 8, 9)");
+
+                            t.HasCheckConstraint("ck_semantic_decisions_times", "embedding_ms >= 0 AND search_ms >= 0");
+                        });
+                });
+
             modelBuilder.Entity("IaBimeta.Messaging.InboxMessage", b =>
                 {
                     b.Property<Guid>("TenantId")

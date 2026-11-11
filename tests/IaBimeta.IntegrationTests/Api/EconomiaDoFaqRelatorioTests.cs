@@ -35,6 +35,27 @@ public sealed class EconomiaDoFaqRelatorioTests
     }
 
     [Fact]
+    public void Acertos_da_busca_semantica_tem_linha_propria_exata_e_entram_na_estimativa_com_o_custo_da_IA_local_nao_descontado()
+    {
+        // 2 do FAQ + 3 da busca semantica = 5 chamadas evitadas; media 1.800 tokens e 0,003 USD por chamada.
+        var linhas = Descrever(new[] { new FaqTurnCounts(A, 2, 5, 3) }, new[] { new ModelCallAverage(A, 2, 3600, "USD", 2, 0.006m) });
+
+        Assert.Equal(3, linhas.Count);
+        Assert.Contains("3 turno(s) respondido(s) direto pela BUSCA SEMÂNTICA", linhas[1].Message);
+        Assert.Contains("contagem exata", linhas[1].Message);
+        Assert.Contains("ESTIMATIVA (não medida): ~9.000 tokens e ~0,0150 USD", linhas[2].Message); // 5 x 1.800 e 5 x 0,003
+        Assert.Contains("FAQ 2 + busca semântica 3", linhas[2].Message);
+        Assert.Contains("custo da IA local é infraestrutura própria e NÃO está descontado", linhas[2].Message);
+    }
+
+    [Fact]
+    public void Empresa_so_com_acertos_semanticos_tambem_aparece_no_relatorio()
+    {
+        var linhas = Descrever(new[] { new FaqTurnCounts(A, 0, 1, 2) }, Array.Empty<ModelCallAverage>());
+        Assert.Contains(linhas, l => l.Message.Contains("2 turno(s) respondido(s) direto pela BUSCA SEMÂNTICA"));
+    }
+
+    [Fact]
     public void Sem_chamada_confirmada_na_janela_nao_ha_media_e_nenhum_numero_e_inventado()
     {
         var linhas = Descrever(new[] { new FaqTurnCounts(A, 4, 0) }, Array.Empty<ModelCallAverage>());

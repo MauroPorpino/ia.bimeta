@@ -10,6 +10,9 @@ namespace IaBimeta.Agents.Presentation;
 /// <summary>A entrada de FAQ que o administrador montou a partir de uma lacuna. <c>AutoReply</c> é falso por padrão.</summary>
 public sealed record PromoteKnowledgeGapBody(string? Question, IReadOnlyList<string>? Aliases, string? Answer, bool AutoReply = false);
 
+/// <summary>A configuração semântica enviada pelo administrador. O tenant nunca vem no corpo.</summary>
+public sealed record SemanticSettingsBody(SemanticAnswerMode Mode, double MinScore, double MinMargin);
+
 public static class AgentsEndpoints
 {
     /// <summary>
@@ -59,6 +62,16 @@ public static class AgentsEndpoints
 
         // A publicação é uma ação explícita do administrador: o rascunho vira a versão que o agente usa, e a anterior é aposentada, numa transação, com auditoria.
         definicao.MapPost("/publish", async (AgentDefinitionService servico, CancellationToken ct) => Results.Ok(await servico.PublishAsync(ct)));
+
+        // ADR 0034: a resposta direta por similaridade. O modo é o interruptor do tenant (Off vale no próximo turno, sem publicar nada); os limiares são do tenant; as métricas são só contagens e latências.
+        var semantica = app.MapGroup("/agents/semantic").AddEndpointFilter(TratarErrosDoAgente);
+
+        semantica.MapGet("/settings", async (SemanticAnswerSettingsService servico, CancellationToken ct) => Results.Ok(await servico.GetAsync(ct)));
+
+        semantica.MapPut("/settings", async (SemanticSettingsBody corpo, SemanticAnswerSettingsService servico, CancellationToken ct) =>
+            Results.Ok(await servico.UpdateAsync(corpo.Mode, corpo.MinScore, corpo.MinMargin, ct)));
+
+        semantica.MapGet("/metrics", async (int? days, SemanticMetricsService servico, CancellationToken ct) => Results.Ok(await servico.GetAsync(days ?? 7, ct)));
 
         return app;
     }

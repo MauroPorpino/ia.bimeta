@@ -55,7 +55,16 @@ public interface IAgentDefinitionReader
 {
     /// <summary>O conteúdo publicado, ou nulo se o tenant ainda não publicou. Sem definição publicada a IA não responde (falha fechada: o turno transfere para o atendente).</summary>
     Task<AgentDefinitionContent?> GetPublishedAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// O conteúdo publicado JUNTO com o número da versão, numa só leitura (nunca um de cada vez: uma publicação no meio os desencontraria). A resposta direta por similaridade (ADR 0034) só vale contra o índice
+    /// da MESMA versão. Nulo se não há versão publicada ou se a implementação não informa o número (falha fechada: a resposta por similaridade recusa).
+    /// </summary>
+    Task<PublishedDefinition?> GetPublishedVersionAsync(CancellationToken cancellationToken) => Task.FromResult<PublishedDefinition?>(null);
 }
+
+/// <summary>A versão publicada: o número e o conteúdo da mesma leitura.</summary>
+public sealed record PublishedDefinition(int Number, AgentDefinitionContent Content);
 
 /// <summary>O armazenamento das versões da definição do agente do tenant do contexto. As entidades voltam RASTREADAS para alteração.</summary>
 public interface IAgentDefinitionStore : IAgentDefinitionReader

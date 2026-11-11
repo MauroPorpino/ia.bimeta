@@ -46,6 +46,13 @@ public static class AgentsInfrastructureExtensions
         services.AddScoped<IKnowledgeGapRecorder, KnowledgeGapRecorder>();
         services.AddScoped<KnowledgeGapService>();
 
+        // A resposta direta por similaridade (ADR 0034): a configuração por tenant (kill switch e limiares), o registro das decisões (só números) e o caso de uso do administrador. Quem busca é o Knowledge.
+        services.AddScoped<ISemanticAnswerSettingsStore, SemanticAnswerSettingsStore>();
+        services.AddScoped<ISemanticDecisionRecorder, SemanticDecisionRecorder>();
+        services.AddScoped<SemanticAnswerSettingsService>();
+        services.AddScoped<ISemanticMetricsStore, SemanticMetricsStore>();
+        services.AddScoped<SemanticMetricsService>();
+
         // Consumo durável do estado de atendimento do Conversations: o inbox do módulo e os handlers (que só gravam o AiTurn).
         services.AddInboxGate<AgentsDbContext>();
         services.AddEventHandler<InboundMessageRegisteredHandler>();

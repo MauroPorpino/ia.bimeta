@@ -36,9 +36,21 @@ Tabela `knowledge.semantic_texts`, uma linha por texto aprovado (pergunta ou ali
 - **Vetorizar** é assíncrono, no Worker (`SemanticIndexer`): reserva um lote (`FOR UPDATE SKIP LOCKED` + lease; se o Worker cair, a reserva vence e outro retoma), pede os vetores em lote, grava só se o texto continua o mesmo (o hash confere). Falha: nova tentativa com espera exponencial (30 s, dobrando, até 10 min) até `MaxAttempts`; depois fica `Failed` e a próxima publicação o recoloca na fila.
 - **Interruptor global:** `Knowledge:Semantic:Enabled`, desligado por padrão; desligado, nada é indexado, vetorizado nem consultado e o banco do módulo não é tocado.
 
-### 4. O que este ADR ainda não decide
+### 4. Resposta direta por similaridade (Pacote 2)
 
-Resposta direta por similaridade, limiares e ambiguidade, kill switch por tenant, modo de avaliação, métricas e economia (Pacote 2); classificação, agrupamento e sugestões por IA local com revisão humana (Pacote 3); interface administrativa, suíte de qualidade em pt-BR e avaliação de prontidão (Pacote 4). Serão acrescentados a este ADR conforme implementados.
+Ordem do turno: **FAQ determinística → busca semântica → AiGateway → atendente humano**. A busca semântica só roda quando a FAQ determinística **não achou nada igual** (`NoMatch`); duplicata, entrada sem `AutoReply` ou resposta direta desligada nunca vão a ela. Elegibilidade igual à do FAQ: uma única mensagem de texto pronta, no idioma do FAQ.
+
+- **Três chaves independentes, todas desligadas por padrão:** `Agents:Options:SemanticAnswerEnabled` (global), `Knowledge:Semantic:Enabled` (índice) e o **modo do tenant** (`Off`, `Evaluate`, `Active`; tabela `agents.semantic_answer_settings`, sem linha = `Off`). Qualquer uma desligada devolve o turno ao fluxo anterior sem consultar nada. O modo do tenant é o **kill switch por tenant**: vale no próximo turno, sem publicar nada, auditado (`agents.semantic-settings.mode-off|evaluate|active`, sem conteúdo).
+- **Modo de avaliação:** a busca roda e a decisão é registrada (o que **teria** respondido), mas o turno segue ao modelo. É assim que os limiares são calibrados com tráfego real sem risco. Não se ativa `Active` para empresa real antes de a avaliação e a suíte de qualidade (Pacote 4) provarem a precisão.
+- **Política pura** (`SemanticAnswerPolicy`), na ordem: índice utilizável e **da mesma versão** da definição publicada (número e conteúdo lidos juntos; versão diferente = `Stale`, nunca responde); melhor candidato com similaridade ≥ limiar do tenant (padrão **0,90**, conservador e **ainda não calibrado** com o modelo real); nenhuma **outra** entrada a menos da margem do tenant (padrão **0,05**; as entradas sem `AutoReply` também competem, a busca não filtra por elegibilidade); a entrada do melhor candidato tem `AutoReply`; salvaguardas determinísticas.
+- **A similaridade nunca é a única garantia:** `SemanticGuards` recusa mensagem com mais de uma pergunta, longa demais (> 30 palavras ou 240 caracteres), com **polaridade diferente** do texto aprovado (negação só de um lado: "preciso de jejum" × "não preciso de jejum") ou com **números diferentes** ("exame 2" × "exame 3"). A resposta é **sempre o texto aprovado** da entrada, sem reescrita generativa, pelo mesmo `RegisterAiReply` do FAQ (as cercas do Conversations valem: resposta defasada continua recusada). O texto do cliente só entra na conferência; não altera instruções, políticas nem conhecimento.
+- **Falha segura:** erro da busca, da configuração ou do registro da métrica devolve o fluxo normal; o atendimento nunca depende da camada semântica.
+- **Métricas por tenant** (`agents.semantic_decisions`, chave `(tenant, turno)`, **só números e códigos, nenhum texto de cliente**): decisões por desfecho, acertos do FAQ e da busca, respostas do modelo, transferências, latência da etapa (média e p95) e "chamadas comerciais evitadas" (soma **exata** de FAQ + busca). Tokens e custo evitados são **estimativa**, só no relatório operacional, com rótulo próprio e o aviso de que o **custo da IA local não está descontado** (infraestrutura própria).
+- API administrativa (`TenantSettingsManage`): `GET|PUT /agents/semantic/settings` e `GET /agents/semantic/metrics`.
+
+### 5. O que este ADR ainda não decide
+
+Classificação, agrupamento e sugestões por IA local com revisão humana (Pacote 3); interface administrativa, suíte de qualidade em pt-BR e avaliação de prontidão (Pacote 4). Serão acrescentados a este ADR conforme implementados.
 
 ## Validação
 

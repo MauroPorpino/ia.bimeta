@@ -3,6 +3,7 @@ using IaBimeta.AiGateway.Contracts;
 using IaBimeta.ContactCenter.Contracts;
 using IaBimeta.Conversations.Contracts;
 using IaBimeta.Conversations.Contracts.Commands;
+using IaBimeta.Knowledge.Contracts;
 
 namespace IaBimeta.Agents.Application;
 
@@ -41,6 +42,9 @@ public enum TurnRunOutcome
 
     /// <summary>A resposta direta do FAQ (ADR 0029) foi aceita pelo Conversations: nenhuma chamada ao modelo.</summary>
     FaqReply = 11,
+
+    /// <summary>A resposta direta por similaridade no conhecimento aprovado (ADR 0034) foi aceita pelo Conversations: nenhuma chamada ao modelo.</summary>
+    SemanticReply = 12,
 }
 
 public sealed record TurnRunResult(TurnRunOutcome Outcome, string Code);
@@ -63,6 +67,9 @@ public sealed class TurnRunner
     private readonly IKnowledgeGapRecorder _gaps;
     private readonly AgentsOptions _options;
     private readonly TimeProvider _clock;
+    private readonly IKnowledgeSearch? _search;
+    private readonly ISemanticAnswerSettingsStore? _semanticSettings;
+    private readonly ISemanticDecisionRecorder? _semanticDecisions;
 
     public TurnRunner(
         IAiTurnStore store,
@@ -72,8 +79,14 @@ public sealed class TurnRunner
         IAgentDefinitionReader definitions,
         IKnowledgeGapRecorder gaps,
         AgentsOptions options,
-        TimeProvider clock)
+        TimeProvider clock,
+        IKnowledgeSearch? search = null,
+        ISemanticAnswerSettingsStore? semanticSettings = null,
+        ISemanticDecisionRecorder? semanticDecisions = null)
     {
+        _search = search;
+        _semanticSettings = semanticSettings;
+        _semanticDecisions = semanticDecisions;
         _store = store;
         _turns = turns;
         _gateway = gateway;
@@ -283,8 +296,98 @@ public sealed class TurnRunner
             return await AfterRegisterAsync(turno, lane, concessao, snapshot, registro, AiTurnEndReasons.FaqHit, TurnRunOutcome.FaqReply, definicao, ct);
         }
 
+        // ADR 0034: o FAQ determinístico não achou nada igual. Só então a busca semântica pode ESTREITAR a escolha entre as entradas aprovadas (nunca quando o FAQ achou duplicata ou entrada sem AutoReply).
+        if (achado.Kind == FaqMatchKind.NoMatch)
+        {
+            var semantica = await TryAnswerSemanticallyAsync(turno, lane, concessao, snapshot, mensagem, definicao, ct);
+            if (semantica is not null)
+            {
+                return semantica;
+            }
+        }
+
         await RecordGapAsync(turno, snapshot, mensagem, achado.Kind, ct);
         return null;
+    }
+
+    /// <summary>
+    /// A resposta direta por similaridade (ADR 0034). Três chaves independentes precisam estar ligadas (global do Agents, índice do Knowledge e modo do tenant); qualquer uma desligada, nada é consultado e o turno
+    /// segue o fluxo anterior. A busca roda no tenant do contexto, no idioma da conversa e SEM filtrar por <c>AutoReply</c> (as entradas sem resposta direta também competem: se uma delas é a melhor, não responde).
+    /// A decisão é da <see cref="SemanticAnswerPolicy"/>; no modo de avaliação ela só é registrada (o que teria respondido) e o turno vai ao modelo. A resposta é SEMPRE o texto aprovado da entrada, pelo mesmo
+    /// <c>RegisterAiReply</c> do FAQ: as cercas do Conversations valem como sempre. Qualquer falha da busca, da configuração ou do registro devolve nulo (melhor esforço): o atendimento nunca depende dela.
+    /// </summary>
+    private async Task<TurnRunResult?> TryAnswerSemanticallyAsync(
+        AiTurn turno, long lane, TurnGrant concessao, TurnSnapshot snapshot, SnapshotMessage mensagem, AgentDefinitionContent definicao, CancellationToken ct)
+    {
+        if (!_options.SemanticAnswerEnabled || _search is null || _semanticSettings is null)
+        {
+            return null;
+        }
+
+        SemanticPolicyDecision decisao;
+        SemanticAnswerMode modo;
+        SemanticSearchResult busca;
+        try
+        {
+            var configuracao = await _semanticSettings.FindAsync(ct);
+            modo = configuracao?.Mode ?? SemanticAnswerMode.Off;
+            if (modo == SemanticAnswerMode.Off)
+            {
+                return null;
+            }
+
+            busca = await _search.SearchAsync(new SemanticSearchRequest(mensagem.Text!, definicao.EffectiveFaqLocale.ToString(), OnlyAutoReplyEligible: false, Limit: 5), ct);
+            if (busca.Outcome == SemanticSearchOutcome.Disabled)
+            {
+                return null;
+            }
+
+            // O número e o conteúdo da MESMA leitura: o índice só vale contra a versão cujo conteúdo vai responder.
+            var publicada = await _definitions.GetPublishedVersionAsync(ct);
+            if (publicada is null)
+            {
+                return null;
+            }
+
+            decisao = SemanticAnswerPolicy.Decide(
+                busca, publicada.Content, publicada.Number, mensagem.Text!,
+                configuracao?.MinScore ?? SemanticAnswerSettings.DefaultMinScore, configuracao?.MinMargin ?? SemanticAnswerSettings.DefaultMinMargin,
+                answer: modo == SemanticAnswerMode.Active);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return null;
+        }
+
+        await RecordSemanticDecisionAsync(turno, modo, decisao, busca, ct);
+        if (decisao.Outcome != SemanticOutcome.Answered)
+        {
+            return null;
+        }
+
+        var registro = await RegisterAsync(turno, concessao, snapshot, ReplyKind.Informative, decisao.Entry!.Answer, Array.Empty<Guid>(), ct);
+        return await AfterRegisterAsync(turno, lane, concessao, snapshot, registro, AiTurnEndReasons.SemanticHit, TurnRunOutcome.SemanticReply, definicao, ct);
+    }
+
+    private async Task RecordSemanticDecisionAsync(AiTurn turno, SemanticAnswerMode modo, SemanticPolicyDecision decisao, SemanticSearchResult busca, CancellationToken ct)
+    {
+        if (_semanticDecisions is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _semanticDecisions.RecordAsync(
+                new SemanticDecisionRecord(
+                    turno.TenantId, turno.Id, _clock.GetUtcNow(), modo, decisao.Outcome, decisao.EntryOrdinal, decisao.Score, decisao.Margin, busca.DefinitionNumber,
+                    (int)Math.Min(busca.EmbeddingMilliseconds, int.MaxValue), (int)Math.Min(busca.SearchMilliseconds, int.MaxValue), busca.FailureCode),
+                ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Métrica é melhor esforço: nunca derruba nem atrasa o turno.
+        }
     }
 
     /// <summary>

@@ -9,7 +9,7 @@ using Microsoft.EntityFrameworkCore;
 namespace IaBimeta.Api.Operations;
 
 /// <summary>Os turnos de UM tenant na janela: quantos o FAQ respondeu direto (sem modelo) e quantos o modelo respondeu.</summary>
-internal sealed record FaqTurnCounts(Guid TenantId, int FaqHits, int ModelReplies);
+internal sealed record FaqTurnCounts(Guid TenantId, int FaqHits, int ModelReplies, int SemanticHits = 0);
 
 /// <summary>A média, no ledger do AiGateway, de uma chamada confirmada do tenant na janela: o que uma chamada evitada teria custado, em média.</summary>
 internal sealed record ModelCallAverage(Guid TenantId, long Calls, long Tokens, string? Currency, long CostCalls, decimal Cost);
@@ -39,7 +39,7 @@ internal static class FaqSavingsReport
 
         var agentes = escopo.ServiceProvider.GetRequiredService<AgentsDbContext>();
         var turnos = agentes.Turns.IgnoreQueryFilters().AsNoTracking()
-            .Where(t => t.State == AiTurnState.Completed && t.EndedAt >= desde && (t.EndReason == AiTurnEndReasons.FaqHit || t.EndReason == AiTurnEndReasons.Replied));
+            .Where(t => t.State == AiTurnState.Completed && t.EndedAt >= desde && (t.EndReason == AiTurnEndReasons.FaqHit || t.EndReason == AiTurnEndReasons.SemanticHit || t.EndReason == AiTurnEndReasons.Replied));
         if (onlyTenant is { } uma)
         {
             var tenant = new TenantId(uma);
@@ -53,9 +53,10 @@ internal static class FaqSavingsReport
                     Tenant = g.Key,
                     Hits = g.Count(t => t.EndReason == AiTurnEndReasons.FaqHit),
                     Replies = g.Count(t => t.EndReason == AiTurnEndReasons.Replied),
+                    Semantic = g.Count(t => t.EndReason == AiTurnEndReasons.SemanticHit),
                 })
                 .ToListAsync(cancellationToken))
-            .Select(c => new FaqTurnCounts(c.Tenant.Value, c.Hits, c.Replies))
+            .Select(c => new FaqTurnCounts(c.Tenant.Value, c.Hits, c.Replies, c.Semantic))
             .ToList();
 
         var gateway = escopo.ServiceProvider.GetRequiredService<AiGatewayDbContext>();
@@ -117,7 +118,7 @@ internal static class FaqSavingsReport
     {
         var linhas = new List<(Guid?, string)>();
         var janela = HealthText.Age(Window);
-        var tenants = counts.Where(c => c.FaqHits > 0).Select(c => c.TenantId).Union(mandatory).Distinct().ToList();
+        var tenants = counts.Where(c => c.FaqHits > 0 || c.SemanticHits > 0).Select(c => c.TenantId).Union(mandatory).Distinct().ToList();
 
         foreach (var tenant in tenants)
         {
@@ -128,12 +129,22 @@ internal static class FaqSavingsReport
                 $"nos últimos {janela}: {c.FaqHits.ToString("N0", Pt)} turno(s) respondido(s) direto pelo FAQ, SEM chamar o modelo (chamadas evitadas; contagem exata); " +
                 $"o modelo respondeu {c.ModelReplies.ToString("N0", Pt)} turno(s); {taxa.ToString("F1", Pt)}% dos turnos respondidos pela IA saíram do FAQ."));
 
-            if (c.FaqHits == 0)
+            // ADR 0034: o turno respondido direto pela BUSCA SEMÂNTICA também é uma chamada ao modelo que não foi feita (contagem exata, rótulo próprio: não é o FAQ determinístico).
+            if (c.SemanticHits > 0)
+            {
+                var comSemantica = c.FaqHits + c.SemanticHits + c.ModelReplies;
+                linhas.Add((tenant,
+                    $"nos últimos {janela}: {c.SemanticHits.ToString("N0", Pt)} turno(s) respondido(s) direto pela BUSCA SEMÂNTICA no conhecimento aprovado, SEM chamar o modelo (chamadas evitadas; contagem exata); " +
+                    $"{(100.0 * c.SemanticHits / comSemantica).ToString("F1", Pt)}% dos turnos respondidos pela IA."));
+            }
+
+            var evitadas = c.FaqHits + c.SemanticHits;
+            if (evitadas == 0)
             {
                 continue;
             }
 
-            var media = averages.FirstOrDefault(m => m.TenantId == tenant);
+            var media =averages.FirstOrDefault(m => m.TenantId == tenant);
             if (media is null || media.Calls == 0)
             {
                 linhas.Add((tenant, "estimativa de tokens e custo: sem chamada confirmada ao modelo deste tenant na janela, não há média para estimar (nenhum número foi inventado)."));
@@ -141,12 +152,13 @@ internal static class FaqSavingsReport
             }
 
             var mediaDeTokens = (double)media.Tokens / media.Calls;
-            var tokensEvitados = c.FaqHits * mediaDeTokens;
+            var tokensEvitados = evitadas * mediaDeTokens;
             var custo = media.Currency is not null && media.CostCalls > 0
-                ? $" e ~{(c.FaqHits * media.Cost / media.CostCalls).ToString("0.0000", Pt)} {media.Currency} (custo estimado pela tabela de preços configurada, não é fatura)"
+                ? $" e ~{(evitadas * media.Cost / media.CostCalls).ToString("0.0000", Pt)} {media.Currency} (custo estimado pela tabela de preços configurada, não é fatura)"
                 : " (sem custo estimado: a tabela de preços não informou custo para as chamadas da janela)";
+            var origem = c.SemanticHits > 0 ? $" (FAQ {c.FaqHits.ToString("N0", Pt)} + busca semântica {c.SemanticHits.ToString("N0", Pt)}; o custo da IA local é infraestrutura própria e NÃO está descontado)" : string.Empty;
             linhas.Add((tenant,
-                $"ESTIMATIVA (não medida): ~{tokensEvitados.ToString("N0", Pt)} tokens{custo} que as {c.FaqHits.ToString("N0", Pt)} chamada(s) evitada(s) teriam consumido = acertos × a média de " +
+                $"ESTIMATIVA (não medida): ~{tokensEvitados.ToString("N0", Pt)} tokens{custo} que as {evitadas.ToString("N0", Pt)} chamada(s) evitada(s){origem} teriam consumido = acertos × a média de " +
                 $"{mediaDeTokens.ToString("N0", Pt)} tokens por chamada confirmada deste tenant ({media.Calls.ToString("N0", Pt)} chamada(s) na janela). A pergunta do FAQ pode ser mais curta ou mais longa que a média."));
         }
 

@@ -20,6 +20,12 @@ internal sealed class AgentDefinitionStore : IAgentDefinitionStore
         return versao?.Content;
     }
 
+    public async Task<PublishedDefinition?> GetPublishedVersionAsync(CancellationToken cancellationToken)
+    {
+        var versao = await _db.DefinitionVersions.AsNoTracking().FirstOrDefaultAsync(v => v.Status == AgentDefinitionStatus.Published, cancellationToken);
+        return versao is null ? null : new PublishedDefinition(versao.Number, versao.Content);
+    }
+
     public Task<AgentDefinitionVersion?> FindDraftAsync(CancellationToken cancellationToken) =>
         _db.DefinitionVersions.FirstOrDefaultAsync(v => v.Status == AgentDefinitionStatus.Draft, cancellationToken);
 

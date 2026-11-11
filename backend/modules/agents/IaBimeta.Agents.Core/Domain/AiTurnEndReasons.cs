@@ -11,4 +11,7 @@ public static class AiTurnEndReasons
 
     /// <summary>A resposta direta do FAQ foi aceita pelo Conversations: o turno terminou SEM chamar o modelo (ADR 0029).</summary>
     public const string FaqHit = "faq-hit";
+
+    /// <summary>Respondido direto pela busca semântica no conhecimento aprovado (ADR 0034), sem chamar o modelo.</summary>
+    public const string SemanticHit = "semantic-hit";
 }

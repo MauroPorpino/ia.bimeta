@@ -6,6 +6,7 @@ using IaBimeta.Audit.Contracts.Commands;
 using IaBimeta.ContactCenter.Contracts;
 using IaBimeta.Conversations.Contracts;
 using IaBimeta.Conversations.Contracts.Commands;
+using IaBimeta.Knowledge.Contracts;
 using IaBimeta.SharedKernel;
 
 namespace IaBimeta.Agents.Testing;
@@ -312,6 +313,69 @@ internal sealed class FakeDefinitions : IAgentDefinitionReader
     public AgentDefinitionContent? Published { get; set; } = Definitions.Default();
 
     public Task<AgentDefinitionContent?> GetPublishedAsync(CancellationToken cancellationToken) => Task.FromResult(Published);
+
+    /// <summary>O número da versão publicada que o dublê informa (nulo: a implementação não informa, e a resposta por similaridade recusa).</summary>
+    public int? PublishedNumber { get; set; } = 1;
+
+    public Task<PublishedDefinition?> GetPublishedVersionAsync(CancellationToken cancellationToken) =>
+        Task.FromResult(Published is null || PublishedNumber is null ? null : new PublishedDefinition(PublishedNumber.Value, Published));
+}
+
+/// <summary>A busca semântica roteirizada: devolve o resultado combinado e registra os pedidos (para provar que nada foi consultado quando deveria estar desligado).</summary>
+internal sealed class FakeSearch : IKnowledgeSearch
+{
+    public List<SemanticSearchRequest> Requests { get; } = new();
+
+    public SemanticSearchResult Result { get; set; } = SemanticSearchResult.Of(SemanticSearchOutcome.NoCandidates);
+
+    public Exception? Failure { get; set; }
+
+    public Task<SemanticSearchResult> SearchAsync(SemanticSearchRequest request, CancellationToken cancellationToken = default)
+    {
+        Requests.Add(request);
+        return Failure is null ? Task.FromResult(Result) : throw Failure;
+    }
+
+    public static SemanticSearchResult Found(int definition, params (int Entry, double Score)[] candidates) => new(
+        SemanticSearchOutcome.Found, definition, candidates.Select(c => new SemanticCandidate(c.Entry, SemanticTextKind.Question, 0, c.Score)).ToList(), null, 12, 3);
+}
+
+internal sealed class FakeSemanticSettings : ISemanticAnswerSettingsStore
+{
+    public SemanticAnswerSettings? Current { get; set; }
+
+    public Exception? Failure { get; set; }
+
+    public Task<SemanticAnswerSettings?> FindAsync(CancellationToken cancellationToken) => Failure is null ? Task.FromResult(Current) : throw Failure;
+
+    public void Add(SemanticAnswerSettings settings) => Current = settings;
+
+    public Task SaveAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public static SemanticAnswerSettings With(SemanticAnswerMode mode, double minScore = 0.9, double minMargin = 0.05)
+    {
+        var s = SemanticAnswerSettings.Default(TestContexts.TenantA, DateTimeOffset.UnixEpoch);
+        s.Apply(mode, minScore, minMargin, DateTimeOffset.UnixEpoch, null);
+        return s;
+    }
+}
+
+internal sealed class FakeDecisionRecorder : ISemanticDecisionRecorder
+{
+    public List<SemanticDecisionRecord> Records { get; } = new();
+
+    public Exception? Failure { get; set; }
+
+    public Task RecordAsync(SemanticDecisionRecord record, CancellationToken cancellationToken)
+    {
+        if (Failure is not null)
+        {
+            throw Failure;
+        }
+
+        Records.Add(record);
+        return Task.CompletedTask;
+    }
 }
 
 internal sealed class FakeAudit : IAuditWriter

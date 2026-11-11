@@ -24,8 +24,17 @@ internal sealed class RunnerHarness
         Handoff = new FakeHandoff();
         Definitions = new FakeDefinitions();
         Gaps = new FakeGapRecorder();
-        Runner = new TurnRunner(Store, Turns, Gateway, Handoff, Definitions, Gaps, Options, Clock);
+        Search = new FakeSearch();
+        SemanticSettings = new FakeSemanticSettings();
+        SemanticDecisions = new FakeDecisionRecorder();
+        Runner = new TurnRunner(Store, Turns, Gateway, Handoff, Definitions, Gaps, Options, Clock, Search, SemanticSettings, SemanticDecisions);
     }
+
+    public FakeSearch Search { get; }
+
+    public FakeSemanticSettings SemanticSettings { get; }
+
+    public FakeDecisionRecorder SemanticDecisions { get; }
 
     public AgentsOptions Options { get; }
 
