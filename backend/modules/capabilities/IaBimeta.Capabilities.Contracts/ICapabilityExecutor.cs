@@ -6,9 +6,9 @@ namespace IaBimeta.Capabilities.Contracts;
 /// </summary>
 public interface ICapabilityCatalog
 {
-    Task<IReadOnlyList<CapabilityDescriptor>> ListAsync(CapabilityCaller caller, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<CapabilityDescriptor>> ListAsync(CapabilityCaller caller, CancellationToken cancellationToken = default, Guid? scopeOrganizationId = null);
 
-    Task<CapabilityDescriptor?> GetAsync(string key, CapabilityCaller caller, CancellationToken cancellationToken = default);
+    Task<CapabilityDescriptor?> GetAsync(string key, CapabilityCaller caller, CancellationToken cancellationToken = default, Guid? scopeOrganizationId = null);
 }
 
 /// <summary>

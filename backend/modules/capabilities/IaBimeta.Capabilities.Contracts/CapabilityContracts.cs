@@ -67,6 +67,23 @@ public enum CapabilityParameterLocation
     Body = 4,
 }
 
+/// <summary>
+/// A classe do DADO que uma operação devolve (ADR 0036). Decisão do ADMINISTRADOR, nunca da IA. <see cref="Public"/>: dado não pessoal (preço, horário, catálogo), que pode ir a qualquer cliente. <see cref="CustomerData"/>: dado
+/// de uma pessoa (padrão seguro: toda operação nasce assim); nenhum modelo de IA o recebe na fase 1.
+/// </summary>
+public enum CapabilityDataClass
+{
+    Public = 1,
+    CustomerData = 2,
+}
+
+/// <summary>De onde vem o valor de um parâmetro. <see cref="Model"/>: do chamador (pode ser saída de IA, validado). <see cref="Session"/>: RESERVADO à fase 2 (identidade autenticada do contato injetada pelo código confiável, que o modelo não sobrescreve); o motor recusa operações que o usam enquanto a fase 2 não existe.</summary>
+public enum CapabilityParameterSource
+{
+    Model = 1,
+    Session = 2,
+}
+
 public enum CapabilityFieldType
 {
     String = 1,
@@ -92,7 +109,8 @@ public sealed record CapabilityParameterSpec(
     decimal? Max = null,
     IReadOnlyList<string>? EnumValues = null,
     string? Default = null,
-    bool Personal = false);
+    bool Personal = false,
+    CapabilityParameterSource Source = CapabilityParameterSource.Model);
 
 /// <summary>Um campo da resposta que o motor devolve. <see cref="Pointer"/> é um JSON Pointer (RFC 6901) relativo ao objeto da resposta (ou a cada item, se a operação mapeia uma lista).</summary>
 public sealed record CapabilityResponseField(
@@ -124,7 +142,8 @@ public sealed record CapabilityDescriptor(
     CapabilityEffect Effect,
     bool RequiresConfirmation,
     IReadOnlyList<CapabilityParameterInfo> Parameters,
-    IReadOnlyList<string> OutputFields);
+    IReadOnlyList<string> OutputFields,
+    CapabilityDataClass DataClass = CapabilityDataClass.CustomerData);
 
 public sealed record CapabilityParameterInfo(string Name, CapabilityParameterType Type, bool Required, string? Description, IReadOnlyList<string>? EnumValues);
 
@@ -133,12 +152,16 @@ public sealed record CapabilityParameterInfo(string Name, CapabilityParameterTyp
 /// <c>RequestContext</c>, nunca daqui. <see cref="IdempotencyKey"/> é obrigatória para escrita e escolhida por quem chama (a mesma intenção, a mesma chave).
 /// </summary>
 /// <param name="ServiceSessionId">A correlação com o atendimento, opaca para o motor (trilha e histórico).</param>
+/// <param name="CorrelationId">A correlação opaca de quem chama (por exemplo, o <c>TurnId</c> de um turno de IA), até 64 caracteres, só para a trilha.</param>
+/// <param name="ScopeOrganizationId">O escopo de organização do atendimento (ADR 0036), informado pelo CÓDIGO confiável do chamador, nunca por saída de modelo. OBRIGATÓRIO para chamadores não humanos (Agent, Workflow, Chatbot): sem ele a execução é recusada. A conexão precisa ser do tenant inteiro ou desta organização.</param>
 public sealed record CapabilityInvocation(
     string Key,
     IReadOnlyDictionary<string, JsonElement> Parameters,
     CapabilityCaller Caller,
     string? IdempotencyKey = null,
-    Guid? ServiceSessionId = null);
+    Guid? ServiceSessionId = null,
+    string? CorrelationId = null,
+    Guid? ScopeOrganizationId = null);
 
 public enum CapabilityExecutionStatus
 {

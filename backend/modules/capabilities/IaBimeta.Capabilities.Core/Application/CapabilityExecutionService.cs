@@ -51,7 +51,7 @@ public sealed partial class CapabilityExecutionService : ICapabilityExecutor, IC
 
     // ---------------------------------------------------------------- catálogo
 
-    public async Task<IReadOnlyList<CapabilityDescriptor>> ListAsync(CapabilityCaller caller, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<CapabilityDescriptor>> ListAsync(CapabilityCaller caller, CancellationToken cancellationToken = default, Guid? scopeOrganizationId = null)
     {
         _auth.RequireAny(Permission.IntegrationExecute, Permission.IntegrationExecuteWrite);
         var contexto = _auth.Context;
@@ -76,8 +76,8 @@ public sealed partial class CapabilityExecutionService : ICapabilityExecutor, IC
         return lista.OrderBy(d => d.Key, StringComparer.Ordinal).ToList();
     }
 
-    public async Task<CapabilityDescriptor?> GetAsync(string key, CapabilityCaller caller, CancellationToken cancellationToken = default) =>
-        (await ListAsync(caller, cancellationToken)).FirstOrDefault(d => d.Key == key);
+    public async Task<CapabilityDescriptor?> GetAsync(string key, CapabilityCaller caller, CancellationToken cancellationToken = default, Guid? scopeOrganizationId = null) =>
+        (await ListAsync(caller, cancellationToken, scopeOrganizationId)).FirstOrDefault(d => d.Key == key);
 
     private static CapabilityDescriptor Describe(CapabilityDefinition d)
     {

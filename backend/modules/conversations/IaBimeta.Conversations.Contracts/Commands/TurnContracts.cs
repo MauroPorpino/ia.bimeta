@@ -56,6 +56,7 @@ public sealed record TurnGrant(long Epoch, long BasedOnInboundSeq, long StateVer
 /// <param name="ChannelInstanceId">O número por onde a conversa acontece: o Agents carrega dele a configuração do agente.</param>
 /// <param name="BusinessUnitId">A unidade responsável no momento do turno (muda por transferência, que avança a versão do estado).</param>
 /// <param name="DepartmentId">O setor responsável, se houver.</param>
+/// <param name="OrganizationId">A organização da sessão (ADR 0036): o ESCOPO que o Agents informa ao motor de integração; vem da sessão autorizada, nunca de texto de cliente nem de saída de modelo.</param>
 public sealed record TurnSnapshot(
     Guid SessionId,
     HandlingMode HandlingMode,
@@ -70,7 +71,8 @@ public sealed record TurnSnapshot(
     LocaleSource LocaleSource,
     ChannelInstanceId ChannelInstanceId,
     Guid? BusinessUnitId,
-    Guid? DepartmentId);
+    Guid? DepartmentId,
+    Guid? OrganizationId = null);
 
 public sealed record SnapshotMessage(
     Guid MessageId,

@@ -75,7 +75,8 @@ public sealed class TurnService : ITurnCommands
             conversa.LocaleSource,
             sessao.ChannelInstanceId,
             sessao.BusinessUnitId,
-            sessao.DepartmentId);
+            sessao.DepartmentId,
+            sessao.OrganizationId);
 
         await trabalho.CommitAsync(cancellationToken);
         return new BeginTurnResult(BeginTurnOutcome.Granted, grant, snapshot);
