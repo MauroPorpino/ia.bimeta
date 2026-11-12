@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ApiError, type ApiClient } from '../api/client';
 import type {
   IntegrationCaller,
+  IntegrationDataClass,
   IntegrationConnection,
   IntegrationDefinition,
   IntegrationEffect,
@@ -16,6 +17,8 @@ import type {
 } from '../api/types';
 import {
   ORIGENS,
+  ORIGENS_NAO_HUMANAS,
+  ROTULO_CLASSE_DO_DADO,
   ROTULO_EFEITO,
   ROTULO_IDEMPOTENCIA,
   ROTULO_ORIGEM,
@@ -184,6 +187,8 @@ function EditorDeOperacao({ api, conexoes, operacao, onAlterada, mensagemInicial
   const [efeito, setEfeito] = useState<IntegrationEffect>(operacao?.effect ?? 'Read');
   const [confirmar, setConfirmar] = useState(operacao?.requiresConfirmation ?? true);
   const [origens, setOrigens] = useState<IntegrationCaller[]>(operacao?.allowedCallers ?? ['Operator']);
+  // A classe do dado é declarada pelo administrador (ADR 0036). Em operação nova começa SEM escolha: exigida quando agente, fluxo ou chatbot podem usar a operação.
+  const [classe, setClasse] = useState<IntegrationDataClass | ''>(operacao ? operacao.dataClass : '');
   const [molde, setMolde] = useState<IntegrationSpec>(operacao?.spec ?? moldeVazio('Read'));
   const [exemplo, setExemplo] = useState('{}');
   const [resultado, setResultado] = useState<IntegrationResult | null>(null);
@@ -218,6 +223,10 @@ function EditorDeOperacao({ api, conexoes, operacao, onAlterada, mensagemInicial
 
   function trocarEfeito(novo: IntegrationEffect) {
     setEfeito(novo);
+    if (novo === 'Write') {
+      setOrigens((atuais) => atuais.filter((o) => o !== 'Agent'));
+    }
+
     // Escrita pede a idempotência declarada; leitura não usa. O método acompanha a natureza da operação.
     setMolde((m) => ({
       ...m,
@@ -265,6 +274,7 @@ function EditorDeOperacao({ api, conexoes, operacao, onAlterada, mensagemInicial
         allowedCallers: origens,
         spec: molde,
         expectedRevision: atual?.status === 'Draft' ? atual.revision : null,
+        dataClass: classe === '' ? null : classe,
       });
       setAtual(salva);
       const texto = `Rascunho salvo (versão ${salva.version}). Teste e publique para usar.`;
@@ -333,7 +343,11 @@ function EditorDeOperacao({ api, conexoes, operacao, onAlterada, mensagemInicial
     setOrigens((atuais) => (atuais.includes(origem) ? atuais.filter((o) => o !== origem) : [...atuais, origem]));
   }
 
-  const podeSalvar = !ocupado && conexaoId !== '' && chave.trim() !== '' && nome.trim() !== '' && origens.length > 0;
+  const exigeClasse = origens.some((o) => ORIGENS_NAO_HUMANAS.includes(o));
+  // O agente de IA nunca executa escrita: a opção fica indisponível numa operação de escrita.
+  const origemIndisponivel = (o: IntegrationCaller) => o === 'Agent' && efeito === 'Write';
+
+  const podeSalvar = !ocupado && conexaoId !== '' && chave.trim() !== '' && nome.trim() !== '' && origens.length > 0 && (!exigeClasse || classe !== '');
 
   return (
     <div className="revisao" role="group" aria-label={nova ? 'Nova operação' : `Operação ${atual.key}`}>
@@ -393,10 +407,22 @@ function EditorDeOperacao({ api, conexoes, operacao, onAlterada, mensagemInicial
           <p className="discreto">Quem pode usar esta operação (por padrão, só uma pessoa pela administração):</p>
           {ORIGENS.map((o) => (
             <label className="caixa" key={o}>
-              <input type="checkbox" checked={origens.includes(o)} onChange={() => alternarOrigem(o)} />
-              {ROTULO_ORIGEM[o]}
+              <input type="checkbox" checked={origens.includes(o)} disabled={origemIndisponivel(o)} onChange={() => alternarOrigem(o)} />
+              {ROTULO_ORIGEM[o]}{origemIndisponivel(o) ? ' (o agente de IA nunca executa escrita)' : ''}
             </label>
           ))}
+          <div className="campo">
+            <label htmlFor="op-classe">Classe do dado devolvido {exigeClasse ? '(obrigatória para agente, fluxo e chatbot)' : ''}</label>
+            <select id="op-classe" value={classe} onChange={(e) => setClasse(e.target.value as IntegrationDataClass | '')}>
+              <option value="">{exigeClasse ? 'Escolha...' : 'Dado do cliente (padrão seguro)'}</option>
+              {(Object.keys(ROTULO_CLASSE_DO_DADO) as IntegrationDataClass[]).map((c) => (
+                <option key={c} value={c}>
+                  {ROTULO_CLASSE_DO_DADO[c]}
+                </option>
+              ))}
+            </select>
+            <p className="discreto">Só operações de LEITURA classificadas como dado público podem ser oferecidas ao agente de IA, e a IA nunca classifica nada: a decisão é sua. O agente só vê as operações da organização do atendimento.</p>
+          </div>
         </div>
 
         <div className="campo">

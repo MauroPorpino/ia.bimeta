@@ -62,6 +62,7 @@ function operacao(sobrescrever: Partial<IntegrationDefinition> = {}): Integratio
     effect: 'Read',
     requiresConfirmation: false,
     allowedCallers: ['Operator'],
+    dataClass: 'CustomerData',
     enabled: true,
     spec: {
       method: 'GET',
@@ -301,6 +302,65 @@ describe('Integrações: operações', () => {
     expect(await screen.findByText(/Rascunho salvo \(versão 1\)/)).toBeTruthy();
   });
 
+  it('a classe do dado é obrigatória quando o agente pode usar a operação e vai no pedido; só para pessoa fica opcional (padrão seguro)', async () => {
+    const salva = operacao();
+    let existe = false;
+    const { f, usuario } = await abrirOperacoes({
+      'GET /capabilities/definitions': () => json(existe ? [salva] : []),
+      [`GET /capabilities/definitions/by-key/${salva.key}/versions`]: json([salva]),
+      'POST /capabilities/definitions': () => {
+        existe = true;
+        return json(salva);
+      },
+    });
+
+    await usuario.click(await screen.findByRole('button', { name: 'Nova operação' }));
+    const form = detalhe('Detalhe da operação');
+    await usuario.type(await form.findByLabelText(/Chave \(identificador usado/), 'preco.consultar');
+    await usuario.type(form.getByLabelText('Nome'), 'Consultar preço');
+    const classe = form.getByLabelText(/Classe do dado devolvido/) as HTMLSelectElement;
+    expect(classe.value).toBe('');
+    expect((form.getByRole('button', { name: 'Salvar rascunho' }) as HTMLButtonElement).disabled).toBe(false);
+
+    await usuario.click(form.getByLabelText('Agente de IA'));
+    expect((form.getByRole('button', { name: 'Salvar rascunho' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(form.getByLabelText(/Classe do dado devolvido \(obrigatória/)).toBeTruthy();
+
+    await usuario.selectOptions(form.getByLabelText(/Classe do dado devolvido/), 'Public');
+    await usuario.click(form.getByRole('button', { name: 'Salvar rascunho' }));
+
+    await waitFor(() => expect(chamadasDe(f, 'POST /capabilities/definitions')).toHaveLength(1));
+    expect(chamadasDe(f, 'POST /capabilities/definitions')[0]!.corpo).toMatchObject({ allowedCallers: ['Operator', 'Agent'], dataClass: 'Public', effect: 'Read' });
+  }, 30_000);
+
+  it('o agente de IA nunca executa escrita: a opção fica indisponível e é desmarcada ao trocar o efeito', async () => {
+    const { usuario } = await abrirOperacoes({});
+
+    await usuario.click(await screen.findByRole('button', { name: 'Nova operação' }));
+    const form = detalhe('Detalhe da operação');
+    await usuario.click(await form.findByLabelText('Agente de IA'));
+    expect((form.getByLabelText('Agente de IA') as HTMLInputElement).checked).toBe(true);
+
+    await usuario.selectOptions(form.getByLabelText('Efeito'), 'Write');
+
+    const agente = form.getByLabelText(/Agente de IA/) as HTMLInputElement;
+    expect(agente.disabled).toBe(true);
+    expect(agente.checked).toBe(false);
+    expect(form.getByText(/o agente de IA nunca executa escrita/)).toBeTruthy();
+  });
+
+  it('mostra a classe já declarada de uma operação publicada', async () => {
+    const publica = operacao({ key: 'preco.consultar', name: 'Consultar preço', status: 'Published', publishedAt: new Date().toISOString(), allowedCallers: ['Agent'], dataClass: 'Public' });
+    const { usuario } = await abrirOperacoes({
+      'GET /capabilities/definitions': json([publica]),
+      [`GET /capabilities/definitions/by-key/${publica.key}/versions`]: json([publica]),
+    });
+
+    await usuario.click(await screen.findByRole('button', { name: /Consultar preço/ }));
+
+    expect((await detalhe('Detalhe da operação').findByLabelText(/Classe do dado devolvido/) as HTMLSelectElement).value).toBe('Public');
+  });
+
   it('escrita pede idempotência declarada e confirmação por padrão, e o teste de leitura fica indisponível', async () => {
     const { usuario } = await abrirOperacoes({});
 
@@ -312,7 +372,7 @@ describe('Integrações: operações', () => {
     expect((form.getByLabelText('Idempotência do sistema externo') as HTMLInputElement).value).toBe('None');
     expect((form.getByLabelText(/Exigir confirmação de uma pessoa/) as HTMLInputElement).checked).toBe(true);
     expect((form.getByLabelText('Pessoa (administração)') as HTMLInputElement).checked).toBe(true);
-    expect((form.getByLabelText('Agente de IA') as HTMLInputElement).checked).toBe(false);
+    expect((form.getByLabelText(/Agente de IA/) as HTMLInputElement).checked).toBe(false);
   });
 
   it('publica o rascunho e mostra a versão publicada com ligar, desligar e aposentar', async () => {

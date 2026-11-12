@@ -553,6 +553,8 @@ export interface FaqSuggestionEdit {
 
 export type IntegrationAuthType = 'None' | 'ApiKey' | 'Basic' | 'OAuth2ClientCredentials';
 export type IntegrationEffect = 'Read' | 'Write';
+/** A classe do dado que a operação devolve (ADR 0036). Decisão do administrador: `Public` é dado não pessoal; `CustomerData` (padrão seguro) nunca chega a um modelo de IA. */
+export type IntegrationDataClass = 'Public' | 'CustomerData';
 export type IntegrationCaller = 'Operator' | 'Agent' | 'Workflow' | 'EmployeeAssistant' | 'Chatbot';
 export type IntegrationParameterType = 'String' | 'Integer' | 'Number' | 'Boolean' | 'Date' | 'Enum';
 export type IntegrationParameterLocation = 'Path' | 'Query' | 'Header' | 'Body';
@@ -658,6 +660,7 @@ export interface IntegrationDefinition {
   effect: IntegrationEffect;
   requiresConfirmation: boolean;
   allowedCallers: IntegrationCaller[];
+  dataClass: IntegrationDataClass;
   enabled: boolean;
   spec: IntegrationSpec;
   createdAt: string;
@@ -675,6 +678,8 @@ export interface IntegrationDefinitionRequest {
   allowedCallers: IntegrationCaller[];
   spec: IntegrationSpec;
   expectedRevision: number | null;
+  /** Obrigatória quando agente, fluxo ou chatbot podem usar a operação; nula = padrão seguro (CustomerData). */
+  dataClass: IntegrationDataClass | null;
 }
 
 export interface IntegrationParameterProblem {

@@ -204,3 +204,27 @@ Para **escrita**, quem chama gera a `IdempotencyKey` a partir da intenção (por
 4. Homologar a idempotência de cada escrita; só então liberar para o Agents/chatbot, com confirmação humana.
 5. Ligar o motor ao Agents/Workflows (ADR da aresta) e ao assistente interno, com testes de isolamento (já há o modelo em `tests`).
 6. Dados pessoais: decidir o que o ERP devolve, `Personal` nos campos e a política de minimização antes de qualquer envio a modelos.
+
+## 13. Consulta do agente de IA (ADR 0036, fase 1)
+
+O Agents pode, **só com a chave ligada**, consultar o Motor de Integração dentro do turno. Fase 1: apenas operações **públicas de leitura**.
+
+**Como funciona.** Com a função ligada e ao menos uma operação elegível, o turno usa um esquema com a ação `lookup` (`operation_key` num enum montado por turno, `parameters_json` em texto). Se o modelo pedir uma consulta, o Agents a valida e executa pelo `ICapabilityExecutor` (origem `Agent`, escopo e sessão do código, `TurnId` como correlação) dentro de um orçamento (`LookupBudget`, padrão 8 s) e faz **uma segunda chamada** ao modelo com o resultado como **dado delimitado e não confiável**, sem o esquema `lookup` (não há laço; uma consulta por turno). A resposta cita as duas chamadas ao modelo.
+
+**O que é oferecido ao modelo** (todas as condições): operação publicada, habilitada, em conexão habilitada, `Agent` entre as origens, efeito `Read`, `DataClass = Public` e conexão do tenant inteiro ou da **organização da sessão**. O motor filtra, o Agents confere de novo e o motor confere pela terceira vez ao executar. Escrita nunca é oferecida nem executada para o agente; operação `CustomerData` nunca chega a um modelo; a IA nunca classifica nada.
+
+**O que a IA nunca decide:** URL, credencial, cabeçalho, método, conexão, tenant, organização, origem, efeito. Só uma chave do enum e valores de parâmetros declarados.
+
+**Falha segura.** Qualquer falha (ERP indisponível, timeout, orçamento estourado, limite, operação desligada, resposta inválida, parâmetros inválidos, escopo recusado) vira **handoff `integration_unavailable`** (sem segunda chamada ao modelo): o aviso aprovado do tenant sai e o histórico e o contexto seguem com o ContactCenter. A falha em montar o catálogo não derruba o turno: ele segue sem consulta.
+
+**Auditoria e métricas.** Entrada `agents.integration-lookup.<código>` (`ok`, `unavailable`, `timeout`, `budget-exceeded`, `rate-limited`...) com o `TurnId` como recurso, sem parâmetros nem respostas; o registro de execuções do motor traz origem `Agent`, sessão e `TurnId`. Métricas no `Meter` `IaBimeta.Agents` (`agents.integration_lookup.attempts` por `outcome` e `agents.integration_lookup.duration_ms`), **por processo** (a evidência durável é a trilha e o registro de execuções).
+
+**Configuração:** `Agents__Options__IntegrationLookupsEnabled` (padrão `false`), `LookupBudget` (1 a 30 s), `LookupMaxPerTurn` (só 1). Exige o módulo no Worker (já composto), as chaves `Capabilities__Secrets` e a política de saída no ambiente do Worker, e `TurnMaxDuration` maior que duas chamadas ao modelo mais o orçamento.
+
+**Novos requisitos de cadastro:** a **classe do dado** (`Public` ou `CustomerData`) é obrigatória quando agente, fluxo ou chatbot podem usar a operação (a tela exige a escolha); o padrão é `CustomerData`; operação `Public` não pode ter campo da resposta marcado como pessoal; o agente não pode ser origem de escrita; `Source = Session` (fase 2) é recusado.
+
+**Fase 2 (não implementada):** dados do cliente exigem identidade autenticada do contato, parâmetros injetados pela sessão (`CapabilityParameterSource.Session`), minimização e base legal, com ADR próprio.
+
+**Limitações:** uma consulta por turno; sem *tool calling*; a segunda chamada ao modelo aumenta custo e latência dos turnos com consulta; as descrições das operações são escritas pelo administrador e entram no prompt; métricas só em memória; o aviso ao cliente é o aviso de transferência já aprovado do tenant (não há texto específico para `integration_unavailable`); limite do motor de 5 chamadas simultâneas por conexão faz o excedente transferir ao atendente.
+
+**Homologação:** (1) ligar em um tenant de teste com uma operação pública real do ERP e conferir preço/prazo ponta a ponta no WhatsApp de homologação; (2) derrubar o ERP e conferir o handoff e o aviso; (3) conferir no ledger do AiGateway as duas chamadas por turno e o custo; (4) revisar a descrição das operações; (5) validar com o modelo real que ele só pede consulta com os parâmetros obrigatórios (o prompt orienta, mas isso só a homologação prova).

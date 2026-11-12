@@ -47,3 +47,10 @@ Cada consulta (sucesso ou falha, inclusive a que o Agents recusou antes do motor
 - O Worker passa a compor o módulo Capabilities (chave de cifra e política de saída no ambiente do Worker, que usa o mesmo `app.env`).
 - Riscos conhecidos: uma descrição de operação mal escrita pode induzir consultas inúteis (o administrador é responsável); o dado `Public` mal classificado vaza a quem perguntar (por isso o padrão é `CustomerData` e a classificação é manual e auditada); as métricas do `Meter` são por processo (a evidência durável é a trilha e o registro de execuções).
 - Fora de escopo: dados do cliente, escrita, mais de uma consulta por turno, *tool calling*, chatbot visual (usará o mesmo motor com `Caller = Workflow`).
+
+## Registro da implementação (12/11/2026)
+
+- Fatias entregues: contratos aditivos (ADR, `DataClass`, `ScopeOrganizationId`, `CorrelationId`, `Source`, `TurnSnapshot.OrganizationId`), regras e migration no motor, integração no Agents (esquema `lookup`, parser, prompt, serviço, falha segura), composição no Worker com testes ponta a ponta e a tela de administração com a classe do dado.
+- **Ajuste em relação ao texto acima:** `LookupMaxPerTurn` existe como opção mas só aceita 1 (a partida recusa outro valor). Com a consulta ligada, `TurnMaxDuration` precisa passar `2 × ModelCallTimeout + LookupBudget` (validado na partida).
+- **Decisão adicional:** as origens não humanas (`Agent`, `Workflow`, `Chatbot`) só executam dado `Public` no motor; o agente também não executa escrita; o catálogo para elas é vazio sem escopo.
+- **Linhas existentes:** a migration marca toda operação já cadastrada como `CustomerData` (padrão seguro).

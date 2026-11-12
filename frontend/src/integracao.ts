@@ -223,3 +223,11 @@ export function enderecoParaExibir(url: string): string {
     return url;
   }
 }
+
+export const ROTULO_CLASSE_DO_DADO: Record<'Public' | 'CustomerData', string> = {
+  Public: 'Dado público (não pessoal: preço, horário, catálogo)',
+  CustomerData: 'Dado do cliente (pessoal; nenhum modelo de IA o recebe)',
+};
+
+/** As origens que não são uma pessoa: exigem a classe do dado declarada e nunca podem executar escrita se forem o agente de IA (ADR 0036). */
+export const ORIGENS_NAO_HUMANAS: IntegrationCaller[] = ['Agent', 'Workflow', 'Chatbot'];
