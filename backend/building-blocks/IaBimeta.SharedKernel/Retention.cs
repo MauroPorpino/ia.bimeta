@@ -38,6 +38,12 @@ public enum RetentionCategory
     /// não fica para sempre. As PENDENTES nunca são apagadas por prazo: esperam a revisão.
     /// </summary>
     FaqSuggestions = 9,
+
+    /// <summary>
+    /// As instâncias de fluxo do chatbot visual JÁ ENCERRADAS (ADR 0037 e 0038), com seus passos e efeitos: só identificadores, estados e códigos (as variáveis e o conteúdo dos efeitos já foram apagados no encerramento).
+    /// Servem ao histórico e às métricas; passado o prazo, são apagadas. Uma instância ATIVA nunca expira por prazo.
+    /// </summary>
+    FlowInstances = 10,
 }
 
 /// <summary>
@@ -62,6 +68,7 @@ public sealed class RetentionOptions
         [RetentionCategory.InboundAttachments] = 0,
         [RetentionCategory.SemanticDecisions] = 90,
         [RetentionCategory.FaqSuggestions] = 90,
+        [RetentionCategory.FlowInstances] = 30,
     };
 
     /// <summary>Sobrescritas por empresa (o slug do tenant), só das categorias citadas.</summary>

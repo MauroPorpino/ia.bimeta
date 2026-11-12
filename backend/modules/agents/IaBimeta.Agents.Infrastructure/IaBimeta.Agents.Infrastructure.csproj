@@ -27,6 +27,7 @@
     <ProjectReference Include="..\..\..\building-blocks\IaBimeta.SharedKernel\IaBimeta.SharedKernel.csproj" />
     <ProjectReference Include="..\..\conversations\IaBimeta.Conversations.Contracts\IaBimeta.Conversations.Contracts.csproj" />
     <ProjectReference Include="..\IaBimeta.Agents.Core\IaBimeta.Agents.Core.csproj" />
+    <ProjectReference Include="..\..\workflows\IaBimeta.Workflows.Contracts\IaBimeta.Workflows.Contracts.csproj" />
   </ItemGroup>
 
 </Project>

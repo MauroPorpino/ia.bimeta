@@ -59,6 +59,9 @@
     <ProjectReference Include="..\..\modules\tenancy\IaBimeta.Tenancy.Contracts\IaBimeta.Tenancy.Contracts.csproj" />
     <ProjectReference Include="..\..\modules\tenancy\IaBimeta.Tenancy.Core\IaBimeta.Tenancy.Core.csproj" />
     <ProjectReference Include="..\..\modules\tenancy\IaBimeta.Tenancy.Infrastructure\IaBimeta.Tenancy.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\modules\workflows\IaBimeta.Workflows.Contracts\IaBimeta.Workflows.Contracts.csproj" />
+    <ProjectReference Include="..\..\modules\workflows\IaBimeta.Workflows.Core\IaBimeta.Workflows.Core.csproj" />
+    <ProjectReference Include="..\..\modules\workflows\IaBimeta.Workflows.Infrastructure\IaBimeta.Workflows.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

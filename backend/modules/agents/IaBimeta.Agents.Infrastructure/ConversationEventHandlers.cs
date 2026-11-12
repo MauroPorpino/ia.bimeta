@@ -3,6 +3,7 @@ using IaBimeta.Conversations.Contracts;
 using IaBimeta.Conversations.Contracts.Events;
 using IaBimeta.Messaging;
 using IaBimeta.SharedKernel;
+using IaBimeta.Workflows.Contracts;
 using Microsoft.EntityFrameworkCore;
 
 namespace IaBimeta.Agents.Infrastructure;
@@ -15,6 +16,21 @@ namespace IaBimeta.Agents.Infrastructure;
 /// </summary>
 internal static class TurnHandling
 {
+    /// <summary>
+    /// A sessão é de um FLUXO do chatbot visual (ADR 0038)? Então o Agents não abre turno: Workflows e Agents nunca respondem à mesma sessão. Com o chatbot visual desligado (ou não composto) a resposta é sempre
+    /// "não": o caminho é idêntico ao anterior. Numa mensagem do cliente (<paramref name="inboundSeq"/>) o roteador também DECIDE (só a primeira mensagem da sessão pode escolher um fluxo).
+    /// </summary>
+    public static async Task<bool> OwnedByFlowAsync(IAutomationRouter? router, Guid sessionId, long? inboundSeq, CancellationToken cancellationToken)
+    {
+        if (router is null)
+        {
+            return false;
+        }
+
+        var dono = inboundSeq is { } seq ? await router.ResolveOnInboundAsync(sessionId, seq, cancellationToken) : await router.GetOwnerAsync(sessionId, cancellationToken);
+        return dono == AutomationOwner.Flow;
+    }
+
     /// <summary>O nome estável deste consumidor no inbox do módulo.</summary>
     public const string Consumer = "agents.turn-scheduling";
 
@@ -56,11 +72,13 @@ internal sealed class InboundMessageRegisteredHandler : EventHandlerBase<Inbound
 {
     private readonly InboxGate<AgentsDbContext> _inbox;
     private readonly TurnScheduler _scheduler;
+    private readonly IAutomationRouter? _router;
 
-    public InboundMessageRegisteredHandler(InboxGate<AgentsDbContext> inbox, TurnScheduler scheduler)
+    public InboundMessageRegisteredHandler(InboxGate<AgentsDbContext> inbox, TurnScheduler scheduler, IAutomationRouter? router = null)
     {
         _inbox = inbox;
         _scheduler = scheduler;
+        _router = router;
     }
 
     public override string EventType => ConversationEventTypes.InboundMessageRegistered;
@@ -68,7 +86,19 @@ internal sealed class InboundMessageRegisteredHandler : EventHandlerBase<Inbound
     public override int EventVersion => 1;
 
     protected override Task<HandlerResult> HandleAsync(EventEnvelope envelope, InboundMessageRegisteredV1 payload, CancellationToken cancellationToken) =>
-        TurnHandling.RunAsync(_inbox, envelope, payload.SessionId, token => _scheduler.OnInboundMessageAsync(payload.SessionId, envelope.OccurredAt, token), cancellationToken);
+        TurnHandling.RunAsync(
+            _inbox,
+            envelope,
+            payload.SessionId,
+            async token =>
+            {
+                // ADR 0038: a sessão que é de um FLUXO não ganha turno de IA (e a primeira mensagem de uma sessão pode escolher o fluxo).
+                if (!await TurnHandling.OwnedByFlowAsync(_router, payload.SessionId, payload.InboundSeq, token))
+                {
+                    await _scheduler.OnInboundMessageAsync(payload.SessionId, envelope.OccurredAt, token);
+                }
+            },
+            cancellationToken);
 }
 
 /// <summary>O conteúdo pendente de uma mensagem ficou pronto (<c>MessageContentReadyV1</c>): o turno que espera é reavaliado já.</summary>
@@ -76,11 +106,13 @@ internal sealed class MessageContentReadyHandler : EventHandlerBase<MessageConte
 {
     private readonly InboxGate<AgentsDbContext> _inbox;
     private readonly TurnScheduler _scheduler;
+    private readonly IAutomationRouter? _router;
 
-    public MessageContentReadyHandler(InboxGate<AgentsDbContext> inbox, TurnScheduler scheduler)
+    public MessageContentReadyHandler(InboxGate<AgentsDbContext> inbox, TurnScheduler scheduler, IAutomationRouter? router = null)
     {
         _inbox = inbox;
         _scheduler = scheduler;
+        _router = router;
     }
 
     public override string EventType => ConversationEventTypes.MessageContentReady;
@@ -88,7 +120,14 @@ internal sealed class MessageContentReadyHandler : EventHandlerBase<MessageConte
     public override int EventVersion => 1;
 
     protected override Task<HandlerResult> HandleAsync(EventEnvelope envelope, MessageContentReadyV1 payload, CancellationToken cancellationToken) =>
-        TurnHandling.RunAsync(_inbox, envelope, payload.SessionId, token => _scheduler.OnContentChangedAsync(payload.SessionId, token), cancellationToken);
+        TurnHandling.RunAsync(_inbox, envelope, payload.SessionId, async token =>
+            {
+                if (!await TurnHandling.OwnedByFlowAsync(_router, payload.SessionId, null, token))
+                {
+                    await _scheduler.OnContentChangedAsync(payload.SessionId, token);
+                }
+            },
+            cancellationToken);
 }
 
 /// <summary>O conteúdo pendente de uma mensagem falhou (<c>MessageContentFailedV1</c>): o turno que espera é reavaliado já, e a política do tipo se aplica.</summary>
@@ -96,11 +135,13 @@ internal sealed class MessageContentFailedHandler : EventHandlerBase<MessageCont
 {
     private readonly InboxGate<AgentsDbContext> _inbox;
     private readonly TurnScheduler _scheduler;
+    private readonly IAutomationRouter? _router;
 
-    public MessageContentFailedHandler(InboxGate<AgentsDbContext> inbox, TurnScheduler scheduler)
+    public MessageContentFailedHandler(InboxGate<AgentsDbContext> inbox, TurnScheduler scheduler, IAutomationRouter? router = null)
     {
         _inbox = inbox;
         _scheduler = scheduler;
+        _router = router;
     }
 
     public override string EventType => ConversationEventTypes.MessageContentFailed;
@@ -108,7 +149,14 @@ internal sealed class MessageContentFailedHandler : EventHandlerBase<MessageCont
     public override int EventVersion => 1;
 
     protected override Task<HandlerResult> HandleAsync(EventEnvelope envelope, MessageContentFailedV1 payload, CancellationToken cancellationToken) =>
-        TurnHandling.RunAsync(_inbox, envelope, payload.SessionId, token => _scheduler.OnContentChangedAsync(payload.SessionId, token), cancellationToken);
+        TurnHandling.RunAsync(_inbox, envelope, payload.SessionId, async token =>
+            {
+                if (!await TurnHandling.OwnedByFlowAsync(_router, payload.SessionId, null, token))
+                {
+                    await _scheduler.OnContentChangedAsync(payload.SessionId, token);
+                }
+            },
+            cancellationToken);
 }
 
 /// <summary>
@@ -119,11 +167,13 @@ internal sealed class HandlingModeChangedHandler : EventHandlerBase<HandlingMode
 {
     private readonly InboxGate<AgentsDbContext> _inbox;
     private readonly TurnScheduler _scheduler;
+    private readonly IAutomationRouter? _router;
 
-    public HandlingModeChangedHandler(InboxGate<AgentsDbContext> inbox, TurnScheduler scheduler)
+    public HandlingModeChangedHandler(InboxGate<AgentsDbContext> inbox, TurnScheduler scheduler, IAutomationRouter? router = null)
     {
         _inbox = inbox;
         _scheduler = scheduler;
+        _router = router;
     }
 
     public override string EventType => ConversationEventTypes.HandlingModeChanged;
@@ -135,9 +185,18 @@ internal sealed class HandlingModeChangedHandler : EventHandlerBase<HandlingMode
             _inbox,
             envelope,
             payload.SessionId,
-            token => payload.To == HandlingMode.AiAutonomous
-                ? _scheduler.OnReturnedToAiAsync(payload.SessionId, token)
-                : _scheduler.OnLeftAiControlAsync(payload.SessionId, "mode-changed", token),
+            async token =>
+            {
+                if (payload.To != HandlingMode.AiAutonomous)
+                {
+                    await _scheduler.OnLeftAiControlAsync(payload.SessionId, "mode-changed", token);
+                }
+                else if (!await TurnHandling.OwnedByFlowAsync(_router, payload.SessionId, null, token))
+                {
+                    // ADR 0038: de volta à IA, a sessão que ainda é de um fluxo não ganha turno de IA.
+                    await _scheduler.OnReturnedToAiAsync(payload.SessionId, token);
+                }
+            },
             cancellationToken);
 }
 
@@ -166,11 +225,13 @@ internal sealed class SessionTransferredHandler : EventHandlerBase<SessionTransf
 {
     private readonly InboxGate<AgentsDbContext> _inbox;
     private readonly TurnScheduler _scheduler;
+    private readonly IAutomationRouter? _router;
 
-    public SessionTransferredHandler(InboxGate<AgentsDbContext> inbox, TurnScheduler scheduler)
+    public SessionTransferredHandler(InboxGate<AgentsDbContext> inbox, TurnScheduler scheduler, IAutomationRouter? router = null)
     {
         _inbox = inbox;
         _scheduler = scheduler;
+        _router = router;
     }
 
     public override string EventType => ConversationEventTypes.SessionTransferred;
@@ -178,7 +239,14 @@ internal sealed class SessionTransferredHandler : EventHandlerBase<SessionTransf
     public override int EventVersion => 1;
 
     protected override Task<HandlerResult> HandleAsync(EventEnvelope envelope, SessionTransferredV1 payload, CancellationToken cancellationToken) =>
-        TurnHandling.RunAsync(_inbox, envelope, payload.SessionId, token => _scheduler.OnSessionStateChangedAsync(payload.SessionId, token), cancellationToken);
+        TurnHandling.RunAsync(_inbox, envelope, payload.SessionId, async token =>
+            {
+                if (!await TurnHandling.OwnedByFlowAsync(_router, payload.SessionId, null, token))
+                {
+                    await _scheduler.OnSessionStateChangedAsync(payload.SessionId, token);
+                }
+            },
+            cancellationToken);
 }
 
 /// <summary>O idioma efetivo da conversa mudou (<c>ConversationLocaleChangedV1</c>): o turno em andamento, escrito no idioma anterior, é trocado por um sucessor.</summary>
@@ -186,11 +254,13 @@ internal sealed class ConversationLocaleChangedHandler : EventHandlerBase<Conver
 {
     private readonly InboxGate<AgentsDbContext> _inbox;
     private readonly TurnScheduler _scheduler;
+    private readonly IAutomationRouter? _router;
 
-    public ConversationLocaleChangedHandler(InboxGate<AgentsDbContext> inbox, TurnScheduler scheduler)
+    public ConversationLocaleChangedHandler(InboxGate<AgentsDbContext> inbox, TurnScheduler scheduler, IAutomationRouter? router = null)
     {
         _inbox = inbox;
         _scheduler = scheduler;
+        _router = router;
     }
 
     public override string EventType => ConversationEventTypes.ConversationLocaleChanged;
@@ -198,5 +268,35 @@ internal sealed class ConversationLocaleChangedHandler : EventHandlerBase<Conver
     public override int EventVersion => 1;
 
     protected override Task<HandlerResult> HandleAsync(EventEnvelope envelope, ConversationLocaleChangedV1 payload, CancellationToken cancellationToken) =>
-        TurnHandling.RunAsync(_inbox, envelope, payload.SessionId, token => _scheduler.OnSessionStateChangedAsync(payload.SessionId, token), cancellationToken);
+        TurnHandling.RunAsync(_inbox, envelope, payload.SessionId, async token =>
+            {
+                if (!await TurnHandling.OwnedByFlowAsync(_router, payload.SessionId, null, token))
+                {
+                    await _scheduler.OnSessionStateChangedAsync(payload.SessionId, token);
+                }
+            },
+            cancellationToken);
+}
+
+/// <summary>
+/// O fluxo do chatbot visual terminou e a sessão voltou ao agente (<c>FlowReleasedToAgentV1</c>, ADR 0038): a entrada ainda não respondida é reavaliada já, como no retorno à IA (CON-7). Se o atendente já
+/// assumiu ou não há entrada pendente, não cria turno.
+/// </summary>
+internal sealed class FlowReleasedToAgentHandler : EventHandlerBase<FlowReleasedToAgentV1>
+{
+    private readonly InboxGate<AgentsDbContext> _inbox;
+    private readonly TurnScheduler _scheduler;
+
+    public FlowReleasedToAgentHandler(InboxGate<AgentsDbContext> inbox, TurnScheduler scheduler)
+    {
+        _inbox = inbox;
+        _scheduler = scheduler;
+    }
+
+    public override string EventType => ConversationEventTypes.FlowReleasedToAgent;
+
+    public override int EventVersion => 1;
+
+    protected override Task<HandlerResult> HandleAsync(EventEnvelope envelope, FlowReleasedToAgentV1 payload, CancellationToken cancellationToken) =>
+        TurnHandling.RunAsync(_inbox, envelope, payload.SessionId, token => _scheduler.OnReturnedToAiAsync(payload.SessionId, token), cancellationToken);
 }

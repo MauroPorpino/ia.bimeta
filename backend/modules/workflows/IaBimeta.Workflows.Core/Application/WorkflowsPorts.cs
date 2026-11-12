@@ -38,6 +38,7 @@ public interface IWorkflowStore
 internal sealed class WorkflowsAuthorizer
 {
     public const string DefinitionResource = "workflows.definition";
+    public const string ActivationResource = "workflows.activation";
 
     private readonly IRequestContextAccessor _context;
     private readonly IAuditWriter _audit;
@@ -50,14 +51,14 @@ internal sealed class WorkflowsAuthorizer
 
     public RequestContext Context => _context.GetRequired();
 
-    public async Task RequireAsync(Permission permission, Guid? organizationId, string operation, Guid? resourceId, CancellationToken cancellationToken)
+    public async Task RequireAsync(Permission permission, Guid? organizationId, string operation, Guid? resourceId, CancellationToken cancellationToken, string resourceType = DefinitionResource)
     {
         if (Context.IsAllowed(permission, organizationId))
         {
             return;
         }
 
-        await WriteAsync(operation, resourceId, AuditOutcome.Denied, cancellationToken);
+        await WriteAsync(operation, resourceId, AuditOutcome.Denied, cancellationToken, resourceType);
         throw new AccessDeniedException(permission);
     }
 
@@ -76,8 +77,8 @@ internal sealed class WorkflowsAuthorizer
         }
     }
 
-    public Task WriteAsync(string operation, Guid? resourceId, AuditOutcome outcome, CancellationToken cancellationToken) =>
-        _audit.WriteAsync(new AuditEntry(operation, DefinitionResource, resourceId?.ToString(), outcome), cancellationToken);
+    public Task WriteAsync(string operation, Guid? resourceId, AuditOutcome outcome, CancellationToken cancellationToken, string resourceType = DefinitionResource) =>
+        _audit.WriteAsync(new AuditEntry(operation, resourceType, resourceId?.ToString(), outcome), cancellationToken);
 }
 
 /// <summary>O catálogo de operações como o validador o enxerga (só leitura, `Public` e autorizada para fluxos; ADR 0037 §2).</summary>

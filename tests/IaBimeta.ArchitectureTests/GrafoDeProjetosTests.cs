@@ -116,7 +116,7 @@ public class GrafoDeProjetosTests
         Assert.Equal(
             new[]
             {
-                ("Agents", "AiGateway"), ("Agents", "Audit"), ("Agents", "Capabilities"), ("Agents", "ContactCenter"), ("Agents", "Conversations"), ("Agents", "Knowledge"),
+                ("Agents", "AiGateway"), ("Agents", "Audit"), ("Agents", "Capabilities"), ("Agents", "ContactCenter"), ("Agents", "Conversations"), ("Agents", "Knowledge"), ("Agents", "Workflows"),
                 ("AiGateway", "Audit"),
                 ("Capabilities", "Audit"),
                 ("Channels", "Audit"), ("Channels", "Conversations"), ("Channels", "Tenancy"),
@@ -124,7 +124,7 @@ public class GrafoDeProjetosTests
                 ("Conversations", "Audit"), ("Conversations", "Tenancy"),
                 ("Identity", "Audit"), ("Identity", "Tenancy"),
                 ("Tenancy", "Audit"),
-                ("Workflows", "Audit"), ("Workflows", "Capabilities"),
+                ("Workflows", "Audit"), ("Workflows", "Capabilities"), ("Workflows", "Conversations"),
             },
             arestas);
     }

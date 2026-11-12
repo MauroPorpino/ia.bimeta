@@ -11,7 +11,7 @@ namespace IaBimeta.IntegrationTests.Api;
 [Collection(PostgresCollection.Name)]
 public sealed class ComandoDeMigracaoTests
 {
-    private static readonly string[] Modulos = ["Tenancy", "Audit", "Identity", "Conversations", "Channels", "ContactCenter", "AiGateway", "Agents", "Capabilities"];
+    private static readonly string[] Modulos = ["Tenancy", "Audit", "Identity", "Conversations", "Channels", "ContactCenter", "AiGateway", "Agents", "Capabilities", "Workflows"];
 
     [Fact]
     public async Task Com_o_banco_em_dia_listar_e_aplicar_cobrem_os_oito_modulos_sem_nada_pendente()

@@ -35,8 +35,9 @@ public class WorkflowsArquiteturaTests
         Assert.Contains(doModulo, p => p.Nome == "IaBimeta.Workflows.Core");
         var permitidas = new Dictionary<string, string[]>
         {
-            ["IaBimeta.Workflows.Core"] = ["IaBimeta.SharedKernel", "IaBimeta.Capabilities.Contracts", "IaBimeta.Audit.Contracts"],
-            ["IaBimeta.Workflows.Infrastructure"] = ["IaBimeta.SharedKernel", "IaBimeta.Workflows.Core"],
+            ["IaBimeta.Workflows.Contracts"] = [],
+            ["IaBimeta.Workflows.Core"] = ["IaBimeta.SharedKernel", "IaBimeta.Workflows.Contracts", "IaBimeta.Capabilities.Contracts", "IaBimeta.Conversations.Contracts", "IaBimeta.Audit.Contracts"],
+            ["IaBimeta.Workflows.Infrastructure"] = ["IaBimeta.SharedKernel", "IaBimeta.Messaging", "IaBimeta.Workflows.Core", "IaBimeta.Workflows.Contracts", "IaBimeta.Conversations.Contracts"],
             ["IaBimeta.Workflows.Presentation"] = ["IaBimeta.SharedKernel", "IaBimeta.Workflows.Core"],
         };
         foreach (var projeto in doModulo)
@@ -57,7 +58,7 @@ public class WorkflowsArquiteturaTests
     {
         var motor = ArquivosDe("IaBimeta.Workflows.Core")
             .Where(a => a.Contains($"{Path.DirectorySeparatorChar}Domain{Path.DirectorySeparatorChar}") || Path.GetFileName(a) is "FlowInterpreter.cs" or "FlowSimulator.cs" or "FlowText.cs" or "FlowValidator.cs" or "FlowGraphSerializer.cs")
-            .Where(a => Path.GetFileName(a) != "WorkflowVersion.cs" && Path.GetFileName(a) != "WorkflowsSupport.cs")
+            .Where(a => Path.GetFileName(a) is not ("WorkflowVersion.cs" or "WorkflowsSupport.cs" or "RuntimeEntities.cs"))
             .ToList();
         Assert.True(motor.Count >= 6);
 
@@ -75,12 +76,13 @@ public class WorkflowsArquiteturaTests
     public void A_Presentation_e_a_Infrastructure_nao_executam_operacao_de_integracao()
     {
         // O editor e a simulação só LEEM o catálogo; executar operação é do runtime (ADR 0037 §2).
-        foreach (var arquivo in ArquivosDe("IaBimeta.Workflows.Presentation").Concat(ArquivosDe("IaBimeta.Workflows.Infrastructure")))
+        // A composição (WorkflowsInfrastructureExtensions) entrega o executor ao runtime; só o runtime (Core) executa. Os demais arquivos da Infrastructure e da Presentation nunca o tocam.
+        foreach (var arquivo in ArquivosDe("IaBimeta.Workflows.Presentation").Concat(ArquivosDe("IaBimeta.Workflows.Infrastructure")).Where(a => Path.GetFileName(a) != "WorkflowsInfrastructureExtensions.cs"))
         {
             Assert.DoesNotContain("ICapabilityExecutor", Codigo(arquivo));
         }
 
-        foreach (var arquivo in ArquivosDe("IaBimeta.Workflows.Core").Where(a => Path.GetFileName(a) is "WorkflowDefinitionService.cs" or "WorkflowsPorts.cs"))
+        foreach (var arquivo in ArquivosDe("IaBimeta.Workflows.Core").Where(a => Path.GetFileName(a) is "WorkflowDefinitionService.cs" or "WorkflowsPorts.cs" or "FlowRouter.cs"))
         {
             Assert.DoesNotContain("ICapabilityExecutor", Codigo(arquivo));
         }

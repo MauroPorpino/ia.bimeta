@@ -1,4 +1,5 @@
 using IaBimeta.Agents.Application;
+using IaBimeta.Workflows.Contracts;
 using IaBimeta.Agents.Domain;
 using IaBimeta.Messaging;
 using Microsoft.EntityFrameworkCore;
@@ -75,6 +76,10 @@ public static class AgentsInfrastructureExtensions
         services.AddEventHandler<SessionClosedHandler>();
         services.AddEventHandler<SessionTransferredHandler>();
         services.AddEventHandler<ConversationLocaleChangedHandler>();
+        services.AddEventHandler<FlowReleasedToAgentHandler>();
+
+        // A porta de conhecimento do chatbot visual (ADR 0037): o nó "knowledge" reaproveita o FAQ aprovado e o índice semântico, sem outro mecanismo de conhecimento.
+        services.AddScoped<IFlowKnowledgeLookup, FlowKnowledgeLookup>();
 
         return services;
     }

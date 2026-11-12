@@ -4,6 +4,9 @@ namespace IaBimeta.Workflows.Core.Domain;
 
 public enum FlowStatus
 {
+    /// <summary>Instância criada, ainda sem nenhum passo (só o roteador a cria; o executor a inicia com a primeira mensagem do cliente).</summary>
+    Created = 1,
+
     /// <summary>Espera a próxima mensagem do cliente (ou o prazo).</summary>
     WaitingInput = 2,
 

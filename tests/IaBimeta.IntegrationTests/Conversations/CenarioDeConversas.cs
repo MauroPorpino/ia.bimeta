@@ -24,6 +24,7 @@ internal sealed class CenarioDeConversas
         Indisponiveis,
         Mensageria,
         Agentes,
+        Fluxos,
     }
 
     private readonly Canais _canais;
@@ -54,12 +55,12 @@ internal sealed class CenarioDeConversas
     /// <param name="agentes">
     /// Verdadeiro: a composição dos Agents (a de mensageria, mais o Agents e o provedor de IA dublê, com o relógio próprio dos Agents). O teste roda o relay e o executor de turnos quando quer.
     /// </param>
-    public static async Task<CenarioDeConversas> CriarAsync(PostgresFixture banco, string prefixo, bool canaisReais = false, bool mensageria = false, bool agentes = false)
+    public static async Task<CenarioDeConversas> CriarAsync(PostgresFixture banco, string prefixo, bool canaisReais = false, bool mensageria = false, bool agentes = false, bool fluxos = false)
     {
         var tenant = await banco.RegistrarTenantAsync(prefixo);
         var organizacao = await banco.CriarOrganizacaoAsync(tenant, $"Organização {prefixo}");
         return new CenarioDeConversas(
-            banco, tenant, organizacao.Id, agentes ? Canais.Agentes : mensageria ? Canais.Mensageria : canaisReais ? Canais.Reais : Canais.Dubles);
+            banco, tenant, organizacao.Id, fluxos ? Canais.Fluxos : agentes ? Canais.Agentes : mensageria ? Canais.Mensageria : canaisReais ? Canais.Reais : Canais.Dubles);
     }
 
     /// <summary>
@@ -77,6 +78,7 @@ internal sealed class CenarioDeConversas
         Canais.Indisponiveis => _banco.NovoEscopoComCanaisIndisponiveis(contexto),
         Canais.Mensageria => _banco.NovoEscopoComMensageria(contexto),
         Canais.Agentes => _banco.NovoEscopoComAgentes(contexto),
+        Canais.Fluxos => _banco.NovoEscopoComFluxos(contexto),
         _ => _banco.NovoEscopo(contexto),
     };
 
@@ -86,6 +88,7 @@ internal sealed class CenarioDeConversas
         Canais.Indisponiveis => _banco.EventosComCanaisIndisponiveis,
         Canais.Mensageria => _banco.EventosComMensageria,
         Canais.Agentes => _banco.EventosComAgentes,
+        Canais.Fluxos => _banco.EventosComFluxos,
         _ => _banco.Eventos,
     };
 

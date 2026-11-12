@@ -38,6 +38,7 @@
   <Project Path="modules/capabilities/IaBimeta.Capabilities.Core/IaBimeta.Capabilities.Core.csproj" />
   <Project Path="modules/capabilities/IaBimeta.Capabilities.Infrastructure/IaBimeta.Capabilities.Infrastructure.csproj" />
   <Project Path="modules/capabilities/IaBimeta.Capabilities.Presentation/IaBimeta.Capabilities.Presentation.csproj" />
+  <Project Path="modules/workflows/IaBimeta.Workflows.Contracts/IaBimeta.Workflows.Contracts.csproj" />
   <Project Path="modules/workflows/IaBimeta.Workflows.Core/IaBimeta.Workflows.Core.csproj" />
   <Project Path="modules/workflows/IaBimeta.Workflows.Infrastructure/IaBimeta.Workflows.Infrastructure.csproj" />
   <Project Path="modules/workflows/IaBimeta.Workflows.Presentation/IaBimeta.Workflows.Presentation.csproj" />

@@ -16,6 +16,9 @@ using IaBimeta.Messaging;
 using IaBimeta.SharedKernel;
 using IaBimeta.Tenancy.Contracts.Queries;
 using IaBimeta.Tenancy.Infrastructure;
+using IaBimeta.Workflows.Contracts;
+using IaBimeta.Workflows.Core.Domain;
+using IaBimeta.Workflows.Infrastructure;
 
 namespace IaBimeta.Worker;
 
@@ -140,6 +143,17 @@ public static class WorkerHost
             opcoes => builder.Configuration.GetSection("Capabilities:Options").Bind(opcoes),
             segredos => builder.Configuration.GetSection("Capabilities:Secrets").Bind(segredos));
 
+        // O Chatbot Visual (ADR 0037 e 0038): DESLIGADO por padrão (Workflows:Options:Enabled = false). Desligado, nenhum consumidor de evento nem executor é registrado e o roteador é um dublê que responde "agente":
+        // o comportamento anterior é preservado integralmente. Ligado, o Worker registra o roteador, os consumidores dos eventos do Conversations e o executor das instâncias. As chaves de cifra das variáveis vêm de
+        // Workflows:Secrets (ActiveKeyId e Keys), do ambiente, nunca de arquivo versionado; sem elas nenhuma instância é criada. A transferência passa pelo adaptador do host sobre o ContactCenter.
+        var fluxos = new WorkflowsOptions();
+        builder.Configuration.GetSection("Workflows:Options").Bind(fluxos);
+        builder.Services.AddWorkflows(
+            provider => ConnectionStringOf(provider, "Workflows"),
+            opcoes => builder.Configuration.GetSection("Workflows:Options").Bind(opcoes),
+            segredos => builder.Configuration.GetSection("Workflows:Secrets").Bind(segredos));
+        builder.Services.AddScoped<IFlowHandoffPort, FlowHandoffAdapter>();
+
         // O Knowledge (ADR 0034): o Worker vetoriza o conhecimento publicado (SemanticIndexer) e, no Pacote 2, busca por similaridade no turno. Desligado por padrão (Knowledge:Semantic:Enabled).
         builder.Services.AddOllamaProvider(ollama => builder.Configuration.GetSection("Knowledge:Providers:Ollama").Bind(ollama));
         builder.Services.AddKnowledge(
@@ -165,11 +179,18 @@ public static class WorkerHost
         builder.Services.AddInboxRetention<ChannelsDbContext>("channels");
         builder.Services.AddInboxRetention<AgentsDbContext>("agents");
         builder.Services.AddAgentsRetention();
+        builder.Services.AddWorkflowsRetention();
         builder.Services.AddInboxRetention<ContactCenterDbContext>("contact_center");
         builder.Services.AddHostedService<RetentionSchedulerService>();
         builder.Services.AddHostedService<ContactCenterReconciliationService>();
         builder.Services.AddHostedService<AgentsTurnExecutorService>();
         builder.Services.AddHostedService<AgentsReconciliationService>();
+        if (fluxos.Enabled)
+        {
+            builder.Services.AddSingleton<FlowExecutor>();
+            builder.Services.AddHostedService<FlowExecutorService>();
+            builder.Services.AddInboxRetention<WorkflowsDbContext>("workflows");
+        }
 
         return builder.Build();
     }

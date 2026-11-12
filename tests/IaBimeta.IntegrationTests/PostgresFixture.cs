@@ -95,6 +95,7 @@ public sealed class PostgresFixture : IAsyncLifetime
     private ServiceProvider? _servicosComCanaisIndisponiveis;
     private ServiceProvider? _servicosComMensageria;
     private ServiceProvider? _servicosComAgentes;
+    private ServiceProvider? _servicosComFluxos;
 
     public string ConnectionString { get; } = TestDatabase.ConnectionString;
 
@@ -108,7 +109,7 @@ public sealed class PostgresFixture : IAsyncLifetime
     /// (um banco que não existe), enquanto o do Conversations e os demais funcionam: a falha da consulta de autorização, de verdade.
     /// </summary>
     private ServiceProvider Compor(
-        bool canaisReais, bool canaisIndisponiveis = false, bool mensageria = false, bool agentes = false, Action<AttachmentOptions>? configurarAnexos = null, IAttachmentScanner? verificador = null)
+        bool canaisReais, bool canaisIndisponiveis = false, bool mensageria = false, bool agentes = false, Action<AttachmentOptions>? configurarAnexos = null, IAttachmentScanner? verificador = null, bool fluxos = false)
     {
         var colecao = new ServiceCollection();
         if (mensageria)
@@ -125,7 +126,28 @@ public sealed class PostgresFixture : IAsyncLifetime
         // O Motor de Integração (ADR 0035): o transporte de saída é o ERP SIMULADO (nenhuma rede); o resto do motor é o real.
         colecao.AddSingleton<IaBimeta.Capabilities.Infrastructure.Outbound.IOutboundHttp>(Erp);
         colecao.AddCapabilities(_ => ConnectionString);
-        colecao.AddWorkflows(_ => ConnectionString);
+        // O Chatbot Visual (ADR 0037 e 0038): desligado em todas as composições, exceto na dos FLUXOS (runtime ligado, chave de cifra de teste, transferência pelo adaptador do host sobre o ContactCenter).
+        // Nas demais, o roteador é o dublê "sempre o agente": a prova de que desligado preserva o comportamento.
+        if (fluxos)
+        {
+            colecao.AddWorkflows(
+                _ => ConnectionString,
+                opcoes =>
+                {
+                    opcoes.Enabled = true;
+                    opcoes.StaleRetries = 3;
+                },
+                segredos =>
+                {
+                    segredos.ActiveKeyId = "k1";
+                    segredos.Keys["k1"] = Convert.ToBase64String(Enumerable.Range(0, 32).Select(i => (byte)(i * 5 + 11)).ToArray());
+                });
+            colecao.AddScoped<IaBimeta.Workflows.Contracts.IFlowHandoffPort, IaBimeta.Worker.FlowHandoffAdapter>();
+        }
+        else
+        {
+            colecao.AddWorkflows(_ => ConnectionString);
+        }
         colecao.AddTenancy(_ => ConnectionString);
         colecao.AddIdentityModule(_ => ConnectionString, opcoes => opcoes.PasswordHashIterations = PasswordIterations);
         // Etapa 3: o publicador é o dublê em memória (não durável), como no host.
@@ -240,6 +262,7 @@ public sealed class PostgresFixture : IAsyncLifetime
         _servicosComCanaisIndisponiveis = Compor(canaisReais: true, canaisIndisponiveis: true);
         _servicosComMensageria = Compor(canaisReais: true, mensageria: true);
         _servicosComAgentes = Compor(canaisReais: true, mensageria: true, agentes: true);
+        _servicosComFluxos = Compor(canaisReais: true, mensageria: true, agentes: true, fluxos: true);
 
         await using var escopo = _servicos.CreateAsyncScope();
         await escopo.ServiceProvider.GetRequiredService<AuditDbContext>().Database.MigrateAsync();
@@ -327,6 +350,13 @@ public sealed class PostgresFixture : IAsyncLifetime
     /// <summary>Como <see cref="NovoEscopo"/>, mas na composição dos Agents.</summary>
     public AsyncServiceScope NovoEscopoComAgentes(RequestContext? contexto = null) => Abrir(_servicosComAgentes!, contexto);
 
+    /// <summary>A composição dos FLUXOS (a dos Agents com o chatbot visual ligado): o roteador, os consumidores de evento e o runtime. A raiz de serviços, onde o relay e o executor vivem.</summary>
+    public IServiceProvider ServicosComFluxos => _servicosComFluxos!;
+
+    public InMemoryEventPublisher EventosComFluxos => _servicosComFluxos!.GetRequiredService<InMemoryEventPublisher>();
+
+    public AsyncServiceScope NovoEscopoComFluxos(RequestContext? contexto = null) => Abrir(_servicosComFluxos!, contexto);
+
     /// <summary>Os eventos publicados pelo Conversations (dublê em memória), para os testes conferirem o que sairia para os consumidores.</summary>
     public InMemoryEventPublisher Eventos => _servicos!.GetRequiredService<InMemoryEventPublisher>();
 
@@ -356,6 +386,11 @@ public sealed class PostgresFixture : IAsyncLifetime
         if (_servicosComMensageria is not null)
         {
             await _servicosComMensageria.DisposeAsync();
+        }
+
+        if (_servicosComFluxos is not null)
+        {
+            await _servicosComFluxos.DisposeAsync();
         }
 
         if (_servicosComAgentes is not null)

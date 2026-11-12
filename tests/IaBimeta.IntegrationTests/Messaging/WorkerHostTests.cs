@@ -207,7 +207,7 @@ public sealed class WorkerHostTests(PostgresFixture banco)
         Assert.Contains("AgentsReconciliationService", servicos);
         await using var escopo = worker.Services.CreateAsyncScope();
 
-        // Os handlers do ContactCenter (4: três projeções de estado e o sinal de falha de envio), os do Agents (7) e os do Channels (3: as duas entradas do Inbox do provedor e o Sender): cada um só age no banco do próprio módulo (o Channels também chama o Conversations pelos
+        // Os handlers do ContactCenter (4: três projeções de estado e o sinal de falha de envio), os do Agents (8: os sete de estado e o da liberação do fluxo ao agente) e os do Channels (3: as duas entradas do Inbox do provedor e o Sender): cada um só age no banco do próprio módulo (o Channels também chama o Conversations pelos
         // Contracts), e o ContactCenter e o Agents consomem o mesmo evento, cada um com o inbox dele.
         var tipos = escopo.ServiceProvider.GetServices<IEventHandler>().Select(h => $"{h.EventType}/{h.EventVersion}").OrderBy(t => t, StringComparer.Ordinal).ToList();
         Assert.Equal(
@@ -217,6 +217,7 @@ public sealed class WorkerHostTests(PostgresFixture banco)
                 "channels.provider-message-received/1",
                 "channels.provider-status-received/1",
                 "conversations.conversation-locale-changed/1",
+                "conversations.flow-released-to-agent/1",
                 "conversations.handling-mode-changed/1",
                 "conversations.handling-mode-changed/1",
                 "conversations.inbound-message-registered/1",

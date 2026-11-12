@@ -21,6 +21,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\..\backend\building-blocks\IaBimeta.SharedKernel\IaBimeta.SharedKernel.csproj" />
     <ProjectReference Include="..\..\..\backend\modules\workflows\IaBimeta.Workflows.Core\IaBimeta.Workflows.Core.csproj" />
+    <ProjectReference Include="..\..\..\backend\modules\workflows\IaBimeta.Workflows.Contracts\IaBimeta.Workflows.Contracts.csproj" />
+    <ProjectReference Include="..\..\..\backend\modules\workflows\IaBimeta.Workflows.Infrastructure\IaBimeta.Workflows.Infrastructure.csproj" />
     <ProjectReference Include="..\..\..\backend\modules\capabilities\IaBimeta.Capabilities.Contracts\IaBimeta.Capabilities.Contracts.csproj" />
     <ProjectReference Include="..\..\..\backend\modules\audit\IaBimeta.Audit.Contracts\IaBimeta.Audit.Contracts.csproj" />
   </ItemGroup>

@@ -1,3 +1,4 @@
+using IaBimeta.Messaging;
 using IaBimeta.SharedKernel;
 using IaBimeta.Workflows.Core.Domain;
 using IaBimeta.Workflows.Infrastructure.Configurations;
@@ -25,6 +26,16 @@ public sealed class WorkflowsDbContext : DbContext
 
     public DbSet<WorkflowVersion> Versions => Set<WorkflowVersion>();
 
+    public DbSet<FlowActivation> Activations => Set<FlowActivation>();
+
+    public DbSet<RoutingDecision> Decisions => Set<RoutingDecision>();
+
+    public DbSet<FlowInstance> Instances => Set<FlowInstance>();
+
+    public DbSet<FlowEffectRecord> Effects => Set<FlowEffectRecord>();
+
+    public DbSet<FlowStepRecord> Steps => Set<FlowStepRecord>();
+
     // O EF reavalia esta propriedade a cada execução de consulta (membro do DbContext no filtro global).
     private TenantId TenantAtual => _contexto.GetRequired().TenantId;
 
@@ -33,6 +44,19 @@ public sealed class WorkflowsDbContext : DbContext
         modelBuilder.HasDefaultSchema(Schema);
         modelBuilder.ApplyConfiguration(new WorkflowVersionConfiguration());
         modelBuilder.Entity<WorkflowVersion>().HasQueryFilter(e => e.TenantId == TenantAtual);
+        modelBuilder.ApplyConfiguration(new FlowActivationConfiguration());
+        modelBuilder.ApplyConfiguration(new RoutingDecisionConfiguration());
+        modelBuilder.ApplyConfiguration(new FlowInstanceConfiguration());
+        modelBuilder.ApplyConfiguration(new FlowEffectConfiguration());
+        modelBuilder.ApplyConfiguration(new FlowStepConfiguration());
+        modelBuilder.Entity<FlowActivation>().HasQueryFilter(e => e.TenantId == TenantAtual);
+        modelBuilder.Entity<RoutingDecision>().HasQueryFilter(e => e.TenantId == TenantAtual);
+        modelBuilder.Entity<FlowInstance>().HasQueryFilter(e => e.TenantId == TenantAtual);
+        modelBuilder.Entity<FlowEffectRecord>().HasQueryFilter(e => e.TenantId == TenantAtual);
+        modelBuilder.Entity<FlowStepRecord>().HasQueryFilter(e => e.TenantId == TenantAtual);
+
+        // Inbox do consumidor (BOUNDARIES.md §12.1): a idempotência por EventId do que este módulo consome do Conversations.
+        modelBuilder.ConfigureInbox();
     }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)

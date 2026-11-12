@@ -15,6 +15,22 @@ public sealed record ValidateBody(Guid OrganizationId, JsonElement Graph);
 
 public sealed record SimulateBody(Guid OrganizationId, JsonElement Graph, SimulationScenario? Scenario);
 
+/// <summary>O corpo de uma ativação. O tenant nunca vem daqui; a organização é conferida contra as permissões do usuário.</summary>
+public sealed record ActivationBody(Guid OrganizationId, Guid? BusinessUnitId, Guid? ChannelInstanceId, string? WorkflowKey, int Priority, int RolloutPercent, OnFailurePolicy OnFailure, int? ExpectedRevision)
+{
+    public FlowActivationRequest ToRequest(int? expectedRevision) =>
+        new(OrganizationId, BusinessUnitId, ChannelInstanceId, WorkflowKey ?? string.Empty, Priority, RolloutPercent, OnFailure, expectedRevision);
+}
+
+/// <summary>O detalhe de uma execução, achatado para a tela (a instância e o caminho e os efeitos, sem variáveis nem conteúdo).</summary>
+public sealed record FlowInstanceDetailBody(
+    Guid Id, Guid SessionId, string WorkflowKey, int VersionNumber, FlowStatus Status, string? NodeId, string? FailureCode, DateTimeOffset CreatedAt, DateTimeOffset? EndedAt,
+    IReadOnlyList<FlowStepView> Steps, IReadOnlyList<FlowEffectView> Effects)
+{
+    public static FlowInstanceDetailBody From(FlowInstanceDetailView d) =>
+        new(d.Instance.Id, d.Instance.SessionId, d.Instance.WorkflowKey, d.Instance.VersionNumber, d.Instance.Status, d.Instance.NodeId, d.Instance.FailureCode, d.Instance.CreatedAt, d.Instance.EndedAt, d.Steps, d.Effects);
+}
+
 public static class WorkflowsEndpoints
 {
     /// <summary>
@@ -44,6 +60,32 @@ public static class WorkflowsEndpoints
         });
         grupo.MapPost("/simulate", async (SimulateBody corpo, WorkflowDefinitionService servico, CancellationToken ct) =>
             Results.Ok(await servico.SimulateAsync(new SimulateRequest(corpo.OrganizationId, RawOf(corpo.Graph), corpo.Scenario ?? new SimulationScenario([])), ct)));
+
+        // As ativações (ADR 0038): onde um fluxo publicado atende. Nascem desligadas; ligar exige versão publicada.
+        var ativacoes = grupo.MapGroup("/activations");
+        ativacoes.MapGet("/", async (FlowOperationsService servico, CancellationToken ct) => Results.Ok(await servico.ListActivationsAsync(ct)));
+        ativacoes.MapPost("/", async (ActivationBody corpo, FlowOperationsService servico, CancellationToken ct) =>
+        {
+            var criada = await servico.CreateActivationAsync(corpo.ToRequest(null), ct);
+            return Results.Created($"/workflows/activations/{criada.Id}", criada);
+        });
+        ativacoes.MapPut("/{id:guid}", async (Guid id, ActivationBody corpo, FlowOperationsService servico, CancellationToken ct) =>
+            await servico.UpdateActivationAsync(id, corpo.ToRequest(corpo.ExpectedRevision), ct) is { } visao ? Results.Ok(visao) : Results.NotFound());
+        ativacoes.MapPost("/{id:guid}/enable", async (Guid id, FlowOperationsService servico, CancellationToken ct) =>
+            await servico.SetEnabledAsync(id, true, ct) is { } visao ? Results.Ok(visao) : Results.NotFound());
+        ativacoes.MapPost("/{id:guid}/disable", async (Guid id, FlowOperationsService servico, CancellationToken ct) =>
+            await servico.SetEnabledAsync(id, false, ct) is { } visao ? Results.Ok(visao) : Results.NotFound());
+
+        // O histórico de execução e as métricas: só identificadores, estados, códigos e contagens (nunca conteúdo de cliente).
+        var instancias = grupo.MapGroup("/instances");
+        instancias.MapGet("/", async (FlowStatus? status, string? key, int? take, int? skip, FlowOperationsService servico, CancellationToken ct) =>
+            Results.Ok(await servico.ListInstancesAsync(status, key, take ?? 25, skip ?? 0, ct)));
+        instancias.MapGet("/{id:guid}", async (Guid id, FlowOperationsService servico, CancellationToken ct) =>
+            await servico.GetInstanceAsync(id, ct) is { } visao ? Results.Ok(FlowInstanceDetailBody.From(visao)) : Results.NotFound());
+        var metricas = grupo.MapGroup("/metrics");
+        metricas.MapGet("/", async (int? days, FlowOperationsService servico, CancellationToken ct) => Results.Ok(await servico.MetricsAsync(days ?? 7, ct)));
+        metricas.MapGet("/funnel", async (string key, int version, int? days, FlowOperationsService servico, CancellationToken ct) =>
+            Results.Ok(await servico.FunnelAsync(key, version, days ?? 7, ct)));
 
         // O que o editor pode oferecer no nó de integração: só as operações elegíveis para fluxos da organização.
         grupo.MapGet("/operations", async (Guid organizationId, WorkflowDefinitionService servico, CancellationToken ct) => Results.Ok(await servico.OperationsAsync(organizationId, ct)));

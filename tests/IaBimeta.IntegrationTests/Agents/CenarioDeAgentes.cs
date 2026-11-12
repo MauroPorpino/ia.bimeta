@@ -31,14 +31,18 @@ internal sealed class CenarioDeAgentes
     private static readonly ConcurrentDictionary<string, Func<AiCompletionRequest, Task<AiCompletionResult>>> Roteiros = new();
     private static int _instalado;
 
-    private CenarioDeAgentes(CenarioDeConversas c, string canario, string canarioDasInstrucoes)
+    private CenarioDeAgentes(CenarioDeConversas c, string canario, string canarioDasInstrucoes, bool fluxos)
     {
         C = c;
+        Servicos = fluxos ? c.Banco.ServicosComFluxos : c.Banco.ServicosComAgentes;
         Canario = canario;
         CanarioDasInstrucoes = canarioDasInstrucoes;
     }
 
     public CenarioDeConversas C { get; }
+
+    /// <summary>A raiz de serviços da composição deste cenário (a dos Agents, ou a dos FLUXOS, com o chatbot visual ligado): onde o relay e os executores vivem.</summary>
+    public IServiceProvider Servicos { get; }
 
     /// <summary>A credencial sintética do tenant: o AiGateway a decifra na hora e a entrega ao provedor, que a usa para saber de QUEM é a chamada.</summary>
     public string Canario { get; }
@@ -56,10 +60,10 @@ internal sealed class CenarioDeAgentes
     public RequestContext Admin { get; private set; } = null!;
 
     public static async Task<CenarioDeAgentes> CriarAsync(
-        PostgresFixture banco, string prefixo, bool configurarIA = true, bool publicarAgente = true, string? textoDeAudio = null, bool usarOpenAi = false)
+        PostgresFixture banco, string prefixo, bool configurarIA = true, bool publicarAgente = true, string? textoDeAudio = null, bool usarOpenAi = false, bool fluxos = false)
     {
-        var c = await CenarioDeConversas.CriarAsync(banco, prefixo, canaisReais: true, agentes: true);
-        var cenario = new CenarioDeAgentes(c, $"sk-CANARIO-{Guid.NewGuid():N}", $"CANARIO-INSTRUCOES-{Guid.NewGuid():N}");
+        var c = await CenarioDeConversas.CriarAsync(banco, prefixo, canaisReais: true, agentes: true, fluxos: fluxos);
+        var cenario = new CenarioDeAgentes(c, $"sk-CANARIO-{Guid.NewGuid():N}", $"CANARIO-INSTRUCOES-{Guid.NewGuid():N}", fluxos);
         InstalarDespachante(banco.ProvedorDeIA);
         var admin = PostgresFixture.ContextoDeUsuario(c.Tenant, Guid.NewGuid(), new PermissionGrant(Permission.TenantSettingsManage, null));
         cenario.Admin = admin;
@@ -152,7 +156,7 @@ internal sealed class CenarioDeAgentes
     public void Avancar(TimeSpan tempo) => Relogio.Avancar(tempo);
 
     /// <summary>Roda o relay do outbox do Conversations: entrega os eventos aos handlers (ContactCenter e Agents). O relógio dos Agents decide o que já está elegível.</summary>
-    public Task<RelayRunResult> RelayAsync() => C.Banco.ServicosComAgentes.GetRequiredService<OutboxRelay<ConversationsDbContext>>().RunOnceAsync("teste-agentes");
+    public Task<RelayRunResult> RelayAsync() => Servicos.GetRequiredService<OutboxRelay<ConversationsDbContext>>().RunOnceAsync("teste-agentes");
 
     /// <summary>
     /// Um ciclo do executor, SÓ para este tenant: reivindica os turnos devidos (com o teto de turnos simultâneos do tenant, no banco) e roda cada um em escopo próprio, como o Worker faz. Os testes
@@ -184,9 +188,9 @@ internal sealed class CenarioDeAgentes
         C.ComoAsync(C.ContextoDeSistema, sp => sp.GetRequiredService<TurnRunner>().RunAsync(turno, cancellationToken));
 
     /// <summary>O executor REAL do Worker (todos os tenants com turno devido). Cria uma instância nova a cada chamada (um dono diferente, como processos diferentes).</summary>
-    public AgentsTurnExecutor ExecutorDoWorker() => ActivatorUtilities.CreateInstance<AgentsTurnExecutor>(C.Banco.ServicosComAgentes);
+    public AgentsTurnExecutor ExecutorDoWorker() => ActivatorUtilities.CreateInstance<AgentsTurnExecutor>(Servicos);
 
-    public AgentsReconciler ReconciliadorDoWorker() => ActivatorUtilities.CreateInstance<AgentsReconciler>(C.Banco.ServicosComAgentes);
+    public AgentsReconciler ReconciliadorDoWorker() => ActivatorUtilities.CreateInstance<AgentsReconciler>(Servicos);
 
     // O agente do tenant
 

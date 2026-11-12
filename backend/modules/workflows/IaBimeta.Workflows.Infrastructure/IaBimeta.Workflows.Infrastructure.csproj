@@ -23,7 +23,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\building-blocks\IaBimeta.SharedKernel\IaBimeta.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\..\building-blocks\IaBimeta.Messaging\IaBimeta.Messaging.csproj" />
     <ProjectReference Include="..\IaBimeta.Workflows.Core\IaBimeta.Workflows.Core.csproj" />
+    <ProjectReference Include="..\IaBimeta.Workflows.Contracts\IaBimeta.Workflows.Contracts.csproj" />
+    <ProjectReference Include="..\..\conversations\IaBimeta.Conversations.Contracts\IaBimeta.Conversations.Contracts.csproj" />
   </ItemGroup>
 
 </Project>

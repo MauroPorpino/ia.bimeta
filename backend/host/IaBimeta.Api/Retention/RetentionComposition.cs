@@ -1,4 +1,5 @@
 using IaBimeta.Agents.Infrastructure;
+using IaBimeta.Workflows.Infrastructure;
 using IaBimeta.Channels.Infrastructure;
 using IaBimeta.ContactCenter.Infrastructure;
 using IaBimeta.Conversations.Infrastructure;
@@ -45,6 +46,8 @@ internal static class RetentionComposition
         services.AddInboxRetention<ChannelsDbContext>("channels");
         services.AddInboxRetention<AgentsDbContext>("agents");
         services.AddAgentsRetention();
+        services.AddInboxRetention<WorkflowsDbContext>("workflows");
+        services.AddWorkflowsRetention();
         services.AddInboxRetention<ContactCenterDbContext>("contact_center");
         return services;
     }

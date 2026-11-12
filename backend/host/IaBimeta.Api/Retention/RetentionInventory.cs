@@ -46,6 +46,10 @@ internal static class RetentionInventory
         ["agents.inbox_message"] = (DataClass.Technical, "marcas de idempotência (só identificadores)"),
         ["agents.semantic_decisions"] = (DataClass.Technical, "decisões da resposta por similaridade (ADR 0034): só números e códigos por turno (similaridade, desfecho, latência), nenhum texto de cliente"),
         ["agents.faq_suggestions"] = (DataClass.Technical, "sugestões da IA local para o FAQ (ADR 0034), conteúdo derivado de conversas e já redigido de dados pessoais; só as JÁ DECIDIDAS expiram (90 dias); as pendentes esperam a revisão"),
+        ["workflows.inbox_message"] = (DataClass.Technical, "marcas de idempotência (só identificadores)"),
+        ["workflows.flow_instances"] = (DataClass.Technical, "instâncias de fluxo do chatbot visual (ADR 0037 e 0038) JÁ ENCERRADAS: só identificadores, estados e códigos (as variáveis e o conteúdo dos efeitos são apagados no encerramento); as ativas nunca expiram por prazo"),
+        ["workflows.flow_steps"] = (DataClass.Technical, "passos de uma instância de fluxo (nó e desfecho): só identificadores e códigos"),
+        ["workflows.flow_effects"] = (DataClass.Technical, "efeitos de uma instância de fluxo (tipo, estado e código); o conteúdo cifrado é apagado no encerramento"),
         ["contact_center.inbox_message"] = (DataClass.Technical, "marcas de idempotência (só identificadores)"),
 
         // Pessoais ou conteúdo de cliente (somente relatório)
@@ -65,6 +69,7 @@ internal static class RetentionInventory
         ["agents.ai_turns"] = (DataClass.Personal, "turnos de IA ligados ao atendimento"),
         ["agents.knowledge_gaps"] = (DataClass.Personal, "lacunas do FAQ (ADR 0030): hash com segredo do tenant de uma pergunta de cliente, contagem de datas e a decisão do administrador; nenhum texto de cliente"),
         ["agents.knowledge_gap_occurrences"] = (DataClass.Personal, "ocorrências das lacunas (ADR 0030): só REFERÊNCIAS ao atendimento, à conversa e à mensagem (o texto fica no Conversations); a referência a mensagem removida é tratada na revisão"),
+        ["workflows.routing_decisions"] = (DataClass.Personal, "quem responde a cada atendimento (ADR 0038): só a referência à sessão, o dono (fluxo ou agente) e a ativação; nenhum conteúdo"),
         ["identity.users"] = (DataClass.Personal, "cadastro dos colaboradores (e-mail, nome, hash de senha)"),
         ["identity.user_organization_grants"] = (DataClass.Personal, "papéis dos colaboradores"),
 
@@ -93,6 +98,8 @@ internal static class RetentionInventory
         ["contact_center.queue_closures"] = (DataClass.Configuration, "fechamentos das filas"),
         ["agents.agent_definition_versions"] = (DataClass.Configuration, "versões da definição do agente"),
         ["agents.semantic_answer_settings"] = (DataClass.Configuration, "modo e limiares da resposta por similaridade de cada empresa (ADR 0034)"),
+        ["workflows.workflow_versions"] = (DataClass.Configuration, "versões dos fluxos do chatbot visual (ADR 0037): o grafo (texto e desenho do fluxo), sem dado de cliente; a versão publicada é imutável"),
+        ["workflows.flow_activations"] = (DataClass.Configuration, "ativações dos fluxos (ADR 0038): onde cada fluxo publicado atende, a parcela e a política de falha"),
         ["knowledge.semantic_texts"] = (DataClass.Configuration, "índice vetorial do conhecimento APROVADO (ADR 0034): texto de pergunta e alias publicados e seus vetores, nunca texto de cliente; derivado e reconstruível pela próxima publicação; só existe com o modo semântico ligado"),
         ["ai_gateway.ai_credentials"] = (DataClass.Configuration, "chaves de IA do tenant, cifradas"),
         ["ai_gateway.ai_tenant_settings"] = (DataClass.Configuration, "configuração de IA do tenant"),
@@ -100,6 +107,7 @@ internal static class RetentionInventory
 
         // Controle do banco
         ["agents.__ef_migrations_history"] = (DataClass.Infrastructure, "histórico de migrations"),
+        ["workflows.__ef_migrations_history"] = (DataClass.Infrastructure, "histórico de migrations"),
         ["capabilities.__ef_migrations_history"] = (DataClass.Infrastructure, "histórico de migrations"),
         ["capabilities.integration_connections"] = (DataClass.Configuration, "conexões do Motor de Integração (ADR 0035): endereço, autenticação e segredo CIFRADO (não é dado pessoal); sai com o encerramento da empresa"),
         ["capabilities.capability_definitions"] = (DataClass.Configuration, "operações versionadas do catálogo de integração (ADR 0035): molde da chamada, sem credencial nem dado de cliente"),
