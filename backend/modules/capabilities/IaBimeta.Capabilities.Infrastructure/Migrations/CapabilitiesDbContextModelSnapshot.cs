@@ -49,6 +49,12 @@ namespace IaBimeta.Capabilities.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("created_by");
 
+                    b.Property<short>("DataClass")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("smallint")
+                        .HasDefaultValue((short)2)
+                        .HasColumnName("data_class");
+
                     b.Property<string>("Description")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)")
@@ -132,6 +138,8 @@ namespace IaBimeta.Capabilities.Infrastructure.Migrations
                         {
                             t.HasCheckConstraint("ck_capability_definitions_confirmation", "requires_confirmation = false OR effect = 2");
 
+                            t.HasCheckConstraint("ck_capability_definitions_data_class", "data_class IN (1, 2)");
+
                             t.HasCheckConstraint("ck_capability_definitions_effect", "effect IN (1, 2)");
 
                             t.HasCheckConstraint("ck_capability_definitions_published", "(status = 1) = (published_at IS NULL)");
@@ -181,6 +189,11 @@ namespace IaBimeta.Capabilities.Infrastructure.Migrations
                     b.Property<Guid>("ConnectionId")
                         .HasColumnType("uuid")
                         .HasColumnName("connection_id");
+
+                    b.Property<string>("CorrelationId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("correlation_id");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")

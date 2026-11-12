@@ -220,6 +220,9 @@ public sealed class CapabilityDefinition : ITenantOwned
 
     public bool RequiresConfirmation { get; private set; }
 
+    /// <summary>A classe do dado que a operação devolve (ADR 0036). Decisão do administrador; o padrão seguro é <see cref="CapabilityDataClass.CustomerData"/>.</summary>
+    public CapabilityDataClass DataClass { get; private set; } = CapabilityDataClass.CustomerData;
+
     public CapabilityCaller AllowedCallers { get; private set; }
 
     public bool Enabled { get; private set; }
@@ -252,7 +255,8 @@ public sealed class CapabilityDefinition : ITenantOwned
         CapabilityCaller allowedCallers,
         CapabilityOperationSpec spec,
         Guid? createdBy,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        CapabilityDataClass dataClass = CapabilityDataClass.CustomerData)
     {
         var definicao = new CapabilityDefinition
         {
@@ -266,24 +270,25 @@ public sealed class CapabilityDefinition : ITenantOwned
             CreatedBy = createdBy,
             CreatedAt = now,
         };
-        definicao.ApplyContent(name, description, effect, requiresConfirmation, allowedCallers, spec, now);
+        definicao.ApplyContent(name, description, effect, requiresConfirmation, allowedCallers, spec, now, dataClass);
         return definicao;
     }
 
     /// <summary>Edita o RASCUNHO. Uma versão publicada nunca é alterada: a mudança vira uma nova versão.</summary>
-    public void UpdateDraft(string name, string? description, CapabilityEffect effect, bool requiresConfirmation, CapabilityCaller allowedCallers, CapabilityOperationSpec spec, DateTimeOffset now)
+    public void UpdateDraft(string name, string? description, CapabilityEffect effect, bool requiresConfirmation, CapabilityCaller allowedCallers, CapabilityOperationSpec spec, DateTimeOffset now, CapabilityDataClass dataClass = CapabilityDataClass.CustomerData)
     {
         if (Status != DefinitionStatus.Draft)
         {
             throw new CapabilitiesConflictException("not-draft", "Só o rascunho pode ser editado: uma versão publicada nunca muda.");
         }
 
-        ApplyContent(name, description, effect, requiresConfirmation, allowedCallers, spec, now);
+        ApplyContent(name, description, effect, requiresConfirmation, allowedCallers, spec, now, dataClass);
         Revision++;
     }
 
-    private void ApplyContent(string name, string? description, CapabilityEffect effect, bool requiresConfirmation, CapabilityCaller allowedCallers, CapabilityOperationSpec spec, DateTimeOffset now)
+    private void ApplyContent(string name, string? description, CapabilityEffect effect, bool requiresConfirmation, CapabilityCaller allowedCallers, CapabilityOperationSpec spec, DateTimeOffset now, CapabilityDataClass dataClass)
     {
+        DataClass = dataClass;
         Name = name;
         Description = description;
         Effect = effect;
@@ -360,6 +365,9 @@ public sealed class CapabilityExecution : ITenantOwned
 
     public Guid? ServiceSessionId { get; private set; }
 
+    /// <summary>A correlação opaca de quem chamou (o TurnId de um turno de IA), só para a trilha.</summary>
+    public string? CorrelationId { get; private set; }
+
     public string? IdempotencyKey { get; private set; }
 
     /// <summary>A impressão digital dos parâmetros (HMAC com a chave do módulo): detecta a mesma chave com parâmetros diferentes sem guardar nem expor os parâmetros.</summary>
@@ -403,8 +411,10 @@ public sealed class CapabilityExecution : ITenantOwned
         string? idempotencyKey,
         string? fingerprint,
         bool isTest,
-        DateTimeOffset now) => new()
+        DateTimeOffset now,
+        string? correlationId = null) => new()
     {
+        CorrelationId = correlationId,
         TenantId = tenantId,
         Id = Guid.NewGuid(),
         DefinitionId = definition.Id,

@@ -109,9 +109,10 @@ internal sealed class Harness
         CapabilityCaller callers = CapabilityCaller.Operator | CapabilityCaller.Agent,
         bool requiresConfirmation = true,
         bool publish = true,
-        int version = 1)
+        int version = 1,
+        CapabilityDataClass dataClass = CapabilityDataClass.Public)
     {
-        var definicao = CapabilityDefinition.CreateDraft(Tenant, conexao.Id, key, version, key, "Descrição de " + key, effect ?? (spec.Method == "GET" ? CapabilityEffect.Read : CapabilityEffect.Write), requiresConfirmation, callers, spec, null, Clock.GetUtcNow());
+        var definicao = CapabilityDefinition.CreateDraft(Tenant, conexao.Id, key, version, key, "Descrição de " + key, effect ?? (spec.Method == "GET" ? CapabilityEffect.Read : CapabilityEffect.Write), requiresConfirmation, callers, spec, null, Clock.GetUtcNow(), dataClass);
         if (publish)
         {
             definicao.Publish(null, Clock.GetUtcNow());
@@ -121,13 +122,16 @@ internal sealed class Harness
         return definicao;
     }
 
+    /// <summary>A organização do atendimento que o código confiável do chamador informa (as conexões dos testes são do tenant inteiro, então qualquer escopo as alcança).</summary>
+    public static readonly Guid Scope = Guid.Parse("5c0be000-0000-4000-8000-000000000001");
+
     public static IReadOnlyDictionary<string, JsonElement> P(object valores) => Specs.Values(valores);
 
     public CapabilityInvocation Read(string key, object valores, CapabilityCaller caller = CapabilityCaller.Operator, Guid? session = null) =>
-        new(key, P(valores), caller, null, session);
+        new(key, P(valores), caller, null, session, null, Scope);
 
     public CapabilityInvocation Write(string key, object valores, string idempotencyKey = "chave-0000001", CapabilityCaller caller = CapabilityCaller.Operator, Guid? session = null) =>
-        new(key, P(valores), caller, idempotencyKey, session);
+        new(key, P(valores), caller, idempotencyKey, session, null, Scope);
 
     /// <summary>Tudo que o motor deixou gravado (execuções e auditoria) como texto, para provar que um valor sensível não está lá.</summary>
     public string Everything() =>

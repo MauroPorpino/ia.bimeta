@@ -64,6 +64,12 @@ public sealed partial class CapabilityExecutionService : ICapabilityExecutor, IC
                 continue;
             }
 
+            // ADR 0036: para chamador não humano o catálogo é por ESCOPO e por CLASSE: sem escopo, vazio; só dado público; o agente nunca vê escrita.
+            if (IsNonHuman(caller) && (scopeOrganizationId is null || (conexao.OrganizationId is { } dona && dona != scopeOrganizationId) || definicao.DataClass != CapabilityDataClass.Public || (caller == CapabilityCaller.Agent && definicao.Effect == CapabilityEffect.Write) || HasUnsupportedSource(definicao)))
+            {
+                continue;
+            }
+
             var permissao = definicao.Effect == CapabilityEffect.Write ? Permission.IntegrationExecuteWrite : Permission.IntegrationExecute;
             if (!contexto.IsAllowed(permissao, conexao.OrganizationId))
             {
@@ -90,8 +96,15 @@ public sealed partial class CapabilityExecutionService : ICapabilityExecutor, IC
             d.Effect,
             d.RequiresConfirmation,
             spec.Parameters.Select(p => new CapabilityParameterInfo(p.Name, p.Type, p.Required && p.Default is null, p.Description, p.EnumValues)).ToList(),
-            spec.ResponseRoot is null ? spec.Response.Select(f => f.Name).ToList() : ["items", "count", "truncated"]);
+            spec.ResponseRoot is null ? spec.Response.Select(f => f.Name).ToList() : ["items", "count", "truncated"],
+            d.DataClass);
     }
+
+    private static bool IsNonHuman(CapabilityCaller caller) => (caller & (CapabilityCaller.Agent | CapabilityCaller.Workflow | CapabilityCaller.Chatbot)) != 0;
+
+    private static bool HasUnsupportedSource(CapabilityDefinition d) => d.Spec.Parameters.Any(p => p.Source != CapabilityParameterSource.Model);
+
+    private static readonly System.Text.RegularExpressions.Regex CorrelationRegex = new("^[A-Za-z0-9._:-]{1,64}$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     // ---------------------------------------------------------------- execução
 
@@ -123,7 +136,12 @@ public sealed partial class CapabilityExecutionService : ICapabilityExecutor, IC
             return await RejectAsync(null, "not-found", cancellationToken);
         }
 
-        return await RunInvocationAsync(definicao, invocation.Parameters, invocation.Caller, invocation.IdempotencyKey, invocation.ServiceSessionId, isTest: false, cancellationToken);
+        if (invocation.CorrelationId is not null && !CorrelationRegex.IsMatch(invocation.CorrelationId))
+        {
+            return await RejectAsync(definicao, "validation-failed", cancellationToken);
+        }
+
+        return await RunInvocationAsync(definicao, invocation.Parameters, invocation.Caller, invocation.IdempotencyKey, invocation.ServiceSessionId, isTest: false, cancellationToken, invocation.CorrelationId, invocation.ScopeOrganizationId);
     }
 
     /// <summary>Executa, como TESTE, uma operação de LEITURA (rascunho, publicada ou aposentada). Exige <c>IntegrationTest</c>; escrita nunca é executada em teste. O teste fica no histórico, marcado como teste.</summary>
@@ -163,7 +181,9 @@ public sealed partial class CapabilityExecutionService : ICapabilityExecutor, IC
         string? idempotencyKey,
         Guid? serviceSessionId,
         bool isTest,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? correlationId = null,
+        Guid? scope = null)
     {
         var contexto = _auth.Context;
         var conexao = await _connections.FindAsync(definicao.ConnectionId, cancellationToken);
@@ -187,6 +207,35 @@ public sealed partial class CapabilityExecutionService : ICapabilityExecutor, IC
         if (origem == CapabilityCaller.Operator && contexto.Principal is null)
         {
             return await RejectAsync(definicao, "caller-not-allowed", cancellationToken);
+        }
+
+        // ADR 0036: chamador não humano exige ESCOPO de organização (recusa segura sem ele), dado PÚBLICO e, no caso do agente de IA, nunca escrita. Origem de parâmetro reservada à fase 2 é recusada.
+        if (IsNonHuman(origem))
+        {
+            if (scope is null)
+            {
+                return await RejectAsync(definicao, "scope-required", cancellationToken);
+            }
+
+            if (conexao.OrganizationId is { } organizacaoDaConexao && organizacaoDaConexao != scope)
+            {
+                return await RejectAsync(definicao, "scope-denied", cancellationToken);
+            }
+
+            if (definicao.DataClass != CapabilityDataClass.Public)
+            {
+                return await RejectAsync(definicao, "data-class-denied", cancellationToken);
+            }
+
+            if (origem == CapabilityCaller.Agent && definicao.Effect == CapabilityEffect.Write)
+            {
+                return await RejectAsync(definicao, "write-not-allowed", cancellationToken);
+            }
+        }
+
+        if (HasUnsupportedSource(definicao))
+        {
+            return await RejectAsync(definicao, "unsupported", cancellationToken);
         }
 
         var escrita = definicao.Effect == CapabilityEffect.Write;
@@ -219,7 +268,7 @@ public sealed partial class CapabilityExecutionService : ICapabilityExecutor, IC
         var agora = _clock.GetUtcNow();
         var impressao = escrita ? _protector.Fingerprint(Canonical(definicao, validacao.Values)) : null;
         var execucao = CapabilityExecution.Start(
-            contexto.TenantId, definicao, conexao.OrganizationId, origem, contexto.Principal?.UserId, serviceSessionId, escrita ? idempotencyKey : null, impressao, isTest, agora);
+            contexto.TenantId, definicao, conexao.OrganizationId, origem, contexto.Principal?.UserId, serviceSessionId, escrita ? idempotencyKey : null, impressao, isTest, agora, correlationId);
 
         var aguardaConfirmacao = escrita && definicao.RequiresConfirmation;
         if (aguardaConfirmacao)

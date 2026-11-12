@@ -47,10 +47,11 @@ public sealed record DefinitionView(
     CapabilityOperationSpec Spec,
     DateTimeOffset CreatedAt,
     DateTimeOffset? PublishedAt,
-    int Revision)
+    int Revision,
+    CapabilityDataClass DataClass = CapabilityDataClass.CustomerData)
 {
     public static DefinitionView From(CapabilityDefinition d) => new(
-        d.Id, d.ConnectionId, d.Key, d.Version, d.Status, d.Name, d.Description, d.Effect, d.RequiresConfirmation, CallerNames(d.AllowedCallers), d.Enabled, d.Spec, d.CreatedAt, d.PublishedAt, d.Revision);
+        d.Id, d.ConnectionId, d.Key, d.Version, d.Status, d.Name, d.Description, d.Effect, d.RequiresConfirmation, CallerNames(d.AllowedCallers), d.Enabled, d.Spec, d.CreatedAt, d.PublishedAt, d.Revision, d.DataClass);
 
     public static IReadOnlyList<string> CallerNames(CapabilityCaller callers) =>
         Enum.GetValues<CapabilityCaller>().Where(c => c != CapabilityCaller.None && callers.HasFlag(c)).Select(c => c.ToString()).ToList();
@@ -76,11 +77,12 @@ public sealed record ExecutionView(
     DateTimeOffset CreatedAt,
     DateTimeOffset? CompletedAt,
     Guid? ConfirmedBy,
-    DateTimeOffset? ConfirmationExpiresAt)
+    DateTimeOffset? ConfirmationExpiresAt,
+    string? CorrelationId = null)
 {
     public static ExecutionView From(CapabilityExecution e) => new(
         e.Id, e.DefinitionId, e.DefinitionKey, e.DefinitionVersion, e.ConnectionId, e.Effect, DefinitionView.CallerNames(e.Caller), e.RequestedBy, e.ServiceSessionId, e.Status,
-        e.ErrorCode, e.UpstreamStatus, e.Attempts, e.DurationMs, e.IsTest, e.CreatedAt, e.CompletedAt, e.ConfirmedBy, e.ConfirmationExpiresAt);
+        e.ErrorCode, e.UpstreamStatus, e.Attempts, e.DurationMs, e.IsTest, e.CreatedAt, e.CompletedAt, e.ConfirmedBy, e.ConfirmationExpiresAt, e.CorrelationId);
 }
 
 public sealed record ExecutionPage(IReadOnlyList<ExecutionView> Items, int Total);
@@ -122,4 +124,5 @@ public sealed record DefinitionRequest(
     bool? RequiresConfirmation,
     IReadOnlyList<CapabilityCaller>? AllowedCallers,
     CapabilityOperationSpec Spec,
-    int? ExpectedRevision);
+    int? ExpectedRevision,
+    CapabilityDataClass? DataClass = null);

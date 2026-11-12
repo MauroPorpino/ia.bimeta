@@ -113,6 +113,25 @@ public sealed partial class DefinitionService
             chamadores = CapabilityCaller.Operator;
         }
 
+        // ADR 0036: a classe do dado é decisão do ADMINISTRADOR e obrigatória quando uma origem não humana pode usar a operação; o padrão seguro é CustomerData. O agente nunca executa escrita.
+        var naoHumanos = CapabilityCaller.Agent | CapabilityCaller.Workflow | CapabilityCaller.Chatbot;
+        if ((chamadores & naoHumanos) != 0 && request.DataClass is null)
+        {
+            problemas.Add("dataClass: obrigatória (Public ou CustomerData) quando a operação é liberada para agente, fluxo ou chatbot.");
+        }
+
+        if (request.DataClass is { } informada && !Enum.IsDefined(informada))
+        {
+            problemas.Add("dataClass: inválida.");
+        }
+
+        if (request.Effect == CapabilityEffect.Write && chamadores.HasFlag(CapabilityCaller.Agent))
+        {
+            problemas.Add("allowedCallers: o agente de IA nunca executa operação de escrita.");
+        }
+
+        var classe = request.DataClass ?? CapabilityDataClass.CustomerData;
+
         var confirmacao = request.Effect == CapabilityEffect.Write ? request.RequiresConfirmation ?? true : false;
         if (request.Spec is null)
         {
@@ -147,7 +166,7 @@ public sealed partial class DefinitionService
                 throw new CapabilitiesConflictException("changed", "O rascunho foi alterado por outra operação. Releia e tente de novo.");
             }
 
-            existente.UpdateDraft(nome, descricao, request.Effect, confirmacao, chamadores, request.Spec!, agora);
+            existente.UpdateDraft(nome, descricao, request.Effect, confirmacao, chamadores, request.Spec!, agora, classe);
             rascunho = existente;
         }
         else
@@ -164,7 +183,7 @@ public sealed partial class DefinitionService
             }
 
             var proxima = (versoes.Count == 0 ? 0 : versoes.Max(v => v.Version)) + 1;
-            rascunho = CapabilityDefinition.CreateDraft(_auth.Context.TenantId, conexao.Id, request.Key!, proxima, nome, descricao, request.Effect, confirmacao, chamadores, request.Spec!, _auth.Context.Principal?.UserId, agora);
+            rascunho = CapabilityDefinition.CreateDraft(_auth.Context.TenantId, conexao.Id, request.Key!, proxima, nome, descricao, request.Effect, confirmacao, chamadores, request.Spec!, _auth.Context.Principal?.UserId, agora, classe);
             _definitions.Add(rascunho);
         }
 

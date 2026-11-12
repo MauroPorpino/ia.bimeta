@@ -1,3 +1,4 @@
+using IaBimeta.Capabilities.Contracts;
 using IaBimeta.Capabilities.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
@@ -68,6 +69,7 @@ internal sealed class CapabilityDefinitionConfiguration : IEntityTypeConfigurati
             table.HasCheckConstraint("ck_capability_definitions_spec", "octet_length(spec_json) <= 16000");
             table.HasCheckConstraint("ck_capability_definitions_published", "(status = 1) = (published_at IS NULL)");
             table.HasCheckConstraint("ck_capability_definitions_confirmation", "requires_confirmation = false OR effect = 2");
+            table.HasCheckConstraint("ck_capability_definitions_data_class", "data_class IN (1, 2)");
         });
 
         builder.HasKey(d => new { d.TenantId, d.Id });
@@ -81,6 +83,7 @@ internal sealed class CapabilityDefinitionConfiguration : IEntityTypeConfigurati
         builder.Property(d => d.Description).HasColumnName("description").HasMaxLength(500);
         builder.Property(d => d.Effect).HasColumnName("effect").HasConversion<short>();
         builder.Property(d => d.RequiresConfirmation).HasColumnName("requires_confirmation");
+        builder.Property(d => d.DataClass).HasColumnName("data_class").HasConversion<short>().HasDefaultValue(CapabilityDataClass.CustomerData);
         builder.Property(d => d.AllowedCallers).HasColumnName("allowed_callers").HasConversion<int>();
         builder.Property(d => d.Enabled).HasColumnName("enabled");
         builder.Property(d => d.SpecJson).HasColumnName("spec_json").HasMaxLength(16000);
@@ -128,6 +131,7 @@ internal sealed class CapabilityExecutionConfiguration : IEntityTypeConfiguratio
         builder.Property(e => e.Caller).HasColumnName("caller").HasConversion<int>();
         builder.Property(e => e.RequestedBy).HasColumnName("requested_by");
         builder.Property(e => e.ServiceSessionId).HasColumnName("service_session_id");
+        builder.Property(e => e.CorrelationId).HasColumnName("correlation_id").HasMaxLength(64);
         builder.Property(e => e.IdempotencyKey).HasColumnName("idempotency_key").HasMaxLength(100);
         builder.Property(e => e.Fingerprint).HasColumnName("fingerprint").HasMaxLength(64);
         builder.Property(e => e.Status).HasColumnName("status").HasConversion<short>();

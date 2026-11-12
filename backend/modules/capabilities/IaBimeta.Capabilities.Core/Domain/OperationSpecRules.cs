@@ -154,6 +154,11 @@ public static partial class OperationSpecRules
                 problemas.Add($"spec.parameters.{p.Name}: nome externo repetido.");
             }
 
+            if (p.Source != CapabilityParameterSource.Model)
+            {
+                problemas.Add($"spec.parameters.{p.Name}.source: reservado à fase 2 (identidade autenticada do contato); ainda não é aceito.");
+            }
+
             ValidateParameterRules(p, problemas);
         }
 

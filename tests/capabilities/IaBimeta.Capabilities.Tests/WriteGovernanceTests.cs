@@ -144,9 +144,9 @@ public class WriteGovernanceTests
     public async Task Um_contexto_de_sistema_nunca_confirma_nem_cancela_so_uma_pessoa_com_permissao_de_escrita()
     {
         var h = new Harness();
-        h.SeedTypical(callers: CapabilityCaller.Operator | CapabilityCaller.Agent);
+        h.SeedTypical(callers: CapabilityCaller.Operator | CapabilityCaller.Workflow);
         var agente = h.As(TestContexts.System());
-        var pendente = await agente.Engine.ExecuteAsync(agente.Write(Cancelar, Valores, caller: CapabilityCaller.Agent));
+        var pendente = await agente.Engine.ExecuteAsync(agente.Write(Cancelar, Valores, caller: CapabilityCaller.Workflow));
         Assert.Equal(CapabilityExecutionStatus.AwaitingConfirmation, pendente.Status);
 
         await Assert.ThrowsAsync<AccessDeniedException>(() => agente.Engine.ConfirmAsync(pendente.ExecutionId));
@@ -211,7 +211,7 @@ public class WriteGovernanceTests
     {
         var h = new Harness(TestContexts.System());
         var conexao = h.SeedConnection();
-        escrita = h.SeedDefinition(conexao, Cancelar, Specs.Write(support), callers: CapabilityCaller.Agent, requiresConfirmation: false);
+        escrita = h.SeedDefinition(conexao, Cancelar, Specs.Write(support), callers: CapabilityCaller.Workflow, requiresConfirmation: false);
         return h;
     }
 
@@ -220,8 +220,8 @@ public class WriteGovernanceTests
     {
         var h = NoConfirmation(out _);
 
-        var primeira = await h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, caller: CapabilityCaller.Agent));
-        var segunda = await h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, caller: CapabilityCaller.Agent));
+        var primeira = await h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, caller: CapabilityCaller.Workflow));
+        var segunda = await h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, caller: CapabilityCaller.Workflow));
 
         Assert.Equal(CapabilityExecutionStatus.Succeeded, primeira.Status);
         Assert.False(primeira.Replayed);
@@ -236,9 +236,9 @@ public class WriteGovernanceTests
     public async Task A_mesma_chave_com_outros_parametros_ou_outra_operacao_e_recusada()
     {
         var h = NoConfirmation(out _);
-        await h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, caller: CapabilityCaller.Agent));
+        await h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, caller: CapabilityCaller.Workflow));
 
-        var outros = await h.Engine.ExecuteAsync(h.Write(Cancelar, new { numero = 56, motivo = "Paciente desistiu" }, caller: CapabilityCaller.Agent));
+        var outros = await h.Engine.ExecuteAsync(h.Write(Cancelar, new { numero = 56, motivo = "Paciente desistiu" }, caller: CapabilityCaller.Workflow));
 
         Assert.Equal(CapabilityExecutionStatus.Rejected, outros.Status);
         Assert.Equal("idempotency-conflict", outros.Error!.Code);
@@ -251,10 +251,10 @@ public class WriteGovernanceTests
         var a = NoConfirmation(out _);
         var b = a.As(TestContexts.System(TestContexts.TenantB));
         var conexaoB = b.SeedConnection();
-        b.SeedDefinition(conexaoB, Cancelar, Specs.Write(), callers: CapabilityCaller.Agent, requiresConfirmation: false);
+        b.SeedDefinition(conexaoB, Cancelar, Specs.Write(), callers: CapabilityCaller.Workflow, requiresConfirmation: false);
 
-        var ra = await a.Engine.ExecuteAsync(a.Write(Cancelar, Valores, caller: CapabilityCaller.Agent));
-        var rb = await b.Engine.ExecuteAsync(b.Write(Cancelar, Valores, caller: CapabilityCaller.Agent));
+        var ra = await a.Engine.ExecuteAsync(a.Write(Cancelar, Valores, caller: CapabilityCaller.Workflow));
+        var rb = await b.Engine.ExecuteAsync(b.Write(Cancelar, Valores, caller: CapabilityCaller.Workflow));
 
         Assert.False(rb.Replayed);
         Assert.NotEqual(ra.ExecutionId, rb.ExecutionId);
@@ -267,7 +267,7 @@ public class WriteGovernanceTests
         var h = NoConfirmation(out _);
         h.Connector.Gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        var chamadas = Enumerable.Range(0, 12).Select(_ => Task.Run(() => h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, caller: CapabilityCaller.Agent)))).ToList();
+        var chamadas = Enumerable.Range(0, 12).Select(_ => Task.Run(() => h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, caller: CapabilityCaller.Workflow)))).ToList();
         await Task.Delay(300);
         h.Connector.Gate.SetResult();
         var resultados = await Task.WhenAll(chamadas);
@@ -284,12 +284,12 @@ public class WriteGovernanceTests
     {
         var h = NoConfirmation(out _);
         h.Connector.Gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var primeira = Task.Run(() => h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, caller: CapabilityCaller.Agent)));
+        var primeira = Task.Run(() => h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, caller: CapabilityCaller.Workflow)));
         await Task.Delay(200);
 
-        var dentroDoPrazo = await h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, caller: CapabilityCaller.Agent));
+        var dentroDoPrazo = await h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, caller: CapabilityCaller.Workflow));
         h.Clock.Advance(TimeSpan.FromSeconds(h.Options.RunningLeaseSeconds + 1));
-        var vencida = await h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, caller: CapabilityCaller.Agent));
+        var vencida = await h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, caller: CapabilityCaller.Workflow));
         h.Connector.Gate.SetResult();
         await primeira;
 
@@ -313,8 +313,8 @@ public class WriteGovernanceTests
         var h = NoConfirmation(out _, IdempotencySupport.None);
         h.Connector.Script = _ => ScriptedConnector.Fail(desfecho, status);
 
-        var r = await h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, caller: CapabilityCaller.Agent));
-        var repetida = await h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, caller: CapabilityCaller.Agent));
+        var r = await h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, caller: CapabilityCaller.Workflow));
+        var repetida = await h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, caller: CapabilityCaller.Workflow));
 
         Assert.Equal(CapabilityExecutionStatus.Unknown, r.Status);
         Assert.Equal("outcome-unknown", r.Error!.Code);
@@ -329,7 +329,7 @@ public class WriteGovernanceTests
         var h = NoConfirmation(out _, IdempotencySupport.None);
         h.Connector.Script = _ => ScriptedConnector.Fail(ConnectorOutcome.NetworkError, null, mayHaveExecuted: false);
 
-        var r = await h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, caller: CapabilityCaller.Agent));
+        var r = await h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, caller: CapabilityCaller.Workflow));
 
         Assert.Equal(CapabilityExecutionStatus.Failed, r.Status);
         Assert.Equal("unavailable", r.Error!.Code);
@@ -341,7 +341,7 @@ public class WriteGovernanceTests
         var h = NoConfirmation(out _, IdempotencySupport.None);
         h.Connector.Script = _ => ScriptedConnector.Fail(ConnectorOutcome.Rejected, 422, mayHaveExecuted: false);
 
-        var r = await h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, caller: CapabilityCaller.Agent));
+        var r = await h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, caller: CapabilityCaller.Workflow));
 
         Assert.Equal(CapabilityExecutionStatus.Failed, r.Status);
         Assert.Equal("upstream-rejected", r.Error!.Code);
@@ -353,12 +353,12 @@ public class WriteGovernanceTests
     {
         var h = NoConfirmation(out _);
         h.Connector.Script = _ => ScriptedConnector.Fail(ConnectorOutcome.Unavailable, 503);
-        var r = await h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, "chave-0000001", CapabilityCaller.Agent));
+        var r = await h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, "chave-0000001", CapabilityCaller.Workflow));
         Assert.Equal(CapabilityExecutionStatus.Failed, r.Status);
         Assert.True(r.Error!.Retryable);
 
         h.Connector.Script = _ => ScriptedConnector.Fail(ConnectorOutcome.Timeout);
-        var t = await h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, "chave-0000002", CapabilityCaller.Agent));
+        var t = await h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, "chave-0000002", CapabilityCaller.Workflow));
         Assert.Equal(CapabilityExecutionStatus.Unknown, t.Status);
     }
 
@@ -367,14 +367,14 @@ public class WriteGovernanceTests
     {
         var h = NoConfirmation(out _);
         h.Connector.Script = _ => ScriptedConnector.Ok("""{"nada":1}""");
-        var r = await h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, caller: CapabilityCaller.Agent));
+        var r = await h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, caller: CapabilityCaller.Workflow));
         Assert.Equal(CapabilityExecutionStatus.Unknown, r.Status);
 
         var h2 = new Harness(TestContexts.System());
         var conexao = h2.SeedConnection();
-        h2.SeedDefinition(conexao, "sem.resposta", Specs.Write() with { Response = [] }, callers: CapabilityCaller.Agent, requiresConfirmation: false);
+        h2.SeedDefinition(conexao, "sem.resposta", Specs.Write() with { Response = [] }, callers: CapabilityCaller.Workflow, requiresConfirmation: false);
         h2.Connector.Script = _ => ScriptedConnector.Ok("{}");
-        var ok = await h2.Engine.ExecuteAsync(h2.Write("sem.resposta", Valores, caller: CapabilityCaller.Agent));
+        var ok = await h2.Engine.ExecuteAsync(h2.Write("sem.resposta", Valores, caller: CapabilityCaller.Workflow));
         Assert.Equal(CapabilityExecutionStatus.Succeeded, ok.Status);
     }
 
@@ -383,14 +383,14 @@ public class WriteGovernanceTests
     {
         var h = NoConfirmation(out _);
         h.Connector.Script = _ => throw new InvalidOperationException("quebrou");
-        var r = await h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, "chave-0000001", CapabilityCaller.Agent));
+        var r = await h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, "chave-0000001", CapabilityCaller.Workflow));
         Assert.Equal(CapabilityExecutionStatus.Unknown, r.Status);
 
         h.Connector.Script = _ => throw new OperationCanceledException();
         using var cts = new CancellationTokenSource();
         await cts.CancelAsync();
         h.Connector.Script = _ => throw new OperationCanceledException(cts.Token);
-        var c = await h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, "chave-0000002", CapabilityCaller.Agent), cts.Token);
+        var c = await h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, "chave-0000002", CapabilityCaller.Workflow), cts.Token);
         Assert.Equal(CapabilityExecutionStatus.Unknown, c.Status);
     }
 
@@ -402,9 +402,9 @@ public class WriteGovernanceTests
     {
         var h = new Harness(TestContexts.System());
         var conexao = h.SeedConnection();
-        h.SeedDefinition(conexao, Cancelar, Specs.Write(suporte, tentativas), callers: CapabilityCaller.Agent, requiresConfirmation: false);
+        h.SeedDefinition(conexao, Cancelar, Specs.Write(suporte, tentativas), callers: CapabilityCaller.Workflow, requiresConfirmation: false);
 
-        await h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, caller: CapabilityCaller.Agent));
+        await h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, caller: CapabilityCaller.Workflow));
 
         var chamada = Assert.Single(h.Connector.Calls);
         Assert.Equal(repete, chamada.AllowRetries);
@@ -416,7 +416,7 @@ public class WriteGovernanceTests
     {
         var h = NoConfirmation(out _);
 
-        var r = await h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, caller: CapabilityCaller.Agent));
+        var r = await h.Engine.ExecuteAsync(h.Write(Cancelar, Valores, caller: CapabilityCaller.Workflow));
 
         Assert.Equal(CapabilityExecutionStatus.Succeeded, r.Status);
         Assert.Null(h.Rows.Single().PendingCiphertext);
