@@ -46,6 +46,7 @@ public class AgentsArquiteturaTests
             {
                 "IaBimeta.SharedKernel", "IaBimeta.AiGateway.Contracts", "IaBimeta.Conversations.Contracts", "IaBimeta.ContactCenter.Contracts", "IaBimeta.Audit.Contracts",
                 "IaBimeta.Knowledge.Contracts", // ADR 0034: o índice semântico do conhecimento publicado (aresta Agents -> Knowledge, já na matriz)
+                "IaBimeta.Capabilities.Contracts", // ADR 0036: a consulta do agente a operações públicas de leitura do Motor de Integração (aresta Agents -> Capabilities, já na matriz)
             },
             ["IaBimeta.Agents.Infrastructure"] = new[] { "IaBimeta.Messaging", "IaBimeta.SharedKernel", "IaBimeta.Conversations.Contracts", "IaBimeta.Agents.Core" },
             ["IaBimeta.Agents.Presentation"] = new[] { "IaBimeta.SharedKernel", "IaBimeta.Agents.Core" },
