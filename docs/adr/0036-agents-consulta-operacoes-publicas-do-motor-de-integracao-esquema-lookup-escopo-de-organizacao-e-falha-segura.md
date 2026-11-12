@@ -1,6 +1,6 @@
 # ADR 0036 — Agents consulta operações PÚBLICAS do Motor de Integração: esquema `lookup`, escopo de organização e falha segura
 
-- **Status:** **Proposto** (decisões do proprietário em 12/11/2026, ratificação do ADR pendente). Fase 1 apenas.
+- **Status:** **Aceito** (decisões do proprietário em 12/11/2026; ratificado em 12/11/2026 depois de conferir que a implementação corresponde ao decidido; ver "Conferência da ratificação" ao final). Fase 1 apenas; a fase 2 (dados do cliente) está adiada e exigirá ADR próprio e autenticação do cliente.
 - **Data:** 12/11/2026
 - **Decisor:** Mauro Porpino
 - **Referências:** ADR 0017 (Agents; seção C.5, lista FECHADA de ações do modelo), 0035 (Motor de Integração), 0007 (ciclo de vida dos turnos), `CLAUDE.md` (o modelo interpreta e sugere; o Capability Execution Engine valida e executa).
@@ -54,3 +54,7 @@ Cada consulta (sucesso ou falha, inclusive a que o Agents recusou antes do motor
 - **Ajuste em relação ao texto acima:** `LookupMaxPerTurn` existe como opção mas só aceita 1 (a partida recusa outro valor). Com a consulta ligada, `TurnMaxDuration` precisa passar `2 × ModelCallTimeout + LookupBudget` (validado na partida).
 - **Decisão adicional:** as origens não humanas (`Agent`, `Workflow`, `Chatbot`) só executam dado `Public` no motor; o agente também não executa escrita; o catálogo para elas é vazio sem escopo.
 - **Linhas existentes:** a migration marca toda operação já cadastrada como `CustomerData` (padrão seguro).
+
+## Conferência da ratificação (12/11/2026)
+
+Conferido contra a implementação, ponto a ponto: (1) esquema `lookup` de cinco campos com o enum por turno e o parser fechado; (2) duas chamadas, sem laço, resposta citando as duas `AiRequestId`; (3) o modelo só escolhe chave e valores; (4) oferta só de operação publicada, habilitada, em conexão habilitada, com `Agent` autorizado, de leitura, `Public` e do escopo, conferida no motor, no Agents e de novo ao executar; (5) escrita recusada no cadastro, no catálogo, no Agents e no motor; (6) escopo obrigatório para origem não humana (`scope-required` e `scope-denied`); (7) resultado como dado delimitado, sem campo pessoal; (8) falha em handoff `integration_unavailable` com aviso específico configurável por tenant e retorno ao aviso de transferência; (9) auditoria `agents.integration-lookup.*` e `Meter`; (10) função desligada por padrão e `Source = Session` recusado. Divergência já registrada: `LookupMaxPerTurn` só aceita 1. Aviso específico por tenant adicionado em 12/11/2026 (coluna `integration_unavailable_notice_text`, provisionamento `ai.integrationUnavailableNotice`).

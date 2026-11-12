@@ -237,6 +237,9 @@ internal sealed class AiSpec
     /// <summary>O aviso que o cliente recebe antes da transferência para uma pessoa. Vazio usa o aviso padrão.</summary>
     public string? HandoffNotice { get; set; }
 
+    /// <summary>O aviso específico quando a consulta ao sistema da empresa falha (ADR 0036). Vazio = vale o aviso de transferência.</summary>
+    public string? IntegrationUnavailableNotice { get; set; }
+
     /// <summary>O idioma em que o FAQ está escrito (BCP 47, como <c>pt-BR</c>); a resposta direta (<c>autoReply</c>) só vale numa conversa desse idioma. Vazio é <c>pt-BR</c> (ADR 0029).</summary>
     public string? FaqLocale { get; set; }
 

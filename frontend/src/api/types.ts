@@ -343,6 +343,8 @@ export interface AgentDefinitionContent {
   faq: FaqEntry[];
   audioInformativeText: string | null;
   handoffNoticeText: string | null;
+  /** O aviso específico quando a consulta ao sistema da empresa falha (ADR 0036); nulo = vale o aviso de transferência. */
+  integrationUnavailableNoticeText?: string | null;
   faqLocale: string | null;
 }
 

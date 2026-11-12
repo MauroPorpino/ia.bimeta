@@ -273,6 +273,46 @@ public sealed class TurnRunnerLookupTests
     }
 
     [Fact]
+    public async Task Com_aviso_especifico_do_tenant_a_falha_da_consulta_avisa_com_ele_e_sem_ele_vale_o_aviso_de_transferencia()
+    {
+        var especifico = Montar();
+        especifico.Definitions.Published = Definitions.Default() with { IntegrationUnavailableNoticeText = "Não consegui consultar agora. Vou chamar um atendente." };
+        especifico.LookupExecutor.Behavior = _ => FakeExecutor.Failed("unavailable");
+        var padrao = Montar();
+        padrao.LookupExecutor.Behavior = _ => FakeExecutor.Failed("unavailable");
+
+        await especifico.RunAsync(Semear(especifico));
+        await padrao.RunAsync(Semear(padrao));
+
+        Assert.Equal("Não consegui consultar agora. Vou chamar um atendente.", Assert.Single(especifico.Turns.Registers).Text);
+        Assert.Contains("transferir você para um atendente", Assert.Single(padrao.Turns.Registers).Text, StringComparison.Ordinal);
+        Assert.Equal("integration_unavailable", Assert.Single(especifico.Handoff.Requests).Reason);
+    }
+
+    [Fact]
+    public async Task O_aviso_especifico_so_vale_para_integration_unavailable_nos_outros_motivos_sai_o_aviso_de_transferencia()
+    {
+        var h = Montar();
+        h.Definitions.Published = Definitions.Default() with { IntegrationUnavailableNoticeText = "Aviso da consulta." };
+        h.Gateway.Behavior = req => req.StructuredOutput?.Name == AgentPrompt.LookupDecisionSchemaName
+            ? ScriptedGateway.Output("""{"action":"handoff","reply_text":"","handoff_reason":"price","operation_key":"none","parameters_json":"{}"}""")
+            : ScriptedGateway.Reply("x");
+
+        await h.RunAsync(Semear(h));
+
+        Assert.Contains("transferir você para um atendente", Assert.Single(h.Turns.Registers).Text, StringComparison.Ordinal);
+        Assert.Equal("ai-decision.price", Assert.Single(h.Handoff.Requests).Reason);
+    }
+
+    [Fact]
+    public void O_aviso_especifico_respeita_os_limites_do_texto_de_aviso()
+    {
+        Assert.Throws<AgentsValidationException>(() => (Definitions.Default() with { IntegrationUnavailableNoticeText = new string('x', AgentDefinitionContent.NoticeMaxLength + 1) }).Validate());
+        (Definitions.Default() with { IntegrationUnavailableNoticeText = "Ok." }).Validate();
+        Assert.Equal("Aviso.", AgentDefinitionVersion.CreateDraft(TestContexts.TenantA, 1, Definitions.Default() with { IntegrationUnavailableNoticeText = "  Aviso.  " }, DateTimeOffset.UtcNow, null).Content.IntegrationUnavailableNoticeText);
+    }
+
+    [Fact]
     public async Task Falha_do_catalogo_nao_derruba_o_turno_que_segue_pelo_fluxo_de_sempre()
     {
         var h = Montar();

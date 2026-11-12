@@ -1,6 +1,6 @@
 # ADR 0035 — Motor de Integração Empresarial: módulo `Capabilities`, conector REST/JSON genérico, governança de escrita e proteção contra SSRF
 
-- **Status:** **Proposto** (diretriz do proprietário em 11/11/2026: o motor é estratégico para a V1 comercial; desenvolvimento autônomo em pacotes, sem integração específica com LabNet ou BImeta). Ratificação pendente.
+- **Status:** **Aceito** (ratificado pelo proprietário em 12/11/2026, depois de conferir que a implementação corresponde ao decidido; ver "Conferência da ratificação" ao final). Atualização do ADR 0036: o Worker também compõe o módulo.
 - **Data:** 11/11/2026
 - **Decisor:** Mauro Porpino
 - **Referências:** ADR 0005 e `BOUNDARIES.md` (o módulo `Capabilities` e a porta `ICapabilityConnector` já previstos, ARQ-21, EFX-4, LIM-1), 0007 e 0017 (Agents), 0034 (Knowledge híbrido), `CLAUDE.md` (LLM interpreta e sugere, não executa; o Capability Execution Engine valida e executa).
@@ -64,3 +64,7 @@ Construtor visual de chatbot; adaptadores LabNet e BImeta; SOAP, GraphQL e filas
 - **Portão de função:** um usuário sem nenhuma permissão de integração recebe 403 antes de qualquer consulta (descoberto ao escrever o teste de rotas: um 404 ou uma lista vazia permitiria sondar chaves e ids).
 - **Índice único da versão publicada:** o teste de invariantes do banco mostrou que o EF fundia os dois índices parciais sobre as mesmas colunas e a regra "uma versão publicada por chave" só valia na aplicação; a migration `CapabilitiesPublishedUniqueIndex` a restabelece no banco (o índice do rascunho passou a incluir o status nas colunas).
 - **Pendente de decisão (fora do escopo desta etapa):** a aresta do Agents (e do Workflows e do assistente interno) para `Capabilities` exige ADR e alteração da matriz; nenhum código do Agents foi tocado.
+
+## Conferência da ratificação (12/11/2026)
+
+Conferido contra a implementação: módulo `Capabilities` sem aresta nova na matriz (só `Audit`); três conceitos separados (conexão, operação versionada, execução sem parâmetros nem resposta); segredos AES-256-GCM com chaves próprias; SSRF com conferência de cada endereço na conexão e sem seguir redirecionamento; escrita com idempotência declarada, confirmação por pessoa e resultado ambíguo nunca reenviado; permissões `IntegrationRead/Manage/Test/Execute/ExecuteWrite`; portão de função (403); índices únicos por banco; auditoria sem valores; limites no banco. Divergências já registradas: o Worker também compõe o módulo (ADR 0036) e o `Agents` passou a usá-lo (ADR 0036).

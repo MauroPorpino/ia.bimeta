@@ -626,6 +626,12 @@ public sealed class TurnRunner
     /// Guarda a decisão no turno (a retomada só repete o pedido), registra o aviso de transferência do tenant, se houver (uma vez, antes do handoff: depois dele a IA já não responde), e pede o atendimento
     /// humano ao ContactCenter com o <c>TurnId</c> como chave de idempotência.
     /// </summary>
+    /// <summary>O aviso de transferência do motivo: para `integration_unavailable` (ADR 0036), o aviso específico do tenant, se houver; senão o aviso de transferência de sempre (retorno seguro).</summary>
+    internal static string? NoticeFor(AgentDefinitionContent? definicao, string reason) =>
+        reason == HandoffReasons.IntegrationUnavailable && !string.IsNullOrWhiteSpace(definicao?.IntegrationUnavailableNoticeText)
+            ? definicao.IntegrationUnavailableNoticeText
+            : definicao?.HandoffNoticeText;
+
     private async Task<TurnRunResult> HandoffFlowAsync(
         AiTurn turno,
         long lane,
@@ -642,7 +648,7 @@ public sealed class TurnRunner
             return Lost();
         }
 
-        if (!turno.NoticeDone && concessao is not null && snapshot is not null && !string.IsNullOrWhiteSpace(definicao?.HandoffNoticeText))
+        if (!turno.NoticeDone && concessao is not null && snapshot is not null && !string.IsNullOrWhiteSpace(NoticeFor(definicao, reason)))
         {
             // O aviso afirma ao cliente que ele vai ser transferido, e depois da transferência a IA já não pode falar (as cercas do Conversations). Por isso ele só sai se as regras de roteamento
             // aceitam o pedido AGORA (verificação somente de leitura, nada é gravado). Recusado, seja de vez (nenhuma fila atende a conversa) ou por agora (fila pausada, fora do horário), o cliente
@@ -657,7 +663,7 @@ public sealed class TurnRunner
                     return await CancelAsync(turno, lane, "handled-by-human");
 
                 case RequestHandoffOutcome.Routable:
-                    var resultadoDoAviso = await RegisterNoticeAsync(turno, lane, concessao, snapshot, definicao.HandoffNoticeText, ct);
+                    var resultadoDoAviso = await RegisterNoticeAsync(turno, lane, concessao, snapshot, NoticeFor(definicao, reason)!, ct);
                     if (resultadoDoAviso is not null)
                     {
                         return resultadoDoAviso;
@@ -707,7 +713,7 @@ public sealed class TurnRunner
         if (!turno.NoticeDone)
         {
             var definicao = await _definitions.GetPublishedAsync(ct);
-            if (!string.IsNullOrWhiteSpace(definicao?.HandoffNoticeText))
+            if (!string.IsNullOrWhiteSpace(NoticeFor(definicao, motivo)))
             {
                 var inicio = await _turns.BeginTurnAsync(new BeginTurnCommand(turno.SessionId, turno.Id, lane, _options.MaxInputMessages), ct);
                 switch (inicio.Outcome)

@@ -341,7 +341,8 @@ internal sealed class TenantProvisioner
             string.IsNullOrWhiteSpace(spec.Ai.Instructions) ? DefaultInstructions : spec.Ai.Instructions.Trim(),
             spec.Ai.Faq.Select(f => new FaqEntry(f.Question!.Trim(), f.Answer!.Trim(), f.Aliases?.Select(a => a.Trim()).ToList(), f.AutoReply)).ToList(),
             HandoffNoticeText: string.IsNullOrWhiteSpace(spec.Ai.HandoffNotice) ? DefaultHandoffNotice : spec.Ai.HandoffNotice.Trim(),
-            FaqLocale: string.IsNullOrWhiteSpace(spec.Ai.FaqLocale) ? null : Locale.Parse(spec.Ai.FaqLocale).ToString());
+            FaqLocale: string.IsNullOrWhiteSpace(spec.Ai.FaqLocale) ? null : Locale.Parse(spec.Ai.FaqLocale).ToString(),
+            IntegrationUnavailableNoticeText: string.IsNullOrWhiteSpace(spec.Ai.IntegrationUnavailableNotice) ? null : spec.Ai.IntegrationUnavailableNotice.Trim());
 
         var publicada = await definicoes.GetPublishedAsync(ct);
         if (publicada is not null && Same(publicada.Content, desejado))
@@ -358,6 +359,7 @@ internal sealed class TenantProvisioner
     private static bool Same(AgentDefinitionContent a, AgentDefinitionContent b) =>
         string.Equals(a.Instructions, b.Instructions, StringComparison.Ordinal)
         && string.Equals(a.HandoffNoticeText, b.HandoffNoticeText, StringComparison.Ordinal)
+        && string.Equals(a.IntegrationUnavailableNoticeText, b.IntegrationUnavailableNoticeText, StringComparison.Ordinal)
         && a.EffectiveFaqLocale.Equals(b.EffectiveFaqLocale)
         && a.Faq.Count == b.Faq.Count
         && a.Faq.Zip(b.Faq).All(par => SameFaqEntry(par.First, par.Second));

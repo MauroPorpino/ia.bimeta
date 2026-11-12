@@ -74,7 +74,8 @@ public sealed record AgentDefinitionContent(
     IReadOnlyList<FaqEntry> Faq,
     string? AudioInformativeText = null,
     string? HandoffNoticeText = null,
-    string? FaqLocale = null)
+    string? FaqLocale = null,
+    string? IntegrationUnavailableNoticeText = null)
 {
     public const int InstructionsMaxLength = 8000;
     public const int FaqMaxEntries = 50;
@@ -132,6 +133,7 @@ public sealed record AgentDefinitionContent(
 
         ValidateOptionalText(AudioInformativeText, "A resposta informativa de áudio");
         ValidateOptionalText(HandoffNoticeText, "O aviso de transferência");
+        ValidateOptionalText(IntegrationUnavailableNoticeText, "O aviso de consulta indisponível");
     }
 
     /// <summary>Os campos da resposta direta (ADR 0029): aliases com texto de verdade, e uma entrada com resposta direta tem de poder ser encontrada.</summary>
@@ -208,6 +210,9 @@ public sealed class AgentDefinitionVersion : ITenantOwned
 
     public string? HandoffNoticeText { get; private set; }
 
+    /// <summary>O aviso específico do motivo `integration_unavailable` (ADR 0036): a consulta ao sistema da empresa falhou. Sem ele, vale o <see cref="HandoffNoticeText"/> (retorno seguro).</summary>
+    public string? IntegrationUnavailableNoticeText { get; private set; }
+
     /// <summary>O idioma do FAQ (BCP 47 canônico), ou nulo para o padrão <c>pt-BR</c> (as versões anteriores ao ADR 0029 não o têm).</summary>
     public string? FaqLocale { get; private set; }
 
@@ -229,7 +234,8 @@ public sealed class AgentDefinitionVersion : ITenantOwned
         JsonSerializer.Deserialize<List<FaqEntry>>(FaqJson, Json) ?? new List<FaqEntry>(),
         AudioInformativeText,
         HandoffNoticeText,
-        FaqLocale);
+        FaqLocale,
+        IntegrationUnavailableNoticeText);
 
     public static AgentDefinitionVersion CreateDraft(TenantId tenant, int number, AgentDefinitionContent content, DateTimeOffset now, Guid? userId)
     {
@@ -307,6 +313,7 @@ public sealed class AgentDefinitionVersion : ITenantOwned
         FaqJson = JsonSerializer.Serialize(content.Faq.Select(f => new FaqEntry(f.Question.Trim(), f.Answer.Trim(), f.GetCleanAliases(), f.AutoReply)).ToList(), Json);
         AudioInformativeText = content.AudioInformativeText?.Trim();
         HandoffNoticeText = content.HandoffNoticeText?.Trim();
+        IntegrationUnavailableNoticeText = content.IntegrationUnavailableNoticeText?.Trim();
         FaqLocale = content.FaqLocale is null ? null : Locale.Parse(content.FaqLocale).ToString();
     }
 }
