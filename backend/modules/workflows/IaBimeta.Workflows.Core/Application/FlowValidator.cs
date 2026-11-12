@@ -14,7 +14,10 @@ public sealed record FlowValidationResult(IReadOnlyList<FlowProblem> Problems)
 
 /// <summary>O que o validador sabe de uma operação do catálogo (o Capabilities, por porta; nulo = sem verificação de catálogo).</summary>
 /// <param name="Eligible">Publicada, habilitada, de leitura, <c>Public</c> e autorizada para <c>Workflow</c> (ADR 0037 §2).</param>
-public sealed record FlowOperationInfo(bool Exists, bool Eligible);
+/// <param name="Parameters">Os parâmetros declarados pela operação (nome e obrigatoriedade), se o catálogo os conhece.</param>
+public sealed record FlowOperationInfo(bool Exists, bool Eligible, IReadOnlyList<FlowOperationParameter>? Parameters = null);
+
+public sealed record FlowOperationParameter(string Name, bool Required);
 
 public interface IFlowCatalogView
 {
@@ -411,11 +414,24 @@ public static partial class FlowValidator
             var info = catalog.Operation(cfg.OperationKey);
             if (info is not { Exists: true })
             {
-                add(id, "operation-missing", "A operação não existe no catálogo.");
+                add(id, "operation-missing", "A operação não existe no catálogo ou não é elegível para fluxos (publicada, habilitada, de leitura, pública e autorizada para fluxos).");
             }
             else if (!info.Eligible)
             {
                 add(id, "operation-not-eligible", "A operação não está publicada, habilitada, de leitura, pública e autorizada para fluxos.");
+            }
+            else if (info.Parameters is { } declared)
+            {
+                var bound = cfg.Parameters ?? new Dictionary<string, ParamBinding>();
+                foreach (var name in bound.Keys.Where(k => !declared.Any(d => d.Name == k)))
+                {
+                    add(id, "parameter-unknown", $"A operação não tem o parâmetro '{name}'.");
+                }
+
+                foreach (var d in declared.Where(d => d.Required && !bound.ContainsKey(d.Name)))
+                {
+                    add(id, "parameter-missing", $"O parâmetro obrigatório '{d.Name}' não foi ligado.");
+                }
             }
         }
 

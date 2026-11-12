@@ -7,6 +7,7 @@ using IaBimeta.Api.Channels;
 using IaBimeta.Api.ContactCenter;
 using IaBimeta.Audit.Infrastructure;
 using IaBimeta.Capabilities.Infrastructure;
+using IaBimeta.Workflows.Infrastructure;
 using IaBimeta.Channels.Infrastructure;
 using IaBimeta.ContactCenter.Application;
 using IaBimeta.ContactCenter.Infrastructure;
@@ -124,6 +125,7 @@ public sealed class PostgresFixture : IAsyncLifetime
         // O Motor de Integração (ADR 0035): o transporte de saída é o ERP SIMULADO (nenhuma rede); o resto do motor é o real.
         colecao.AddSingleton<IaBimeta.Capabilities.Infrastructure.Outbound.IOutboundHttp>(Erp);
         colecao.AddCapabilities(_ => ConnectionString);
+        colecao.AddWorkflows(_ => ConnectionString);
         colecao.AddTenancy(_ => ConnectionString);
         colecao.AddIdentityModule(_ => ConnectionString, opcoes => opcoes.PasswordHashIterations = PasswordIterations);
         // Etapa 3: o publicador é o dublê em memória (não durável), como no host.
@@ -248,6 +250,7 @@ public sealed class PostgresFixture : IAsyncLifetime
         await escopo.ServiceProvider.GetRequiredService<ContactCenterDbContext>().Database.MigrateAsync();
         await escopo.ServiceProvider.GetRequiredService<AiGatewayDbContext>().Database.MigrateAsync();
         await escopo.ServiceProvider.GetRequiredService<CapabilitiesDbContext>().Database.MigrateAsync();
+        await escopo.ServiceProvider.GetRequiredService<IaBimeta.Workflows.Infrastructure.WorkflowsDbContext>().Database.MigrateAsync();
 
         // O esquema do Agents só existe na composição dos Agents (as demais composições não o conhecem).
         await using (var escopoDosAgentes = _servicosComAgentes.CreateAsyncScope())

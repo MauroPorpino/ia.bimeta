@@ -9,10 +9,14 @@
   <ItemGroup>
     <InternalsVisibleTo Include="IaBimeta.Workflows.Tests" />
     <InternalsVisibleTo Include="IaBimeta.IntegrationTests" />
+    <InternalsVisibleTo Include="IaBimeta.Workflows.Infrastructure" />
+    <InternalsVisibleTo Include="IaBimeta.Workflows.Presentation" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\building-blocks\IaBimeta.SharedKernel\IaBimeta.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\capabilities\IaBimeta.Capabilities.Contracts\IaBimeta.Capabilities.Contracts.csproj" />
+    <ProjectReference Include="..\..\audit\IaBimeta.Audit.Contracts\IaBimeta.Audit.Contracts.csproj" />
   </ItemGroup>
 
 </Project>

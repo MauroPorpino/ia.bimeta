@@ -124,6 +124,7 @@ public class GrafoDeProjetosTests
                 ("Conversations", "Audit"), ("Conversations", "Tenancy"),
                 ("Identity", "Audit"), ("Identity", "Tenancy"),
                 ("Tenancy", "Audit"),
+                ("Workflows", "Audit"), ("Workflows", "Capabilities"),
             },
             arestas);
     }

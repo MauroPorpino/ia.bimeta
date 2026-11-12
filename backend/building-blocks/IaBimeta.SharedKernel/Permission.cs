@@ -69,4 +69,16 @@ public enum Permission
 
     /// <summary>Executar e confirmar operações de integração que ALTERAM dados no sistema externo. Distinta de <see cref="IntegrationExecute"/> de propósito (autorização explícita de escrita).</summary>
     IntegrationExecuteWrite = 20,
+
+    /// <summary>Ler os fluxos do chatbot visual (rascunhos e versões publicadas) de uma organização (ADR 0037). Nunca dá acesso a conteúdo de cliente.</summary>
+    WorkflowRead = 21,
+
+    /// <summary>Criar e editar rascunhos de fluxo de uma organização.</summary>
+    WorkflowManage = 22,
+
+    /// <summary>Publicar, aposentar e ativar fluxos de uma organização. Distinta de <see cref="WorkflowManage"/> de propósito: quem edita não coloca no ar.</summary>
+    WorkflowPublish = 23,
+
+    /// <summary>Simular fluxos (sem chamada real a IA, sistema externo ou canal).</summary>
+    WorkflowTest = 24,
 }

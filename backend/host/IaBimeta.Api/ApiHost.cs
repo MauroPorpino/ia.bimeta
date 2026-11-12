@@ -17,6 +17,8 @@ using IaBimeta.Audit.Infrastructure;
 using IaBimeta.Audit.Presentation;
 using IaBimeta.Capabilities.Infrastructure;
 using IaBimeta.Capabilities.Presentation;
+using IaBimeta.Workflows.Infrastructure;
+using IaBimeta.Workflows.Presentation;
 using IaBimeta.Channels.Infrastructure;
 using IaBimeta.Channels.Presentation;
 using IaBimeta.ContactCenter.Application;
@@ -149,6 +151,11 @@ public static class ApiHost
             opcoes => builder.Configuration.GetSection("Capabilities:Options").Bind(opcoes),
             segredos => builder.Configuration.GetSection("Capabilities:Secrets").Bind(segredos));
 
+        // O Chatbot Visual (ADR 0037, módulo Workflows): fluxos versionados, validação e simulação. As opções vêm de Workflows:Options; o runtime (Enabled) nasce DESLIGADO.
+        builder.Services.AddWorkflows(
+            provider => ConnectionStringOf(provider, "Workflows"),
+            opcoes => builder.Configuration.GetSection("Workflows:Options").Bind(opcoes));
+
         // Enums saem e entram como texto (por exemplo, "HumanAssisted"), não como número.
         builder.Services.ConfigureHttpJsonOptions(opcoes => opcoes.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
@@ -238,6 +245,7 @@ public static class ApiHost
 
         // A API do Motor de Integração Empresarial (ADR 0035): conexões, operações, execuções e histórico.
         app.MapCapabilitiesEndpoints();
+        app.MapWorkflowsEndpoints();
 
         // O Receiver do webhook do provedor: anônimo, autenticado pela assinatura do corpo (ADR 0011, seção C).
         app.MapChannelWebhookEndpoints();

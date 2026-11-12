@@ -109,6 +109,8 @@ public class RolePermissionsTests
                 Permission.ChannelRead,
                 Permission.QueueRead,
                 Permission.IntegrationRead,
+                Permission.WorkflowRead, // ADR 0037: o gerente lê e simula fluxos, mas não edita nem publica
+                Permission.WorkflowTest,
             },
             Permissoes(Role.Manager, Organizacao));
     }
