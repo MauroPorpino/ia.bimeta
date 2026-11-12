@@ -121,6 +121,8 @@ public sealed class PostgresFixture : IAsyncLifetime
         colecao.AddScoped<RequestContextHolder>();
         colecao.AddScoped<IRequestContextAccessor>(provider => provider.GetRequiredService<RequestContextHolder>());
         colecao.AddAudit(_ => ConnectionString);
+        // O Motor de Integração (ADR 0035): o transporte de saída é o ERP SIMULADO (nenhuma rede); o resto do motor é o real.
+        colecao.AddSingleton<IaBimeta.Capabilities.Infrastructure.Outbound.IOutboundHttp>(Erp);
         colecao.AddCapabilities(_ => ConnectionString);
         colecao.AddTenancy(_ => ConnectionString);
         colecao.AddIdentityModule(_ => ConnectionString, opcoes => opcoes.PasswordHashIterations = PasswordIterations);
@@ -217,7 +219,7 @@ public sealed class PostgresFixture : IAsyncLifetime
 
             // O adaptador REAL da OpenAI (C4), com o servidor HTTP simulado no lugar da rede: o pedido, o uso, os erros e o tempo limite são os do adaptador de produção.
             colecao.AddSingleton<IAiProvider>(_ => new IaBimeta.Adapters.Ai.OpenAI.OpenAiProvider(new HttpClient(ServidorOpenAi) { Timeout = Timeout.InfiniteTimeSpan }, new IaBimeta.Adapters.Ai.OpenAI.OpenAiOptions()));
-            colecao.AddAgents(_ => ConnectionString, opcoes => { opcoes.KnowledgeGapHashKey = ChaveDeLacunasDeTeste; opcoes.SemanticAnswerEnabled = true; opcoes.LocalSuggestionsEnabled = true; });
+            colecao.AddAgents(_ => ConnectionString, opcoes => { opcoes.KnowledgeGapHashKey = ChaveDeLacunasDeTeste; opcoes.SemanticAnswerEnabled = true; opcoes.LocalSuggestionsEnabled = true; opcoes.IntegrationLookupsEnabled = true; opcoes.ModelCallTimeout = TimeSpan.FromSeconds(30); });
             colecao.AddSingleton<IaBimeta.Knowledge.Contracts.ILocalGenerationProvider>(IaLocal);
             colecao.AddSingleton(BuscaSemantica);
             colecao.AddScoped<IaBimeta.Knowledge.Contracts.IKnowledgeSearch, IaBimeta.IntegrationTests.Agents.BuscaSemanticaSimulada>();
@@ -225,6 +227,9 @@ public sealed class PostgresFixture : IAsyncLifetime
 
         return colecao.BuildServiceProvider(validateScopes: true);
     }
+
+    /// <summary>O ERP simulado do Motor de Integração (compartilhado; os testes o roteirizam e conferem as chamadas por host).</summary>
+    public IaBimeta.IntegrationTests.Agents.ErpSimulado Erp { get; } = new();
 
     public async Task InitializeAsync()
     {

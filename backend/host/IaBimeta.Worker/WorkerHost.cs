@@ -6,6 +6,7 @@ using IaBimeta.Adapters.WhatsApp;
 using IaBimeta.AiGateway.Application;
 using IaBimeta.AiGateway.Infrastructure;
 using IaBimeta.Audit.Infrastructure;
+using IaBimeta.Capabilities.Infrastructure;
 using IaBimeta.Channels.Infrastructure;
 using IaBimeta.ContactCenter.Infrastructure;
 using IaBimeta.Conversations.Application;
@@ -131,6 +132,13 @@ public static class WorkerHost
         builder.Services.AddAgents(
             provider => ConnectionStringOf(provider, "Agents"),
             agentes => builder.Configuration.GetSection("Agents:Options").Bind(agentes));
+
+        // O Motor de Integração (ADR 0035 e 0036): o turno de IA consulta, por ele, operações PÚBLICAS de leitura (Agents:Options:IntegrationLookupsEnabled, desligado por padrão). O Worker faz as chamadas de saída ao ERP,
+        // então precisa das MESMAS chaves mestras dos segredos das conexões (Capabilities:Secrets) e da MESMA política de destino de saída (Capabilities:Options:Outbound) do Api. Os dois leem do mesmo app.env.
+        builder.Services.AddCapabilities(
+            provider => ConnectionStringOf(provider, "Capabilities"),
+            opcoes => builder.Configuration.GetSection("Capabilities:Options").Bind(opcoes),
+            segredos => builder.Configuration.GetSection("Capabilities:Secrets").Bind(segredos));
 
         // O Knowledge (ADR 0034): o Worker vetoriza o conhecimento publicado (SemanticIndexer) e, no Pacote 2, busca por similaridade no turno. Desligado por padrão (Knowledge:Semantic:Enabled).
         builder.Services.AddOllamaProvider(ollama => builder.Configuration.GetSection("Knowledge:Providers:Ollama").Bind(ollama));
