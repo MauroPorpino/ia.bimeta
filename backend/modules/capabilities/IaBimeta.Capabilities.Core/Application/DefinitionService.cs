@@ -131,6 +131,11 @@ public sealed partial class DefinitionService
         }
 
         var classe = request.DataClass ?? CapabilityDataClass.CustomerData;
+        if (classe == CapabilityDataClass.Public && request.Spec?.Response.Any(f => f.Personal) == true)
+        {
+            problemas.Add("dataClass: uma operação Public não pode ter campo da resposta marcado como dado pessoal.");
+        }
+
 
         var confirmacao = request.Effect == CapabilityEffect.Write ? request.RequiresConfirmation ?? true : false;
         if (request.Spec is null)

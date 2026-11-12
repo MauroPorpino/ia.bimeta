@@ -60,6 +60,18 @@ public sealed class AgentsOptions
     public bool LocalSuggestionsEnabled { get; set; }
 
     /// <summary>
+    /// Liga a consulta do agente a operações PÚBLICAS de leitura do Motor de Integração (ADR 0036). Desligado por padrão. Ligado, o turno com operações elegíveis pode pedir UMA consulta (esquema `lookup`) e faz uma segunda chamada ao modelo
+    /// com o resultado. Exige o módulo Capabilities composto no host e `TurnMaxDuration` maior que duas chamadas ao modelo mais o orçamento da consulta.
+    /// </summary>
+    public bool IntegrationLookupsEnabled { get; set; }
+
+    /// <summary>Quantas consultas um turno pode fazer. Nesta fase só 1 (ADR 0036); outro valor é recusado na partida.</summary>
+    public int LookupMaxPerTurn { get; set; } = 1;
+
+    /// <summary>O orçamento de TODA a consulta (catálogo já oferecido, execução e resposta do motor). Estourado, o turno transfere para um atendente (`integration_unavailable`). De 1 a 30 s.</summary>
+    public TimeSpan LookupBudget { get; set; } = TimeSpan.FromSeconds(8);
+
+    /// <summary>
     /// Liga o REGISTRO DE LACUNAS do FAQ (ADR 0030): a pergunta de cliente que não teve resposta direta e vale uma revisão vira uma ocorrência (só referências e um hash, nunca o texto). Independe da resposta direta:
     /// um tenant que ainda não ligou nenhum <c>AutoReply</c> também descobre o que os clientes perguntam. Desligado, nada é gravado. Sem <see cref="KnowledgeGapHashKey"/> o registro também não roda.
     /// </summary>
@@ -159,6 +171,16 @@ public sealed class AgentsOptions
         {
             throw new InvalidOperationException(
                 "A configuração do Agents é inválida (tempos, tentativas, mensagens, tetos, capacidade ou lotes); o tempo do turno precisa passar o da chamada ao modelo.");
+        }
+
+        if (LookupMaxPerTurn != 1 || LookupBudget < TimeSpan.FromSeconds(1) || LookupBudget > TimeSpan.FromSeconds(30))
+        {
+            throw new InvalidOperationException("Agents:Options: LookupMaxPerTurn só pode ser 1 nesta fase e LookupBudget fica entre 1 e 30 segundos.");
+        }
+
+        if (IntegrationLookupsEnabled && TurnMaxDuration <= (ModelCallTimeout * 2) + LookupBudget)
+        {
+            throw new InvalidOperationException("Agents:Options: com a consulta de integração ligada, TurnMaxDuration precisa passar o dobro de ModelCallTimeout mais LookupBudget (duas chamadas ao modelo e a consulta).");
         }
 
         try

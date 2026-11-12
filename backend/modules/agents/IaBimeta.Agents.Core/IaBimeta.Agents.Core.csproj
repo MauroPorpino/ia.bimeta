@@ -15,6 +15,7 @@
     <ProjectReference Include="..\..\..\building-blocks\IaBimeta.SharedKernel\IaBimeta.SharedKernel.csproj" />
     <!-- Só os Contracts dos outros módulos (ADR 0017, seção B). O ContactCenter.Contracts tem só o RequestHandoff: a restrição da matriz (Agents para ContactCenter). -->
     <ProjectReference Include="..\..\ai-gateway\IaBimeta.AiGateway.Contracts\IaBimeta.AiGateway.Contracts.csproj" />
+    <ProjectReference Include="..\..\capabilities\IaBimeta.Capabilities.Contracts\IaBimeta.Capabilities.Contracts.csproj" />
     <ProjectReference Include="..\..\conversations\IaBimeta.Conversations.Contracts\IaBimeta.Conversations.Contracts.csproj" />
     <ProjectReference Include="..\..\contact-center\IaBimeta.ContactCenter.Contracts\IaBimeta.ContactCenter.Contracts.csproj" />
     <ProjectReference Include="..\..\audit\IaBimeta.Audit.Contracts\IaBimeta.Audit.Contracts.csproj" />

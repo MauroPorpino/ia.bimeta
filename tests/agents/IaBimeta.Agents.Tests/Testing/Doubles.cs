@@ -460,9 +460,11 @@ internal static class Snapshots
         string locale = "pt-BR",
         LocaleSource source = LocaleSource.ChannelDefault,
         DeliveryState? lastDelivery = null,
-        bool replyDeliveryFailed = false) =>
+        bool replyDeliveryFailed = false,
+        Guid? organizationId = null,
+        Guid? sessionId = null) =>
         new(
-            SessionId,
+            sessionId ?? SessionId,
             mode,
             stateVersion,
             lastInbound,
@@ -475,7 +477,8 @@ internal static class Snapshots
             source,
             ChannelInstanceId.New(),
             Guid.NewGuid(),
-            null);
+            null,
+            organizationId);
 
     /// <summary>O snapshot mais comum: uma mensagem de texto do cliente, ainda sem resposta.</summary>
     public static TurnSnapshot OneText(string text = "Preciso de jejum para o exame?") => Snapshot(new[] { Customer(1, text) });

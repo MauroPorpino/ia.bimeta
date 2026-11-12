@@ -8,10 +8,18 @@ public enum AgentAction
 
     /// <summary>Transferir para um atendente humano, por um motivo da lista fechada.</summary>
     Handoff = 2,
+
+    /// <summary>Pedir UMA consulta de leitura ao Motor de Integração (ADR 0036). Só existe no esquema com `lookup` (função ligada e operações elegíveis); a chave precisa estar no conjunto oferecido no turno.</summary>
+    Lookup = 3,
 }
 
 /// <summary>A decisão já validada (nunca a saída bruta do modelo): <see cref="ReplyText"/> para <see cref="AgentAction.Reply"/>, <see cref="HandoffReason"/> para <see cref="AgentAction.Handoff"/>.</summary>
-public sealed record AgentDecision(AgentAction Action, string? ReplyText, string? HandoffReason);
+public sealed record AgentDecision(
+    AgentAction Action,
+    string? ReplyText,
+    string? HandoffReason,
+    string? LookupKey = null,
+    IReadOnlyDictionary<string, System.Text.Json.JsonElement>? LookupParameters = null);
 
 /// <summary>
 /// Os motivos de handoff que o modelo pode escolher (lista fechada) e os códigos que o Agents usa no pedido ao ContactCenter. O ContactCenter aceita só <c>^[a-z0-9][a-z0-9_.-]*$</c> de até
@@ -46,4 +54,7 @@ public static class HandoffReasons
 
     /// <summary>O tenant não tem definição de agente publicada: a IA não responde sem instruções aprovadas.</summary>
     public const string AiNotConfigured = "ai-not-configured";
+
+    /// <summary>ADR 0036: a consulta ao sistema da empresa falhou (indisponível, tempo, limite, recusa ou resposta inválida): a IA não improvisa sem o dado e a política é transferir.</summary>
+    public const string IntegrationUnavailable = "integration_unavailable";
 }

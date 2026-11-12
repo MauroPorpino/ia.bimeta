@@ -38,6 +38,15 @@ public static class AgentsInfrastructureExtensions
         services.AddScoped<IPendingTurnSource, PendingTurnSource>();
         services.AddScoped<TurnScheduler>();
         services.AddScoped<TurnRunner>();
+
+        // ADR 0036: a consulta do agente a operações PÚBLICAS de leitura do Motor de Integração. Só existe se o host compôs o Capabilities (o catálogo e o executor); desligada por padrão (Agents:Options:IntegrationLookupsEnabled).
+        services.AddScoped<IntegrationLookupService>(provider =>
+        {
+            var catalogo = provider.GetService<IaBimeta.Capabilities.Contracts.ICapabilityCatalog>();
+            var executor = provider.GetService<IaBimeta.Capabilities.Contracts.ICapabilityExecutor>();
+            var auditoria = provider.GetService<IaBimeta.Audit.Contracts.Commands.IAuditWriter>();
+            return catalogo is null || executor is null || auditoria is null ? null! : new IntegrationLookupService(catalogo, executor, auditoria, provider.GetRequiredService<AgentsOptions>());
+        });
         services.AddScoped<AgentDefinitionService>();
 
         // As lacunas do FAQ (ADR 0030): o registro (melhor esforço, só referências e um hash com segredo do tenant) e a revisão do administrador. Sem Agents:Options:KnowledgeGapHashKey o registro fica desligado.

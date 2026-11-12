@@ -27,10 +27,19 @@ internal sealed class RunnerHarness
         Search = new FakeSearch();
         SemanticSettings = new FakeSemanticSettings();
         SemanticDecisions = new FakeDecisionRecorder();
-        Runner = new TurnRunner(Store, Turns, Gateway, Handoff, Definitions, Gaps, Options, Clock, Search, SemanticSettings, SemanticDecisions);
+        LookupCatalog = new FakeCatalog();
+        LookupExecutor = new FakeExecutor();
+        LookupAudit = new FakeAudit();
+        Runner = new TurnRunner(Store, Turns, Gateway, Handoff, Definitions, Gaps, Options, Clock, Search, SemanticSettings, SemanticDecisions, new IntegrationLookupService(LookupCatalog, LookupExecutor, LookupAudit, Options));
     }
 
     public FakeSearch Search { get; }
+
+    public FakeCatalog LookupCatalog { get; }
+
+    public FakeExecutor LookupExecutor { get; }
+
+    public FakeAudit LookupAudit { get; }
 
     public FakeSemanticSettings SemanticSettings { get; }
 

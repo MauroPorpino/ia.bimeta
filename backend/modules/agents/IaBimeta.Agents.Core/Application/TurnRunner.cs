@@ -1,5 +1,6 @@
 using IaBimeta.Agents.Domain;
 using IaBimeta.AiGateway.Contracts;
+using IaBimeta.Capabilities.Contracts;
 using IaBimeta.ContactCenter.Contracts;
 using IaBimeta.Conversations.Contracts;
 using IaBimeta.Conversations.Contracts.Commands;
@@ -70,6 +71,7 @@ public sealed class TurnRunner
     private readonly IKnowledgeSearch? _search;
     private readonly ISemanticAnswerSettingsStore? _semanticSettings;
     private readonly ISemanticDecisionRecorder? _semanticDecisions;
+    private readonly IntegrationLookupService? _lookups;
 
     public TurnRunner(
         IAiTurnStore store,
@@ -82,8 +84,10 @@ public sealed class TurnRunner
         TimeProvider clock,
         IKnowledgeSearch? search = null,
         ISemanticAnswerSettingsStore? semanticSettings = null,
-        ISemanticDecisionRecorder? semanticDecisions = null)
+        ISemanticDecisionRecorder? semanticDecisions = null,
+        IntegrationLookupService? lookups = null)
     {
+        _lookups = lookups;
         _search = search;
         _semanticSettings = semanticSettings;
         _semanticDecisions = semanticDecisions;
@@ -205,17 +209,39 @@ public sealed class TurnRunner
             return await HandoffFlowAsync(turno, lane, concessao, snapshot, definicao, HandoffReasons.ContentUnavailable, "no-text-input", failure: false, ct);
         }
 
+        // ADR 0036: com a função ligada e operações elegíveis (públicas, de leitura, autorizadas ao agente e do escopo da sessão), o modelo pode pedir UMA consulta. Qualquer falha ao montar a oferta devolve vazio: o turno segue como sempre.
+        var oferta = _lookups is null ? Array.Empty<CapabilityDescriptor>() : await _lookups.ListOfferedAsync(snapshot.OrganizationId, ct);
+        var chaves = oferta.Select(d => d.Key).ToList();
+
         var pedido = new AiGenerationRequest(
             turno.Id.ToString(),
-            AgentPrompt.BuildSystemInstruction(definicao, snapshot),
+            AgentPrompt.BuildSystemInstruction(definicao, snapshot, oferta.Count > 0 ? oferta : null),
             mensagens,
             _options.MaxOutputTokens,
             _options.ModelCallTimeout,
             AiOutputMode.StructuredJson,
-            AgentPrompt.DecisionSchema);
+            oferta.Count > 0 ? AgentPrompt.BuildLookupSchema(chaves) : AgentPrompt.DecisionSchema);
 
         var resultado = await _gateway.GenerateAsync(pedido, ct);
+        return await HandleModelResultAsync(turno, lane, concessao, snapshot, definicao, mensagens, resultado, oferta, [], ct);
+    }
 
+    /// <summary>
+    /// O que fazer com a resposta do modelo (T9, T10 e o registro): a mesma lógica da chamada única e, na segunda chamada de uma consulta (ADR 0036), com o esquema SEM `lookup` (<paramref name="oferta"/> vazia): não há laço.
+    /// <paramref name="anteriores"/> são as <c>AiRequestId</c> das chamadas anteriores do mesmo turno, que a resposta registrada cita junto com a última.
+    /// </summary>
+    private async Task<TurnRunResult> HandleModelResultAsync(
+        AiTurn turno,
+        long lane,
+        TurnGrant concessao,
+        TurnSnapshot snapshot,
+        AgentDefinitionContent definicao,
+        IReadOnlyList<AiMessage> mensagens,
+        AiGenerationResult resultado,
+        IReadOnlyList<CapabilityDescriptor> oferta,
+        IReadOnlyList<Guid> anteriores,
+        CancellationToken ct)
+    {
         // Voltou a chamada: o turno ainda é nosso? (CAN-2: cancelar a chamada física é otimização; esta releitura só poupa o registro, a correção é das cercas do Conversations.)
         var vivo = await _store.FindAsync(turno.Id, CancellationToken.None);
         if (vivo is null || vivo.State != AiTurnState.Running || vivo.LaneToken != lane)
@@ -241,7 +267,12 @@ public sealed class TurnRunner
                 return await FailAttemptAsync(turno, lane, "output-truncated", concessao, snapshot, definicao);
         }
 
-        if (!DecisionParser.TryParse(resultado.Completion.Text, out var decisao, out var invalido))
+        AgentDecision? decisao;
+        string? invalido;
+        var parseou = oferta.Count > 0
+            ? DecisionParser.TryParseWithLookup(resultado.Completion.Text, oferta.Select(d => d.Key).ToHashSet(StringComparer.Ordinal), out decisao, out invalido)
+            : DecisionParser.TryParse(resultado.Completion.Text, out decisao, out invalido);
+        if (!parseou)
         {
             return await FailAttemptAsync(turno, lane, "invalid-output-" + invalido, concessao, snapshot, definicao);
         }
@@ -252,8 +283,62 @@ public sealed class TurnRunner
                 turno, lane, concessao, snapshot, definicao, HandoffReasons.ForAiDecision(decisao.HandoffReason!), "handoff-" + decisao.HandoffReason, failure: false, ct);
         }
 
-        var resposta = await RegisterAsync(turno, concessao, snapshot, ReplyKind.Generated, decisao.ReplyText!, new[] { resultado.AiRequestId }, ct);
+        if (decisao.Action == AgentAction.Lookup)
+        {
+            return await RunLookupAsync(turno, lane, concessao, snapshot, definicao, mensagens, oferta, decisao, resultado.AiRequestId, ct);
+        }
+
+        var ids = anteriores.Append(resultado.AiRequestId).ToList();
+        var resposta = await RegisterAsync(turno, concessao, snapshot, ReplyKind.Generated, decisao.ReplyText!, ids, ct);
         return await AfterRegisterAsync(turno, lane, concessao, snapshot, resposta, AiTurnEndReasons.Replied, TurnRunOutcome.Replied, definicao, ct);
+    }
+
+    /// <summary>
+    /// A consulta que o modelo pediu (ADR 0036): o <see cref="IntegrationLookupService"/> confere de novo a chave oferecida, executa dentro do orçamento e devolve um desfecho com código. Falhou (qualquer motivo): handoff
+    /// determinístico `integration_unavailable`, sem segunda chamada ao modelo; o aviso aprovado do tenant sai pelo fluxo de handoff e o histórico e o contexto seguem com o ContactCenter. Deu certo: UMA segunda chamada com o
+    /// resultado como DADO não confiável e o esquema sem `lookup`. Entre uma e outra o turno é conferido de novo (uma consulta é leitura: um turno substituído só descarta o resultado).
+    /// </summary>
+    private async Task<TurnRunResult> RunLookupAsync(
+        AiTurn turno,
+        long lane,
+        TurnGrant concessao,
+        TurnSnapshot snapshot,
+        AgentDefinitionContent definicao,
+        IReadOnlyList<AiMessage> mensagens,
+        IReadOnlyList<CapabilityDescriptor> oferta,
+        AgentDecision decisao,
+        Guid primeiraChamada,
+        CancellationToken ct)
+    {
+        var consulta = await _lookups!.ExecuteAsync(turno.Id, turno.SessionId, snapshot.OrganizationId, decisao, oferta, ct);
+
+        var vivo = await _store.FindAsync(turno.Id, CancellationToken.None);
+        if (vivo is null || vivo.State != AiTurnState.Running || vivo.LaneToken != lane)
+        {
+            if (vivo?.State == AiTurnState.Superseded)
+            {
+                await EndConversationTurnAsync(turno, concessao, TurnEndReason.Superseded);
+            }
+
+            return Lost();
+        }
+
+        if (!consulta.Succeeded)
+        {
+            return await HandoffFlowAsync(turno, lane, concessao, snapshot, definicao, HandoffReasons.IntegrationUnavailable, "integration-unavailable", failure: false, ct);
+        }
+
+        var segundo = new AiGenerationRequest(
+            turno.Id.ToString(),
+            AgentPrompt.BuildResultInstruction(AgentPrompt.BuildSystemInstruction(definicao, snapshot), consulta.Operation!.Name, consulta.OutputJson!),
+            mensagens,
+            _options.MaxOutputTokens,
+            _options.ModelCallTimeout,
+            AiOutputMode.StructuredJson,
+            AgentPrompt.DecisionSchema);
+
+        var resultado = await _gateway.GenerateAsync(segundo, ct);
+        return await HandleModelResultAsync(turno, lane, concessao, snapshot, definicao, mensagens, resultado, Array.Empty<CapabilityDescriptor>(), [primeiraChamada], ct);
     }
 
     /// <summary>
