@@ -345,12 +345,13 @@ function EditorInterno({ api, fluxo, onFechar, onAlterado }: Props) {
             deleteKeyCode={somenteLeitura ? null : 'Delete'}
             onPaneClick={() => setSelecionado(null)}
             fitView
+            fitViewOptions={{ padding: 0.15 }}
             minZoom={0.2}
             proOptions={{ hideAttribution: true }}
           >
             <Background />
             <Controls showInteractive={false} />
-            <MiniMap pannable zoomable />
+            <MiniMap pannable zoomable nodeColor="#8b97a8" maskColor="rgba(120, 130, 150, 0.15)" />
           </ReactFlow>
         </div>
 

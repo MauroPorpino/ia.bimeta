@@ -34,6 +34,13 @@ import type {
   FlowGraph,
   FlowProblem,
   WorkflowOperationOption,
+  FlowActivation,
+  FlowActivationRequest,
+  FlowFunnelRow,
+  FlowInstanceDetail,
+  FlowInstancePage,
+  FlowMetricRow,
+  ListFlowInstancesParams,
   WorkflowSummary,
   ItemActionRequest,
   KnowledgeGapDetail,
@@ -488,6 +495,16 @@ export function createApi(opcoes: ApiOptions = {}) {
     simularFluxo: (organizationId: string, grafo: FlowGraph, cenario: SimulationScenario) =>
       requisitar<SimulateWorkflowResult>('POST', '/workflows/simulate', { corpo: { organizationId, graph: grafo, scenario: cenario } }),
     operacoesParaFluxos: (organizationId: string) => requisitar<WorkflowOperationOption[]>('GET', '/workflows/operations', { consulta: { organizationId } }),
+    listarAtivacoesDeFluxo: () => requisitar<FlowActivation[]>('GET', '/workflows/activations'),
+    criarAtivacaoDeFluxo: (pedido: FlowActivationRequest) => requisitar<FlowActivation>('POST', '/workflows/activations', { corpo: pedido }),
+    atualizarAtivacaoDeFluxo: (id: string, pedido: FlowActivationRequest) => requisitar<FlowActivation>('PUT', `/workflows/activations/${encodeURIComponent(id)}`, { corpo: pedido }),
+    ligarAtivacaoDeFluxo: (id: string) => requisitar<FlowActivation>('POST', `/workflows/activations/${encodeURIComponent(id)}/enable`),
+    desligarAtivacaoDeFluxo: (id: string) => requisitar<FlowActivation>('POST', `/workflows/activations/${encodeURIComponent(id)}/disable`),
+    listarInstanciasDeFluxo: (p: ListFlowInstancesParams = {}) =>
+      requisitar<FlowInstancePage>('GET', '/workflows/instances', { consulta: { status: p.status, key: p.key, take: p.take, skip: p.skip } }),
+    detalheDaInstanciaDeFluxo: (id: string) => requisitar<FlowInstanceDetail>('GET', `/workflows/instances/${encodeURIComponent(id)}`),
+    metricasDosFluxos: (dias = 7) => requisitar<FlowMetricRow[]>('GET', '/workflows/metrics', { consulta: { days: dias } }),
+    funilDoFluxo: (chave: string, versao: number, dias = 7) => requisitar<FlowFunnelRow[]>('GET', '/workflows/metrics/funnel', { consulta: { key: chave, version: versao, days: dias } }),
   };
 }
 

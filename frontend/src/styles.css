@@ -1600,3 +1600,21 @@ label {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.fluxo-linha input,
+.fluxo-linha select {
+  width: auto;
+  flex: 1 1 7rem;
+  min-width: 0;
+}
+
+@media (max-width: 70rem) {
+  .fluxo-paleta {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .fluxo-paleta h3 {
+    width: 100%;
+  }
+}

@@ -57,3 +57,15 @@ React Flow (`@xyflow/react`, MIT, versão fixa, compatível com React 19; confer
 - Fluxos determinísticos coexistem com o Agents sem mudar o comportamento atual (desligado por padrão).
 - Custo: nova superfície de administração e de runtime; tabelas e varredores novos; cifra de variáveis pessoais.
 - Fora de escopo: dado privado de integração, escrita, retorno da IA ao fluxo, voz e Instagram.
+
+## Registro da implementação (12/11/2026)
+
+Entregue em seis pacotes (W0 a W5): ADRs, interpretador e simulador, persistência e publicação, editor React Flow e simulador visual, runtime integrado (desligado por padrão) e operação (ativação, histórico, métricas, retenção, documentação em `docs/operations/CHATBOT-VISUAL.md`).
+
+Ajustes em relação ao texto acima, todos dentro do decidido:
+- **Uma tabela de versões**: `WorkflowDefinition` e `WorkflowVersion` ficaram numa só tabela (`workflow_versions`, uma linha por versão e chave), no molde já provado do Capabilities, com índices únicos por estado (um rascunho e uma publicada por chave) e gatilho de imutabilidade no banco. O fluxo pertence a uma organização (o escopo das permissões e das operações de integração).
+- **Estado `Created`** (instância criada pelo roteador, ainda sem passo) e **efeito `Wait` representado no estado** (`WaitingInput` com prazo), não como efeito.
+- **Variáveis**: cifradas em repouso na instância e, **ao encerrar, apagadas** (junto com o conteúdo dos efeitos): a minimização é por construção; a retenção por empresa (`FlowInstances`, 30 dias) apaga o que sobra (identificadores, estados e códigos). Chaves próprias `Workflows:Secrets`.
+- **Mensagens de um passo viram uma só** e as opções, uma lista numerada: a renderização com botões por canal fica para os adaptadores.
+- **Resumo de variáveis ao atendente**: não entregue à parte (a conversa já traz as respostas); declarado como limitação.
+- **Editor**: `@xyflow/react` 12.12.0 (MIT, peer React ≥ 17, sem vulnerabilidades conhecidas), carregado sob demanda só para quem administra fluxos.

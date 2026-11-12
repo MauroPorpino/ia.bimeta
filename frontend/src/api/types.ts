@@ -921,3 +921,81 @@ export interface WorkflowOperationOption {
   parameters: Array<{ name: string; type: string; required: boolean; description: string | null; enumValues: string[] | null }>;
   outputFields: string[];
 }
+
+// ---------------------------------------------------------------- Chatbot Visual: ativação, histórico e métricas (ADR 0038)
+
+export type FlowOnFailure = 'Handoff' | 'Agent';
+
+export interface FlowActivation {
+  id: string;
+  organizationId: string;
+  businessUnitId: string | null;
+  channelInstanceId: string | null;
+  workflowKey: string;
+  enabled: boolean;
+  priority: number;
+  rolloutPercent: number;
+  onFailure: FlowOnFailure;
+  createdAt: string;
+  updatedAt: string;
+  revision: number;
+}
+
+export interface FlowActivationRequest {
+  organizationId: string;
+  businessUnitId: string | null;
+  channelInstanceId: string | null;
+  workflowKey: string;
+  priority: number;
+  rolloutPercent: number;
+  onFailure: FlowOnFailure;
+  expectedRevision?: number | null;
+}
+
+export type FlowInstanceStatus = 'Created' | 'WaitingInput' | 'AwaitingEffect' | 'AwaitingAgent' | 'Completed' | 'HandedOff' | 'Delegated' | 'Failed' | 'Cancelled';
+
+export interface FlowInstanceSummary {
+  id: string;
+  sessionId: string;
+  workflowKey: string;
+  versionNumber: number;
+  status: FlowInstanceStatus;
+  nodeId: string | null;
+  failureCode: string | null;
+  createdAt: string;
+  endedAt: string | null;
+}
+
+export interface FlowInstancePage {
+  items: FlowInstanceSummary[];
+  total: number;
+}
+
+export interface FlowInstanceDetail extends FlowInstanceSummary {
+  steps: Array<{ step: number; nodeId: string; outcome: string; at: string }>;
+  effects: Array<{ key: string; kind: string; state: string; resultCode: string | null; attempts: number }>;
+}
+
+export interface FlowMetricRow {
+  workflowKey: string;
+  versionNumber: number;
+  started: number;
+  active: number;
+  completed: number;
+  handedOff: number;
+  delegated: number;
+  failed: number;
+  cancelled: number;
+}
+
+export interface FlowFunnelRow {
+  nodeId: string;
+  visits: number;
+}
+
+export interface ListFlowInstancesParams {
+  status?: FlowInstanceStatus;
+  key?: string;
+  take?: number;
+  skip?: number;
+}

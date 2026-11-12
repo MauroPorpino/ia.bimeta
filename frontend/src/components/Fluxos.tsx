@@ -1,7 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
 import { descreverErro, type ApiClient } from '../api/client';
 import type { CurrentUser, WorkflowSummary } from '../api/types';
+import { AtivacoesDeFluxo } from './AtivacoesDeFluxo';
 import { EditorDeFluxo, type FluxoEmEdicao } from './EditorDeFluxo';
+import { HistoricoDeFluxos } from './HistoricoDeFluxos';
+import { MetricasDeFluxos } from './MetricasDeFluxos';
+
+type Aba = 'fluxos' | 'ativacoes' | 'historico' | 'metricas';
+
+const ABAS: Array<{ id: Aba; rotulo: string }> = [
+  { id: 'fluxos', rotulo: 'Fluxos' },
+  { id: 'ativacoes', rotulo: 'Ativações' },
+  { id: 'historico', rotulo: 'Histórico' },
+  { id: 'metricas', rotulo: 'Métricas' },
+];
 
 const ROTULO_DO_ESTADO: Record<WorkflowSummary['status'], string> = { Draft: 'Rascunho', Published: 'Publicada', Retired: 'Aposentada' };
 
@@ -34,6 +46,13 @@ export function Fluxos({ api, me, oculto = false }: Props) {
   const [nome, setNome] = useState('');
   const [organizacao, setOrganizacao] = useState('');
   const [ocupado, setOcupado] = useState(false);
+  const [aba, setAba] = useState<Aba>('fluxos');
+  const [abertas, setAbertas] = useState<Set<Aba>>(new Set<Aba>(['fluxos']));
+
+  function abrirAba(destino: Aba) {
+    setAba(destino);
+    setAbertas((atuais) => (atuais.has(destino) ? atuais : new Set([...atuais, destino])));
+  }
 
   const carregar = useCallback(async () => {
     try {
@@ -108,6 +127,17 @@ export function Fluxos({ api, me, oculto = false }: Props) {
         />
       ) : (
         <>
+          <nav className="abas-integracoes" aria-label="Seções dos fluxos">
+            {ABAS.map((a) => (
+              <button key={a.id} type="button" className="area-aba" aria-current={aba === a.id ? 'page' : undefined} onClick={() => abrirAba(a.id)}>
+                {a.rotulo}
+              </button>
+            ))}
+          </nav>
+          <div hidden={aba !== 'ativacoes'}>{abertas.has('ativacoes') && <AtivacoesDeFluxo api={api} me={me} fluxos={fluxos ?? []} />}</div>
+          <div hidden={aba !== 'historico'}>{abertas.has('historico') && <HistoricoDeFluxos api={api} />}</div>
+          <div hidden={aba !== 'metricas'}>{abertas.has('metricas') && <MetricasDeFluxos api={api} />}</div>
+          <div hidden={aba !== 'fluxos'}>
           <header className="fluxos-topo">
             <h2>Fluxos do chatbot</h2>
             <button type="button" className="btn btn-primario" onClick={() => setCriando((v) => !v)} aria-expanded={criando}>
@@ -181,6 +211,7 @@ export function Fluxos({ api, me, oculto = false }: Props) {
               </tbody>
             </table>
           )}
+          </div>
         </>
       )}
     </main>
