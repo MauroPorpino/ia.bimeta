@@ -11,6 +11,9 @@ public enum MessageAuthor
     Customer = 1,
     Ai = 2,
     Human = 3,
+
+    /// <summary>Mensagem de um fluxo do chatbot visual (ADR 0037 e 0038): determinística, sem modelo e sem atendente. Distinta da IA e do humano na interface e na auditoria.</summary>
+    Bot = 4,
 }
 
 public enum MessageKind

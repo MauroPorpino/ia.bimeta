@@ -12,7 +12,7 @@ namespace IaBimeta.Conversations.Application;
 /// recusada por regra fixa, sem configuração, sem parâmetro de contrato e sem consultar o Audit. Só um contexto de sistema
 /// chama (<see cref="Permission.SystemOperation"/>): um usuário autenticado nunca produz resposta de IA.
 /// </summary>
-public sealed class TurnService : ITurnCommands
+public sealed class TurnService : ITurnCommands, IFlowCommands
 {
     public const int MaxAiRequestIds = 50;
 
@@ -198,6 +198,92 @@ public sealed class TurnService : ITurnCommands
             cancellationToken);
 
         return new RegisterAiReplyResult(RegisterReplyOutcome.Accepted, resposta.Id, sessao.AnsweredThroughSeq, sessao.LastInboundSeq);
+    }
+
+    /// <summary>
+    /// A mensagem de um fluxo (ADR 0038): as MESMAS cercas e a mesma transação da resposta de IA (turno ativo e época, responsável e versão do estado, entrada), idempotente por <c>TurnId</c>. A defasagem de
+    /// entrada continua recusada (<see cref="RegisterReplyOutcome.StaleInput"/>): a recuperação (reabrir o turno e tentar de novo) é de quem chama, nunca um afrouxamento da cerca.
+    /// </summary>
+    public async Task<RegisterFlowMessageResult> RegisterFlowMessageAsync(RegisterFlowMessageCommand command, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        var contexto = _context.GetRequired();
+        contexto.Require(Permission.SystemOperation);
+
+        await using var trabalho = await _store.BeginAsync(cancellationToken);
+        var sessao = await trabalho.LockSessionAsync(command.SessionId, cancellationToken);
+        if (sessao is null)
+        {
+            return new RegisterFlowMessageResult(RegisterReplyOutcome.SessionNotFound, null, null, null);
+        }
+
+        var existente = await trabalho.FindReplyByTurnAsync(sessao.Id, command.TurnId, cancellationToken);
+        if (existente is not null)
+        {
+            return new RegisterFlowMessageResult(RegisterReplyOutcome.AlreadyRegistered, existente.Id, sessao.AnsweredThroughSeq, sessao.LastInboundSeq);
+        }
+
+        var recusa = sessao.CheckReplyFences(command.TurnId, command.Epoch, command.ExpectedStateVersion, command.BasedOnInboundSeq);
+        if (recusa is { } motivo)
+        {
+            return new RegisterFlowMessageResult(motivo, null, sessao.AnsweredThroughSeq, sessao.LastInboundSeq);
+        }
+
+        if (string.IsNullOrWhiteSpace(command.Text) || command.Text.Length > ConversationLimits.TextMaxLength)
+        {
+            return new RegisterFlowMessageResult(RegisterReplyOutcome.ShapeNotAllowed, null, sessao.AnsweredThroughSeq, sessao.LastInboundSeq);
+        }
+
+        var conversa = await trabalho.FindConversationAsync(command.TargetConversationId, cancellationToken);
+        if (conversa is null || conversa.SessionId != sessao.Id)
+        {
+            return new RegisterFlowMessageResult(RegisterReplyOutcome.ShapeNotAllowed, null, sessao.AnsweredThroughSeq, sessao.LastInboundSeq);
+        }
+
+        var agora = _clock.GetUtcNow();
+        var sequencia = sessao.NextOutboundSeq(agora);
+        var mensagem = Message.CreateFlowMessage(
+            contexto.TenantId, sessao.Id, conversa.Id, conversa.ChannelInstanceId, sequencia, command.TurnId, command.BasedOnInboundSeq, command.Text, agora, conversa.EffectiveLocale);
+        sessao.AcceptFlowMessage(command.BasedOnInboundSeq, command.CoversInbound, agora);
+        trabalho.Add(mensagem);
+        await trabalho.CommitAsync(
+            new[]
+            {
+                ConversationEventFactory.Create(
+                    contexto.TenantId,
+                    sessao.Id,
+                    ConversationEventTypes.OutboundMessageRequested,
+                    new OutboundMessageRequestedV1(sessao.Id, conversa.Id, mensagem.Id, mensagem.Id, null, mensagem.ChannelInstanceId),
+                    agora),
+            },
+            cancellationToken);
+
+        return new RegisterFlowMessageResult(RegisterReplyOutcome.Accepted, mensagem.Id, sessao.AnsweredThroughSeq, sessao.LastInboundSeq);
+    }
+
+    public async Task<ReleaseFlowResult> ReleaseSessionToAgentAsync(ReleaseFlowCommand command, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        var contexto = _context.GetRequired();
+        contexto.Require(Permission.SystemOperation);
+        ConversationLimits.ValidateReason(command.Reason);
+
+        await using var trabalho = await _store.BeginAsync(cancellationToken);
+        var sessao = await trabalho.LockSessionAsync(command.SessionId, cancellationToken);
+        if (sessao is null)
+        {
+            return new ReleaseFlowResult(false);
+        }
+
+        // Nada muda na sessão: o evento só faz o Agents reavaliar a entrada ainda não respondida. A mesma entrega repetida é segura (o Agents é idempotente por EventId e reavalia o estado real).
+        await trabalho.CommitAsync(
+            new[]
+            {
+                ConversationEventFactory.Create(
+                    contexto.TenantId, sessao.Id, ConversationEventTypes.FlowReleasedToAgent, new FlowReleasedToAgentV1(sessao.Id, command.Reason), _clock.GetUtcNow()),
+            },
+            cancellationToken);
+        return new ReleaseFlowResult(true);
     }
 
     public async Task<RaiseSessionAttentionResult> RaiseSessionAttentionAsync(RaiseSessionAttentionCommand command, CancellationToken cancellationToken = default)

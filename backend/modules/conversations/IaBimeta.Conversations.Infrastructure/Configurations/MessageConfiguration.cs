@@ -18,7 +18,7 @@ internal sealed class MessageConfiguration : IEntityTypeConfiguration<Message>
             table.HasCheckConstraint(
                 "ck_messages_direction_shape",
                 "(direction = 1 AND inbound_seq IS NOT NULL AND provider_event_id IS NOT NULL AND author = 1 AND delivery_state IS NULL) " +
-                "OR (direction = 2 AND inbound_seq IS NULL AND delivery_state IS NOT NULL AND author IN (2, 3))");
+                "OR (direction = 2 AND inbound_seq IS NULL AND delivery_state IS NOT NULL AND author IN (2, 3, 4))");
             table.HasCheckConstraint("ck_messages_sequences", "message_seq >= 1 AND (inbound_seq IS NULL OR inbound_seq >= 1)");
 
             // O idioma da mensagem e a origem andam juntos: desconhecido (os dois nulos) ou declarado/pretendido (os dois preenchidos).

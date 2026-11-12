@@ -290,6 +290,21 @@ public sealed class ServiceSession : ITenantOwned
         LastReplyAcceptedAt = now;
     }
 
+    /// <summary>
+    /// Aceita a mensagem de um fluxo (ADR 0038), depois de <see cref="CheckReplyFences"/>: limpa o turno ativo e registra o instante. Só avança a cobertura lógica quando <paramref name="coversInbound"/>:
+    /// um passo que termina entregando a conversa ao agente NÃO cobre a entrada, porque o agente ainda precisa respondê-la.
+    /// </summary>
+    public void AcceptFlowMessage(long basedOnInboundSeq, bool coversInbound, DateTimeOffset now)
+    {
+        if (coversInbound)
+        {
+            AnsweredThroughSeq = Math.Max(AnsweredThroughSeq, basedOnInboundSeq);
+        }
+
+        ActiveTurnId = null;
+        LastReplyAcceptedAt = now;
+    }
+
     // Cerca de quem executa
 
     /// <summary>

@@ -16,6 +16,7 @@ public static class ConversationEventTypes
     public const string OutboundMessageFailed = "conversations.outbound-message-failed";
     public const string SessionAttentionRaised = "conversations.session-attention-raised";
     public const string ConversationLocaleChanged = "conversations.conversation-locale-changed";
+    public const string FlowReleasedToAgent = "conversations.flow-released-to-agent";
     public const string SessionTransferred = "conversations.session-transferred";
 }
 
@@ -127,3 +128,8 @@ public sealed record ConversationLocaleChangedV1(
     IaBimeta.SharedKernel.Locale To,
     LocaleSource Source,
     long StateVersion);
+
+/// <summary>
+/// O fluxo do chatbot visual terminou e a sessão volta ao agente (ADR 0038). Consumido pelo Agents, que reavalia a entrada ainda não respondida (como no retorno à IA). Não carrega conteúdo de mensagem.
+/// </summary>
+public sealed record FlowReleasedToAgentV1(Guid SessionId, string Reason);

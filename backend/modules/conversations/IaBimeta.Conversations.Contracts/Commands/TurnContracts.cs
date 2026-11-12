@@ -171,3 +171,39 @@ public enum RaiseAttentionOutcome
 }
 
 public sealed record RaiseSessionAttentionResult(RaiseAttentionOutcome Outcome);
+
+/// <summary>
+/// Os comandos de um fluxo do chatbot visual (ADR 0037 e 0038). Só um contexto de sistema chama (<c>SystemOperation</c>). O fluxo roda DENTRO de um turno aberto por <c>BeginTurn</c> (mesma exclusividade,
+/// época e versão de estado da IA): a mensagem de fluxo preserva as cercas de turno, época, estado, modo (só com a IA autônoma) e entrada, e é idempotente por <c>TurnId</c>.
+/// </summary>
+public interface IFlowCommands
+{
+    /// <summary>Registra uma mensagem de fluxo se TODAS as cercas passam (as mesmas da resposta de IA, inclusive a defasagem de entrada); autor <c>Bot</c>, resposta determinística, sem chamada de modelo.</summary>
+    Task<RegisterFlowMessageResult> RegisterFlowMessageAsync(RegisterFlowMessageCommand command, CancellationToken cancellationToken = default);
+
+    /// <summary>O fluxo terminou e a sessão volta ao agente: emite o evento que o faz reavaliar a entrada ainda não respondida. Idempotente por natureza (reavaliar é seguro).</summary>
+    Task<ReleaseFlowResult> ReleaseSessionToAgentAsync(ReleaseFlowCommand command, CancellationToken cancellationToken = default);
+}
+
+/// <param name="TurnId">Chave de idempotência do registro: no máximo uma mensagem de fluxo por turno (o fluxo junta todas as mensagens de um passo numa só).</param>
+/// <param name="Epoch">A época devolvida pelo <c>BeginTurn</c>.</param>
+/// <param name="ExpectedStateVersion">A versão do estado em que o turno se baseou.</param>
+/// <param name="BasedOnInboundSeq">O <c>LastInboundSeq</c> do snapshot: a cerca de entrada (defasada é recusada).</param>
+/// <param name="TargetConversationId">A conversa de destino: precisa pertencer à sessão.</param>
+/// <param name="CoversInbound">Se a mensagem cobre logicamente a entrada até <paramref name="BasedOnInboundSeq"/>. Falso quando o passo termina entregando a conversa ao agente: ele ainda precisa responder à última pergunta.</param>
+public sealed record RegisterFlowMessageCommand(
+    Guid SessionId,
+    Guid TurnId,
+    long Epoch,
+    long ExpectedStateVersion,
+    long BasedOnInboundSeq,
+    Guid TargetConversationId,
+    string Text,
+    bool CoversInbound = true);
+
+public sealed record RegisterFlowMessageResult(RegisterReplyOutcome Outcome, Guid? MessageId, long? AnsweredThroughSeq, long? LastInboundSeq);
+
+/// <param name="Reason">Motivo curto (por exemplo, <c>delegated</c>, <c>completed</c>, <c>failed</c>), só letras minúsculas, números e <c>_.-</c>.</param>
+public sealed record ReleaseFlowCommand(Guid SessionId, string Reason);
+
+public sealed record ReleaseFlowResult(bool SessionFound);

@@ -51,6 +51,7 @@ export const ROTULO_AUTOR: Record<MessageAuthor, string> = {
   Customer: 'Cliente',
   Ai: 'IA',
   Human: 'Atendente',
+  Bot: 'Fluxo automático',
 };
 
 export const ROTULO_PRESENCA: Record<AgentStatus, string> = {

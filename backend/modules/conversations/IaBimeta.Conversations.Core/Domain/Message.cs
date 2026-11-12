@@ -232,6 +232,53 @@ public sealed class Message : ITenantOwned
     }
 
     /// <summary>
+    /// Mensagem de um fluxo do chatbot visual (ADR 0038): autor <see cref="MessageAuthor.Bot"/>, resposta determinística (<see cref="Contracts.ReplyKind.Informative"/>), sem chamada de modelo. Nasce liberada para
+    /// envio, como a da IA. <paramref name="coveredThroughSeq"/> é a entrada que ela cobre logicamente (a própria entrada base, mesmo quando o passo não avança a cobertura da sessão).
+    /// </summary>
+    public static Message CreateFlowMessage(
+        TenantId tenantId,
+        Guid sessionId,
+        Guid conversationId,
+        ChannelInstanceId channelInstanceId,
+        long messageSeq,
+        Guid turnId,
+        long coveredThroughSeq,
+        string text,
+        DateTimeOffset now,
+        Locale conversationLocale)
+    {
+        ArgumentNullException.ThrowIfNull(tenantId);
+        ArgumentNullException.ThrowIfNull(conversationLocale);
+
+        ValidateText(text, MessageKind.Text, required: true);
+
+        return new Message
+        {
+            Id = Guid.CreateVersion7(),
+            TenantId = tenantId,
+            SessionId = sessionId,
+            ConversationId = conversationId,
+            ChannelInstanceId = channelInstanceId,
+            Direction = MessageDirection.Outbound,
+            MessageSeq = messageSeq,
+            Author = MessageAuthor.Bot,
+            Kind = MessageKind.Text,
+            ContentState = ContentState.Ready,
+            Text = text,
+            ReceivedAt = now,
+            OccurredAt = now,
+            TurnId = turnId,
+            ReplyKind = Contracts.ReplyKind.Informative,
+            CoveredThroughSeq = coveredThroughSeq,
+            DeliveryState = Contracts.DeliveryState.Requested,
+            AiRequestIds = [],
+            CreatedAt = now,
+            Locale = conversationLocale,
+            LocaleOrigin = MessageLocaleOrigin.ConversationLocale,
+        };
+    }
+
+    /// <summary>
     /// Reenvio pedido por um atendente (COV-7): copia o conteúdo e o destino da mensagem que falhou, guarda o vínculo com ela
     /// e o autor, e nasce liberado para envio. Não cobre nada de novo (a cobertura já existia) e não vem de turno de IA.
     /// </summary>

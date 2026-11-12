@@ -361,7 +361,8 @@ export interface AgentDefinition {
 
 export type MessageDirection = 'Inbound' | 'Outbound';
 
-export type MessageAuthor = 'Customer' | 'Ai' | 'Human';
+/** `Bot`: mensagem de um fluxo do chatbot visual (ADR 0038), distinta da IA e do atendente. */
+export type MessageAuthor = 'Customer' | 'Ai' | 'Human' | 'Bot';
 
 export type MessageKind = 'Text' | 'Audio' | 'Image' | 'Document' | 'Video' | 'Other';
 
