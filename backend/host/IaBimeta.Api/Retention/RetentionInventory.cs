@@ -100,6 +100,10 @@ internal static class RetentionInventory
 
         // Controle do banco
         ["agents.__ef_migrations_history"] = (DataClass.Infrastructure, "histórico de migrations"),
+        ["capabilities.__ef_migrations_history"] = (DataClass.Infrastructure, "histórico de migrations"),
+        ["capabilities.integration_connections"] = (DataClass.Configuration, "conexões do Motor de Integração (ADR 0035): endereço, autenticação e segredo CIFRADO (não é dado pessoal); sai com o encerramento da empresa"),
+        ["capabilities.capability_definitions"] = (DataClass.Configuration, "operações versionadas do catálogo de integração (ADR 0035): molde da chamada, sem credencial nem dado de cliente"),
+        ["capabilities.capability_executions"] = (DataClass.Personal, "registro das execuções de integração (ADR 0035): quem pediu, origem, atendimento correlacionado, versão e resultado; NUNCA parâmetros nem resposta (só uma escrita pendente guarda parâmetros cifrados, apagados ao concluir)"),
         ["knowledge.__ef_migrations_history"] = (DataClass.Infrastructure, "histórico de migrations (só existe com o modo semântico ligado)"),
         ["ai_gateway.__ef_migrations_history"] = (DataClass.Infrastructure, "histórico de migrations"),
         ["audit.__ef_migrations_history"] = (DataClass.Infrastructure, "histórico de migrations"),

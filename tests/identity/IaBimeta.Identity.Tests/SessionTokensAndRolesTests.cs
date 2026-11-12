@@ -95,7 +95,7 @@ public class RolePermissionsTests
     }
 
     [Fact]
-    public void Gestor_acrescenta_gerir_estrutura_ver_usuarios_ler_e_gerir_conversas_e_ler_canais_e_filas()
+    public void Gestor_acrescenta_gerir_estrutura_ver_usuarios_ler_e_gerir_conversas_e_ler_canais_filas_e_integracoes()
     {
         Assert.Equal(
             new HashSet<Permission>
@@ -108,6 +108,7 @@ public class RolePermissionsTests
                 Permission.ConversationManage,
                 Permission.ChannelRead,
                 Permission.QueueRead,
+                Permission.IntegrationRead,
             },
             Permissoes(Role.Manager, Organizacao));
     }
