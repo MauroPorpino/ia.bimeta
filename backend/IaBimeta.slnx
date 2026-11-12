@@ -8,6 +8,7 @@
   <Project Path="../tests/building-blocks/IaBimeta.Messaging.Tests/IaBimeta.Messaging.Tests.csproj" />
   <Project Path="../tests/building-blocks/IaBimeta.SharedKernel.Tests/IaBimeta.SharedKernel.Tests.csproj" />
   <Project Path="../tests/capabilities/IaBimeta.Capabilities.Tests/IaBimeta.Capabilities.Tests.csproj" />
+  <Project Path="../tests/workflows/IaBimeta.Workflows.Tests/IaBimeta.Workflows.Tests.csproj" />
   <Project Path="../tests/channels/IaBimeta.Channels.Tests/IaBimeta.Channels.Tests.csproj" />
   <Project Path="../tests/contact-center/IaBimeta.ContactCenter.Tests/IaBimeta.ContactCenter.Tests.csproj" />
   <Project Path="../tests/conversations/IaBimeta.Conversations.Tests/IaBimeta.Conversations.Tests.csproj" />
@@ -37,6 +38,7 @@
   <Project Path="modules/capabilities/IaBimeta.Capabilities.Core/IaBimeta.Capabilities.Core.csproj" />
   <Project Path="modules/capabilities/IaBimeta.Capabilities.Infrastructure/IaBimeta.Capabilities.Infrastructure.csproj" />
   <Project Path="modules/capabilities/IaBimeta.Capabilities.Presentation/IaBimeta.Capabilities.Presentation.csproj" />
+  <Project Path="modules/workflows/IaBimeta.Workflows.Core/IaBimeta.Workflows.Core.csproj" />
   <Project Path="modules/channels/IaBimeta.Channels.Contracts/IaBimeta.Channels.Contracts.csproj" />
   <Project Path="modules/channels/IaBimeta.Channels.Core/IaBimeta.Channels.Core.csproj" />
   <Project Path="modules/channels/IaBimeta.Channels.Infrastructure/IaBimeta.Channels.Infrastructure.csproj" />
