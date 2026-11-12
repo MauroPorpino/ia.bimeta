@@ -742,3 +742,181 @@ export interface IntegrationConnectionStats {
   unknown: number;
   lastAt: string | null;
 }
+
+// ---------------------------------------------------------------- Chatbot Visual (ADR 0037): o MESMO documento de grafo que o servidor lê de forma estrita
+
+export type FlowNodeType = 'message' | 'question' | 'condition' | 'knowledge' | 'ai' | 'integration' | 'handoff' | 'end';
+export type FlowAnswerType = 'text' | 'choice' | 'number' | 'email' | 'phone' | 'date' | 'pattern';
+export type FlowOperator = 'equals' | 'notEquals' | 'contains' | 'isEmpty' | 'isNotEmpty' | 'greaterThan' | 'lessThan' | 'in' | 'withinBusinessHours';
+export type FlowVariableClass = 'public' | 'personal';
+
+export interface FlowChoice {
+  id: string;
+  label: string;
+}
+
+export interface FlowBusinessWindow {
+  days: number[];
+  from: string;
+  to: string;
+}
+
+export interface FlowBusinessSchedule {
+  timeZone: string;
+  windows: FlowBusinessWindow[];
+}
+
+export interface FlowCondition {
+  variable?: string | null;
+  op: FlowOperator;
+  value?: string | null;
+  values?: string[] | null;
+  schedule?: FlowBusinessSchedule | null;
+}
+
+export interface FlowBranch {
+  port: string;
+  all: FlowCondition[];
+}
+
+export interface FlowParamBinding {
+  variable?: string | null;
+  literal?: string | null;
+}
+
+export interface FlowNodeConfig {
+  text?: string | null;
+  prompt?: string | null;
+  answerType?: FlowAnswerType;
+  variable?: string | null;
+  choices?: FlowChoice[] | null;
+  pattern?: string | null;
+  maxAttempts?: number;
+  timeoutSeconds?: number | null;
+  invalidText?: string | null;
+  branches?: FlowBranch[] | null;
+  queryVariable?: string | null;
+  sourceKey?: string | null;
+  operationKey?: string | null;
+  parameters?: Record<string, FlowParamBinding> | null;
+  resultPrefix?: string | null;
+  reasonCode?: string | null;
+  summaryVariables?: string[] | null;
+}
+
+export interface FlowNode {
+  id: string;
+  type: FlowNodeType;
+  config?: FlowNodeConfig;
+  label?: string | null;
+  position?: { x: number; y: number } | null;
+}
+
+export interface FlowEdge {
+  from: string;
+  port: string;
+  to: string;
+}
+
+export interface FlowVariable {
+  name: string;
+  class: FlowVariableClass;
+}
+
+export interface FlowGraph {
+  schemaVersion: number;
+  start: string;
+  nodes: FlowNode[];
+  edges: FlowEdge[];
+  variables: FlowVariable[];
+}
+
+export type WorkflowVersionStatus = 'Draft' | 'Published' | 'Retired';
+
+export interface WorkflowSummary {
+  id: string;
+  organizationId: string;
+  key: string;
+  version: number;
+  status: WorkflowVersionStatus;
+  name: string;
+  description: string | null;
+  graphHash: string;
+  revision: number;
+  updatedAt: string;
+  publishedAt: string | null;
+  retiredAt: string | null;
+  /** O documento do grafo (texto JSON); só vem no detalhe. */
+  graphJson?: string | null;
+}
+
+export interface FlowProblem {
+  nodeId: string | null;
+  code: string;
+  message: string;
+}
+
+export interface SaveWorkflowResult {
+  workflow: WorkflowSummary;
+  problems: FlowProblem[];
+}
+
+export interface SaveWorkflowRequest {
+  organizationId: string;
+  key: string;
+  name: string;
+  description: string | null;
+  graph: FlowGraph;
+  expectedRevision: number | null;
+}
+
+export type SimInputKind = 'Say' | 'Choose' | 'Media' | 'Wait';
+
+export interface SimInput {
+  kind: SimInputKind;
+  text?: string | null;
+  choiceId?: string | null;
+  seconds?: number;
+}
+
+export interface SimNodeStub {
+  found?: boolean | null;
+  answer?: string | null;
+  success?: boolean | null;
+  fields?: Record<string, string> | null;
+  errorCode?: string | null;
+}
+
+export interface SimulationScenario {
+  inputs: SimInput[];
+  stubs?: Record<string, SimNodeStub>;
+}
+
+export interface SimEvent {
+  kind: string;
+  nodeId: string | null;
+  text: string | null;
+  choices: FlowChoice[] | null;
+  data: Record<string, string> | null;
+}
+
+export interface SimulationResult {
+  events: SimEvent[];
+  outcome: string;
+  visited: string[];
+  finalState: { status: string; nodeId: string | null; variables: Record<string, string>; failureCode: string | null };
+}
+
+export interface SimulateWorkflowResult {
+  problems: FlowProblem[];
+  simulation: SimulationResult | null;
+}
+
+export interface WorkflowOperationOption {
+  key: string;
+  name: string;
+  description: string | null;
+  eligible: boolean;
+  parameters: Array<{ name: string; type: string; required: boolean; description: string | null; enumValues: string[] | null }>;
+  outputFields: string[];
+}

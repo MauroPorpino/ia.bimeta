@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createApi, descreverErro, ehFalhaDeConexao, type ApiClient } from './api/client';
 import { aoSair, encerrarSessaoLocal, obterTenant, restaurarSessao } from './api/session';
 import { gravarItemAberto, lerItemAberto } from './armazem';
@@ -6,6 +6,8 @@ import type { CurrentUser, SendingAlert } from './api/types';
 import { AlertasDeEnvio } from './components/AlertasDeEnvio';
 import { ConexaoBanner } from './components/ConexaoBanner';
 import { Conhecimento } from './components/Conhecimento';
+// O editor visual (React Flow) é pesado e só serve a administradores e gerentes: carrega sob demanda, para o atendente comum não baixar nada dele.
+const Fluxos = lazy(() => import('./components/Fluxos').then((m) => ({ default: m.Fluxos })));
 import { Integracoes } from './components/Integracoes';
 import { ConversationPanel } from './components/ConversationPanel';
 import { ErrorBanner, type Aviso } from './components/ErrorBanner';
@@ -13,10 +15,11 @@ import { LoginScreen } from './components/LoginScreen';
 import { QueuePanel } from './components/QueuePanel';
 import { TrocarSenha } from './components/TrocarSenha';
 import { ehAdministradorDoTenant } from './conhecimento';
+import { podeVerFluxos } from './fluxo';
 import { podeVerIntegracoes } from './integracao';
 import { useCacheDeConversas, useEstadoDaConexao, useNomesDosContatos, usePolling } from './hooks';
 
-type Area = 'atendimento' | 'conhecimento' | 'integracoes';
+type Area = 'atendimento' | 'conhecimento' | 'integracoes' | 'fluxos';
 
 interface AppProps {
   /** Para testes. Por padrão, o cliente real (via proxy `/api`). */
@@ -92,6 +95,8 @@ function Atendimento({ api, saidaManual, intervaloFilaMs, intervaloConversaMs, i
   const [conhecimentoAberto, setConhecimentoAberto] = useState(false);
   // A área "Integrações" (ADR 0035) é de administradores e gerentes; também fica montada depois de aberta.
   const [integracoesAberta, setIntegracoesAberta] = useState(false);
+  // A área "Fluxos" (chatbot visual, ADR 0037) é de administradores e gerentes; também fica montada depois de aberta.
+  const [fluxosAberta, setFluxosAberta] = useState(false);
   const [itemSelecionado, setItemSelecionado] = useState<string | null>(null);
   const [versaoDaLista, setVersaoDaLista] = useState(0);
   const [errosDeRede, setErrosDeRede] = useState<Record<string, ErroDeRede>>({});
@@ -231,12 +236,17 @@ function Atendimento({ api, saidaManual, intervaloFilaMs, intervaloConversaMs, i
   const podeVerIntegracao = me !== null && podeVerIntegracoes(me);
   const naAreaDeConhecimento = podeVerConhecimento && area === 'conhecimento';
   const naAreaDeIntegracoes = podeVerIntegracao && area === 'integracoes';
-  const foraDoAtendimento = naAreaDeConhecimento || naAreaDeIntegracoes;
+  const podeVerFluxo = me !== null && podeVerFluxos(me);
+  const naAreaDeFluxos = podeVerFluxo && area === 'fluxos';
+  const foraDoAtendimento = naAreaDeConhecimento || naAreaDeIntegracoes || naAreaDeFluxos;
 
   function irParaArea(destino: Area) {
     setArea(destino);
     if (destino === 'conhecimento') {
       setConhecimentoAberto(true);
+    }
+    if (destino === 'fluxos') {
+      setFluxosAberta(true);
     }
     if (destino === 'integracoes') {
       setIntegracoesAberta(true);
@@ -246,8 +256,8 @@ function Atendimento({ api, saidaManual, intervaloFilaMs, intervaloConversaMs, i
   return (
     <div className="app">
       <header className="topo">
-        <h1>{naAreaDeConhecimento ? 'ia.bimeta - Conhecimento' : naAreaDeIntegracoes ? 'ia.bimeta - Integrações' : 'ia.bimeta - Atendimento'}</h1>
-        {(podeVerConhecimento || podeVerIntegracao) && (
+        <h1>{naAreaDeConhecimento ? 'ia.bimeta - Conhecimento' : naAreaDeIntegracoes ? 'ia.bimeta - Integrações' : naAreaDeFluxos ? 'ia.bimeta - Fluxos' : 'ia.bimeta - Atendimento'}</h1>
+        {(podeVerConhecimento || podeVerIntegracao || podeVerFluxo) && (
           <nav className="areas" aria-label="Áreas do sistema">
             <button type="button" className="area-aba" aria-current={!foraDoAtendimento ? 'page' : undefined} onClick={() => irParaArea('atendimento')}>
               Atendimento
@@ -260,6 +270,11 @@ function Atendimento({ api, saidaManual, intervaloFilaMs, intervaloConversaMs, i
             {podeVerIntegracao && (
               <button type="button" className="area-aba" aria-current={naAreaDeIntegracoes ? 'page' : undefined} onClick={() => irParaArea('integracoes')}>
                 Integrações
+              </button>
+            )}
+            {podeVerFluxo && (
+              <button type="button" className="area-aba" aria-current={naAreaDeFluxos ? 'page' : undefined} onClick={() => irParaArea('fluxos')}>
+                Fluxos
               </button>
             )}
           </nav>
@@ -332,6 +347,11 @@ function Atendimento({ api, saidaManual, intervaloFilaMs, intervaloConversaMs, i
 
       {podeVerConhecimento && conhecimentoAberto && <Conhecimento api={api} oculto={!naAreaDeConhecimento} />}
       {podeVerIntegracao && integracoesAberta && me && <Integracoes api={api} me={me} oculto={!naAreaDeIntegracoes} />}
+      {podeVerFluxo && fluxosAberta && me && (
+        <Suspense fallback={<p className="discreto">Carregando o editor de fluxos...</p>}>
+          <Fluxos api={api} me={me} oculto={!naAreaDeFluxos} />
+        </Suspense>
+      )}
     </div>
   );
 }

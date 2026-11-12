@@ -27,6 +27,14 @@ import type {
   IntegrationExecutionStatus,
   IntegrationParameterProblem,
   IntegrationResult,
+  SaveWorkflowRequest,
+  SaveWorkflowResult,
+  SimulateWorkflowResult,
+  SimulationScenario,
+  FlowGraph,
+  FlowProblem,
+  WorkflowOperationOption,
+  WorkflowSummary,
   ItemActionRequest,
   KnowledgeGapDetail,
   KnowledgeGapPage,
@@ -464,6 +472,22 @@ export function createApi(opcoes: ApiOptions = {}) {
     resumoDasExecucoes: (dias = 7) => requisitar<IntegrationConnectionStats[]>('GET', '/capabilities/executions/stats', { consulta: { days: dias } }),
     confirmarExecucao: (id: string) => requisitar<IntegrationResult>('POST', `/capabilities/executions/${encodeURIComponent(id)}/confirm`),
     cancelarExecucao: (id: string) => requisitar<IntegrationResult>('POST', `/capabilities/executions/${encodeURIComponent(id)}/cancel`),
+
+    // ---- Chatbot Visual (ADR 0037). O tenant vem da sessão; a organização do fluxo vai no corpo e é conferida no servidor. O grafo é o documento que o servidor valida de forma estrita.
+    listarFluxos: () => requisitar<WorkflowSummary[]>('GET', '/workflows/definitions'),
+    obterFluxo: (id: string) => requisitar<WorkflowSummary>('GET', `/workflows/definitions/${encodeURIComponent(id)}`),
+    versoesDoFluxo: (chave: string) => requisitar<WorkflowSummary[]>('GET', `/workflows/definitions/by-key/${encodeURIComponent(chave)}/versions`),
+    salvarFluxo: (pedido: SaveWorkflowRequest) =>
+      requisitar<SaveWorkflowResult>('POST', '/workflows/definitions', {
+        corpo: { organizationId: pedido.organizationId, key: pedido.key, name: pedido.name, description: pedido.description, graph: pedido.graph, expectedRevision: pedido.expectedRevision },
+      }),
+    publicarFluxo: (id: string) => requisitar<WorkflowSummary>('POST', `/workflows/definitions/${encodeURIComponent(id)}/publish`),
+    aposentarFluxo: (id: string) => requisitar<WorkflowSummary>('POST', `/workflows/definitions/${encodeURIComponent(id)}/retire`),
+    validarFluxo: (organizationId: string, grafo: FlowGraph) =>
+      requisitar<{ valid: boolean; problems: FlowProblem[] }>('POST', '/workflows/validate', { corpo: { organizationId, graph: grafo } }),
+    simularFluxo: (organizationId: string, grafo: FlowGraph, cenario: SimulationScenario) =>
+      requisitar<SimulateWorkflowResult>('POST', '/workflows/simulate', { corpo: { organizationId, graph: grafo, scenario: cenario } }),
+    operacoesParaFluxos: (organizationId: string) => requisitar<WorkflowOperationOption[]>('GET', '/workflows/operations', { consulta: { organizationId } }),
   };
 }
 
