@@ -68,3 +68,12 @@ public interface IFlowHandoffPort
 {
     Task<FlowHandoffResult> RequestAsync(FlowHandoffRequest request, CancellationToken cancellationToken = default);
 }
+
+/// <summary>
+/// A porta de validação do ESCOPO de uma ativação (ADR 0038 §2): confere, no tenant do contexto, que a organização existe, que a unidade é dela e que o número (canal) é dela e, com unidade, a atende.
+/// O Workflows não referencia o Channels; o host a implementa sobre o Tenancy e o Channels. Devolve nulo se o escopo é válido, ou um motivo curto e fixo (nunca o valor informado).
+/// </summary>
+public interface IActivationScopeValidator
+{
+    Task<string?> ValidateAsync(Guid organizationId, Guid? businessUnitId, Guid? channelInstanceId, CancellationToken cancellationToken = default);
+}

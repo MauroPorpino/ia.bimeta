@@ -114,6 +114,7 @@ public static class ApiHost
 
         // A janela de resposta livre e os modelos de mensagem do número (ADR 0027): o ContactCenter pergunta por uma porta própria e quem responde é o Channels, ligado aqui no host.
         builder.Services.AddScoped<IChannelReplyPolicy, ChannelsBackedReplyPolicy>();
+        builder.Services.AddScoped<IaBimeta.Workflows.Contracts.IActivationScopeValidator, WorkflowActivationScopeValidator>();
         builder.Services.AddContactCenter(provider => ConnectionStringOf(provider, "ContactCenter"));
 
         // AiGateway (ADR 0017, C1.4): a configuração de IA do tenant, a credencial BYOK cifrada, o ledger de uso e o IAiGateway. O catálogo de modelos e os limites padrão vêm da

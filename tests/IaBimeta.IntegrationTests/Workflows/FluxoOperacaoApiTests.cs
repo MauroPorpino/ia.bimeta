@@ -2,6 +2,7 @@ using System.Net;
 using System.Text.Json.Nodes;
 using IaBimeta.Identity.Domain;
 using IaBimeta.IntegrationTests.Api;
+using IaBimeta.IntegrationTests.Conversations;
 using IaBimeta.SharedKernel;
 using IaBimeta.Workflows.Core.Domain;
 using IaBimeta.Workflows.Infrastructure;
@@ -78,7 +79,7 @@ public sealed class FluxoOperacaoApiTests(PostgresFixture banco)
         await using var c = await IniciarAsync("op-ativacao");
         await RascunhoAsync(c, "publicado", publicar: true);
         await RascunhoAsync(c, "so-rascunho", publicar: false);
-        var canal = Guid.NewGuid();
+        Guid? canal = null;
 
         var (st, criada) = await c.ComoAdmin(HttpMethod.Post, "/workflows/activations", Ativacao(c, "publicado", 50, 3, "Handoff", canal));
         Assert.Equal(HttpStatusCode.Created, st);
@@ -336,5 +337,45 @@ public sealed class FluxoOperacaoApiTests(PostgresFixture banco)
         var (instanciasB, passosB, efeitosB) = await EstadoAsync(tenantB);
         Assert.Contains(b.Velha, instanciasB); // outra empresa: intacta nesta passada
         Assert.Equal((3, 4), (passosB, efeitosB));
+    }
+
+    // ------------------------------------------------------------ escopo da ativação (prontidão da V1)
+
+    [Fact]
+    public async Task O_escopo_da_ativacao_exige_organizacao_unidade_e_canal_existentes_no_tenant_e_coerentes_entre_si()
+    {
+        var conv = await CenarioDeConversas.CriarAsync(banco, "op-escopo", canaisReais: true);
+        var admin = await banco.CriarAdministradorDoTenantAsync(conv.Tenant);
+        await using var api = await ApiServer.StartAsync("Production", ApiServer.ConfiguracaoDeProducao());
+        var token = await api.LoginAsync(admin);
+        var c = new Cenario { Api = api, Admin = token, Tenant = conv.Tenant, Org = new IaBimeta.Tenancy.Application.OrganizationView(conv.OrganizacaoId, "Org", DateTimeOffset.UtcNow) };
+        await RascunhoAsync(c, "escopo", publicar: true);
+
+        var unidade = await conv.CriarUnidadeAsync(conv.OrganizacaoId, "Matriz", true);
+        var outraUnidade = await conv.CriarUnidadeAsync(conv.OrganizacaoId, "Filial");
+        var canal = await conv.CriarCanalAsync([unidade], unidade);
+        object Corpo(Guid org, Guid? un, Guid? ca) => new { organizationId = org, businessUnitId = un, channelInstanceId = ca, workflowKey = "escopo", priority = 0, rolloutPercent = 100, onFailure = "Agent" };
+
+        Assert.Equal(HttpStatusCode.Created, (await c.ComoAdmin(HttpMethod.Post, "/workflows/activations", Corpo(conv.OrganizacaoId, unidade, canal.Value))).Status);
+
+        // Inexistentes (ou de outro tenant: respondem igual), unidade que o canal não atende e organização que não é a do canal.
+        var (stOrg, _) = await c.ComoAdmin(HttpMethod.Post, "/workflows/activations", Corpo(Guid.NewGuid(), null, null));
+        Assert.True(stOrg is HttpStatusCode.BadRequest or HttpStatusCode.Forbidden);
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.ComoAdmin(HttpMethod.Post, "/workflows/activations", Corpo(conv.OrganizacaoId, Guid.NewGuid(), null))).Status);
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.ComoAdmin(HttpMethod.Post, "/workflows/activations", Corpo(conv.OrganizacaoId, null, Guid.NewGuid()))).Status);
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.ComoAdmin(HttpMethod.Post, "/workflows/activations", Corpo(conv.OrganizacaoId, outraUnidade, canal.Value))).Status);
+
+        // Unidade e canal de OUTRO tenant nunca valem.
+        var outro = await CenarioDeConversas.CriarAsync(banco, "op-escopo-outro", canaisReais: true);
+        var unidadeAlheia = await outro.CriarUnidadeAsync(outro.OrganizacaoId, "Alheia", true);
+        var canalAlheio = await outro.CriarCanalAsync([unidadeAlheia], unidadeAlheia);
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.ComoAdmin(HttpMethod.Post, "/workflows/activations", Corpo(conv.OrganizacaoId, unidadeAlheia, null))).Status);
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.ComoAdmin(HttpMethod.Post, "/workflows/activations", Corpo(conv.OrganizacaoId, null, canalAlheio.Value))).Status);
+
+        // A edição passa pela mesma validação.
+        var (_, lista) = await c.ComoAdmin(HttpMethod.Get, "/workflows/activations");
+        var id = lista!.AsArray().Single()!["id"]!.GetValue<Guid>();
+        var (stEdita, _) = await c.ComoAdmin(HttpMethod.Put, $"/workflows/activations/{id}", new { organizationId = conv.OrganizacaoId, businessUnitId = (Guid?)null, channelInstanceId = Guid.NewGuid(), workflowKey = "escopo", priority = 0, rolloutPercent = 100, onFailure = "Agent", expectedRevision = 1 });
+        Assert.Equal(HttpStatusCode.BadRequest, stEdita);
     }
 }

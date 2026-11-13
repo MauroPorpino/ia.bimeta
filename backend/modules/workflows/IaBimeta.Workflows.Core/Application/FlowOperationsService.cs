@@ -87,14 +87,16 @@ public sealed class FlowOperationsService
     private readonly IWorkflowStore _versions;
     private readonly WorkflowsOptions _options;
     private readonly TimeProvider _clock;
+    private readonly IaBimeta.Workflows.Contracts.IActivationScopeValidator? _scope;
 
-    internal FlowOperationsService(WorkflowsAuthorizer auth, IFlowOperationsStore store, IWorkflowStore versions, WorkflowsOptions options, TimeProvider clock)
+    internal FlowOperationsService(WorkflowsAuthorizer auth, IFlowOperationsStore store, IWorkflowStore versions, WorkflowsOptions options, TimeProvider clock, IaBimeta.Workflows.Contracts.IActivationScopeValidator? scope = null)
     {
         _auth = auth;
         _store = store;
         _versions = versions;
         _options = options;
         _clock = clock;
+        _scope = scope;
     }
 
     // ------------------------------------------------------------ ativações
@@ -213,6 +215,17 @@ public sealed class FlowOperationsService
         if (problemas.Count > 0)
         {
             throw new WorkflowsValidationException(problemas);
+        }
+
+        // O ESCOPO precisa existir no tenant e ser coerente: organização, unidade da organização e canal da organização (que atenda a unidade). Sem o validador (host sem Tenancy/Channels) recusa: falha fechada.
+        if (_scope is null)
+        {
+            throw new WorkflowsConflictException("scope-unavailable", "A validação do escopo da ativação não está disponível neste ambiente.");
+        }
+
+        if (await _scope.ValidateAsync(request.OrganizationId, request.BusinessUnitId, request.ChannelInstanceId, cancellationToken) is { } motivo)
+        {
+            throw new WorkflowsValidationException($"escopo: {motivo}.");
         }
 
         // O fluxo precisa existir (publicado ou, ao menos, em uso) na MESMA organização: uma ativação não aponta para o fluxo de outra organização.

@@ -55,7 +55,7 @@ public static class WorkflowsInfrastructureExtensions
             p.GetRequiredService<WorkflowsAuthorizer>(), p.GetRequiredService<IWorkflowStore>(), p.GetService<ICapabilityCatalog>(), p.GetRequiredService<WorkflowsOptions>(),
             p.GetRequiredService<SimulationThrottle>(), p.GetRequiredService<TimeProvider>()));
         services.AddScoped(p => new FlowOperationsService(
-            p.GetRequiredService<WorkflowsAuthorizer>(), p.GetRequiredService<IFlowOperationsStore>(), p.GetRequiredService<IWorkflowStore>(), p.GetRequiredService<WorkflowsOptions>(), p.GetRequiredService<TimeProvider>()));
+            p.GetRequiredService<WorkflowsAuthorizer>(), p.GetRequiredService<IFlowOperationsStore>(), p.GetRequiredService<IWorkflowStore>(), p.GetRequiredService<WorkflowsOptions>(), p.GetRequiredService<TimeProvider>(), p.GetService<IaBimeta.Workflows.Contracts.IActivationScopeValidator>()));
 
         if (!opcoes.Enabled)
         {
