@@ -1,0 +1,80 @@
+# Roteiro único de homologação da V1 (13/11/2026)
+
+Sequência para sair do código na branch `feature/mvp-c-ia-minima` até a V1 homologada numa **VM Ubuntu de teste**, cobrindo ContactCenter, Agents, Knowledge Engine, Capabilities e Workflows. Cada fase aponta para o documento de detalhe; **não repete** o que já está lá. Regra geral: **não avance de fase com um item falhando**; registre o resultado de cada item (data, quem, evidência).
+
+**O que já está provado (Windows, sem infraestrutura externa):** gate automático (backend e frontend verdes), testes de API com PostgreSQL real, teste funcional do editor de fluxos com a API real (`EditorDeFluxosComApiRealTests`). **O que nada disso prova:** Docker/Caddy/systemd, ClamAV real, pgvector/Ollama, Meta, OpenAI, ERP, navegador.
+
+## Fase 0. Antes da VM (no PC de desenvolvimento)
+
+| # | Item | Como |
+|---|---|---|
+| 0.1 | Gate verde | `dotnet test backend/IaBimeta.slnx`; no `frontend`: `npx vitest run` e `npm run build` |
+| 0.2 | Editor com API real | incluído no gate (`EditorDeFluxosComApiRealTests`); à mão: `npm run test:e2e` com as variáveis `E2E_*` (ver `frontend/vitest.e2e.config.ts`) |
+| 0.3 | Decisões do proprietário | domínio e DNS, IP público fixo, NAT 80/443, conta Meta, chave OpenAI/Anthropic, destino do backup externo, ratificação dos ADRs ainda Propostos (0033 a 0038) |
+
+## Fase 1. A VM e a pilha (`IMPLANTACAO-LINUX.md`)
+
+Ordem: `instalar-host.sh` (root) → levar o código → `gerar-segredos.sh --dominio ... --email ...` → **guardar `.env`, `app.env` e `backup.env` fora da máquina** → `preflight.sh` (0 erro; ele confere as chaves de Channels, AiGateway, Capabilities, **Workflows**, anexos e a do Knowledge) → `subir.sh` (aplica `migrate`) → `aceitacao.sh --confirmo-que-e-teste` (10 grupos, tudo `PASSOU`) → reinício da VM → `empresa.sh` (valida, depois `--aplicar`) → `backup.sh` e `agendar.sh`.
+
+Conferir: `cli.sh migrate --list` sem pendência (inclui os esquemas `workflows` e `capabilities`, a coluna de autor `Bot` do Conversations e a extensão `vector` se o Knowledge híbrido for usado).
+
+## Fase 2. ContactCenter e Conversations (sem IA)
+
+Com a IA desligada na empresa piloto (`PILOTO-PRIMEIRA-EMPRESA.md`, `OPERACAO-E-SUPERVISAO.md`):
+
+1. Login do administrador, do atendente e de um colaborador de outra unidade (permissões e escopo: cada um só vê o que lhe cabe).
+2. Fila por unidade e setor, horário, atribuição, **assumir** (conflito entre dois atendentes: só um vence), transferir entre atendentes e filas, encerrar.
+3. Histórico paginado, rascunhos persistentes, mensagens novas, anexos recebidos e enviados (imagem, documento, áudio) com o ClamAV real (`SEGURANCA-DOS-ARQUIVOS.md`, `MIDIA-DO-WHATSAPP.md`, `ENVIO-DE-ARQUIVOS.md`).
+4. Modelos de mensagem fora da janela de 24 h (`MODELOS-DE-MENSAGEM.md`).
+5. Senhas e sessões: troca, redefinição por token (`SENHAS-E-SESSOES.md`).
+6. Isolamento: com **duas empresas**, nenhuma vê dado da outra (inclusive por URL direta).
+
+## Fase 3. WhatsApp real (`HOMOLOGACAO-META.md`, `WHATSAPP-CONEXAO-REAL.md`)
+
+Conectar o número pelos scripts PowerShell do PC contra `https://<dominio>`; `Test-ProntidaoWhatsApp.ps1`; mensagem de entrada → fila → resposta do atendente → entrega e status; assinatura inválida rejeitada; reenvio idempotente (webhook repetido não duplica). Falha de envio aparece como sinal na fila e é recuperável pelo atendente.
+
+## Fase 4. Agents e Knowledge Engine
+
+1. **FAQ direto** (`CONHECIMENTO-DO-FAQ.md`): entrada com `AutoReply` aprovada responde sem chamar a IA; entrada sem aprovação não responde; lacunas aparecem na área Conhecimento e viram rascunho revisável (`HOMOLOGACAO-DO-CONHECIMENTO.md`).
+2. **IA com chave BYOK real da empresa**: uma pergunta responde com a última pergunta apenas; **teste de isolamento** do `CLAUDE.md` (Mauro #1001 x Pedro #1002: a resposta a Mauro usa só o contexto de #1001 e vai só a #1001); falha da IA → política `OnAiPermanentFailure`; rajada longa → alerta ao atendente; **transferência IA → humano** leva histórico e resumo.
+3. **Knowledge híbrido (opcional)** (`CONHECIMENTO-HIBRIDO.md` §4 e §5): só depois de `pgvector` e Ollama reais passarem os testes do §4. Começa em `Evaluate`, sem responder ao cliente.
+
+## Fase 5. Capabilities (`MOTOR-DE-INTEGRACAO.md` §11)
+
+1. Chave `Capabilities__Secrets__*` guardada fora da máquina.
+2. Um **ERP de homologação** (ou simulador na VM): `Testar conexão`, uma leitura, e uma escrita com a idempotência real do sistema (repetir a chave não duplica).
+3. Política de destino de saída: só o CIDR exato liberado pelo operador; certificado inválido recusado; credencial nunca aparece em log nem na interface.
+4. Consulta do agente (ADR 0036, desligada por padrão): ligar só com a operação revisada (`Proven`, quem pode usar) e `TurnMaxDuration` conferida.
+
+## Fase 6. Workflows / Chatbot Visual (`CHATBOT-VISUAL.md`)
+
+O runtime nasce **desligado**. Ligar só depois das fases 2 a 4.
+
+1. **Editor no navegador** (o que o jsdom não cobre): arrastar nós, **conectar saídas com o mouse**, painel do nó, validação com nós em vermelho, simulador com o caminho destacado, navegação por teclado. Em seguida publicar (a versão fica imutável).
+2. **Ativação**: criar com organização, unidade e canal reais (os do tenant); testar a recusa de identificador inventado e de canal de outra organização; nasce desligada; ligar para **um canal de teste com parcela pequena**.
+3. `Workflows__Options__Enabled=true` **só no Worker**, reiniciar o Worker. Conversa nova no canal de teste: entra no fluxo, lista numerada legível, resposta por número/rótulo, janela de 24 h, falha de envio registrada sem reprocessar o fluxo.
+4. **Transferência** do fluxo para a fila real (aviso único, item na fila, atendente vê o histórico) e **entrega ao agente** (resposta única à última pergunta).
+5. **Integração** de um nó com o ERP de homologação (operação pública; falha e timeout seguem a política de falha).
+6. **Drenagem** (ensaio obrigatório antes do piloto): desligar a ativação; `cli.sh workflows status`; deixar uma instância parada esperando resposta; `cli.sh workflows drain --confirm --tenant <slug>`; conferir que a conversa voltou ao agente, que nada foi enviado ao cliente e que o status zerou; só então `Enabled=false` e reinício do Worker.
+7. Retenção (`Retention__Days__FlowInstances`) definida por empresa.
+
+## Fase 7. Segurança, operação e encerramento
+
+1. Backup manual, **ensaio de restauração** e copia externa conferida (`BACKUP-E-RESTAURACAO.md`); nenhum segredo nos logs.
+2. `retention report`, `status.sh`, alertas do monitor; matar o Worker à força e vê-lo voltar.
+3. Atualização simulada (`atualizar.sh`: backup antes, migrations, recriação) e o plano de reversão (restaurar o backup anterior com a versão anterior do código).
+4. Relatório final: lista dos itens PASSOU/FALHOU/NÃO FEITO, com data e evidência.
+
+## Reversão rápida por funcionalidade
+
+| O que | Como desligar |
+|---|---|
+| Fluxos | ativação desligada → drenagem → `Workflows__Options__Enabled=false` (Worker) |
+| FAQ automático | modo `Off` no Knowledge; `AutoReply` desligado por entrada |
+| Consulta do agente ao ERP | `Agents__Options__IntegrationLookupsEnabled=false` |
+| IA do tenant | desligar o agente da fila (conversas vão ao atendente) |
+| Operação de ERP | desativar a definição da capacidade |
+
+## O que continua sem prova (declarado, não escondido)
+
+Docker Compose, Caddy, systemd, ClamAV real, pgvector, Ollama, Meta, OpenAI/Anthropic, ERP, desempenho e memória sob carga, restauração com dados reais, e o arraste/conexão de nós por mouse. Cada um tem sua fase acima; o resultado só vale depois de executado na VM.
