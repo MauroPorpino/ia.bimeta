@@ -65,6 +65,7 @@ preencher "$DEPLOY_DIR/app.env.example" "$DEPLOY_DIR/app.env" \
   "Channels__Secrets__Keys__ch1=$(chave32)" \
   "AiGateway__Secrets__Keys__ai1=$(chave32)" \
   "Capabilities__Secrets__Keys__cp1=$(chave32)" \
+  "Workflows__Secrets__Keys__wf1=$(chave32)" \
   "Conversations__Attachments__Encryption__Keys__an1=$(chave32)" \
   "Agents__Options__KnowledgeGapHashKey=$(chave32)"
 

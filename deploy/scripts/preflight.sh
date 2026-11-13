@@ -63,7 +63,7 @@ if [ -f "$DEPLOY_DIR/.env" ]; then
 fi
 
 if [ -f "$DEPLOY_DIR/app.env" ]; then
-  for par in "Channels__Secrets:32" "AiGateway__Secrets:32" "Capabilities__Secrets:32" "Conversations__Attachments__Encryption:32"; do
+  for par in "Channels__Secrets:32" "AiGateway__Secrets:32" "Capabilities__Secrets:32" "Workflows__Secrets:32" "Conversations__Attachments__Encryption:32"; do
     prefixo="${par%%:*}"
     ( read_env_file "$DEPLOY_DIR/app.env"
       ativo_nome="${prefixo}__ActiveKeyId"
