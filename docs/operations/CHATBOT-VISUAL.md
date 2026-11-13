@@ -62,6 +62,18 @@ Recuperação: uma queda entre a gravação do efeito e a realização é recupe
 - Só conversas **novas** entram. Uma conversa em andamento nunca muda de dono por uma ativação criada depois.
 - Roteiro sugerido: publicar → simular → ativar para um canal/unidade de teste com parcela pequena → ampliar → (reverter = desligar a ativação).
 - **Desligar uma ativação** não afeta instâncias em andamento (terminam na versão em que começaram). **Desligar o runtime** (`Enabled=false` no Worker) suspende as instâncias: antes disso, desligue as ativações e deixe as instâncias terminarem (ou aguarde o prazo de retenção). Religar retoma as suspensas.
+- **A ativação é conferida no servidor**: a organização precisa existir no tenant, a unidade pertencer a ela e o canal pertencer à organização e atender a unidade; caso contrário a criação é recusada (400) e nada é gravado.
+
+### Procedimento de drenagem (desativar fluxos com instâncias ativas)
+
+Sem mecanismo novo: três passos e um comando.
+
+1. **Parar a entrada**: desligue todas as ativações do fluxo (Fluxos → Ativações). Conversas novas voltam ao agente; as em andamento seguem no fluxo.
+2. **Acompanhar**: `sudo ./scripts/cli.sh workflows status` mostra, por estado, as instâncias não terminadas. Repita até zerar (normalmente minutos; o limite é o tempo de espera dos nós de pergunta). Uma instância parada esperando o cliente só termina por resposta, pelo prazo do nó ou pela drenagem.
+3. **Drenar o que sobrar**, quando não puder esperar: `sudo ./scripts/cli.sh workflows drain --confirm [--tenant <slug>]`. Numa só transação, cada instância não terminada é cancelada (`operator-drain`), seus efeitos pendentes são descartados sem envio (variáveis apagadas) e a conversa **volta ao agente**; o comando imprime os totais. Sem `--confirm` nada é alterado.
+4. Só então ponha `Workflows__Options__Enabled=false` e reinicie o Worker (`docker compose restart worker`).
+
+**Recuperação:** a drenagem é definitiva para as instâncias encerradas (o cliente continua com o agente e pode ser transferido normalmente). Para voltar a usar fluxos: `Enabled=true`, reiniciar o Worker e religar a ativação (só conversas novas entram). Um efeito de capacidade externa **ambíguo** nunca é reenviado: ele aparece no histórico da instância para decisão humana, não na drenagem automática.
 
 ## 6. Segurança e privacidade
 
@@ -150,7 +162,6 @@ Interpretador, validador, serializador e simulador (determinismo, ciclos, limite
 - O **resumo de variáveis ao atendente** não é entregue à parte (o histórico da conversa já traz as respostas do cliente).
 - Mensagens de um passo são **juntas em uma**; passo que passe de 4096 caracteres é recusado pelo Conversations e cai na política de falha.
 - O editor foi verificado por testes automatizados (jsdom) e, uma vez, no navegador embutido com uma API SIMULADA (lista, canvas com nós e conexões, painel do nó, validação com nós em vermelho, simulador com o caminho destacado); a verificação com a API real, o arraste de nós e a conexão por mouse ficam para a homologação.
-- A ativação não valida se a unidade/o canal informados existem (o Workflows não referencia Tenancy nem Channels): identificador errado simplesmente não casa nenhuma conversa.
 - Desligar o runtime com instâncias ativas as suspende (ver §5).
 - Métricas do `Meter` são por processo; a visão durável vem do histórico no banco (retenção padrão de 30 dias).
 
@@ -164,4 +175,5 @@ Interpretador, validador, serializador e simulador (determinismo, ciclos, limite
 6. Teste de **integração** com o ERP real (operação pública, escopo da organização, falha/timeout).
 7. Conferir o **editor no navegador com a API real** (arraste de nós, conexão por mouse, painel, simulador) e a acessibilidade por teclado.
 8. Definir os prazos de retenção por empresa (`Retention__Days__FlowInstances`) e revisar o texto de privacidade.
-9. Plano de reversão: desligar a ativação (novas conversas voltam ao agente) e, se necessário, `Workflows__Options__Enabled=false` depois de esvaziar as instâncias.
+9. Plano de reversão: o procedimento de drenagem da §5 (desligar ativações, `workflows status`, `workflows drain --confirm`, `Enabled=false`).
+10. Teste funcional do editor com a API real: `npm run test:e2e` (feito pelo `EditorDeFluxosComApiRealTests` quando há Node); o arraste e a conexão por mouse continuam manuais (item 7).
