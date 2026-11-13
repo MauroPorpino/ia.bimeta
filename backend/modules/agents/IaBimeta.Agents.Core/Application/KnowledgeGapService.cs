@@ -205,13 +205,29 @@ public sealed class KnowledgeGapService
             throw new KnowledgeGapConflictException("faq-conflict", conflito);
         }
 
-        var novo = baseDoRascunho with { Faq = baseDoRascunho.Faq.Append(entrada).ToList() };
-        novo.Validate();
+        // Validação antecipada (falha rápido, sem abrir transação). A base que realmente recebe a entrada é RELIDA dentro da transação, abaixo.
+        var previa = baseDoRascunho with { Faq = baseDoRascunho.Faq.Append(entrada).ToList() };
+        previa.Validate();
 
         var agora = _clock.GetUtcNow();
         var rascunho = await _definitionStore.InTransactionAsync(
             async () =>
             {
+                // Ler-modificar-gravar ATÔMICO: a base lida fora da transação pode já ter recebido a entrada de outra promoção concorrente, e gravar o FAQ inteiro por cima a apagaria em silêncio (a lacuna
+                // ficaria "enviada" sem a entrada no rascunho). Com o bloqueio da definição do tenant, as promoções passam uma por vez e cada uma relê a base já com as anteriores confirmadas.
+                await _definitionStore.LockDefinitionAsync(cancellationToken);
+                var baseAtual = (await _definitions.GetDraftAsync(cancellationToken))?.Content
+                    ?? (await _definitions.GetPublishedAsync(cancellationToken))?.Content
+                    ?? throw new KnowledgeGapConflictException("no-definition", "A empresa ainda não tem definição do agente: publique uma antes de enviar entradas ao FAQ.");
+                var conflitoAtual = FindConflict(baseAtual.Faq, entrada);
+                if (conflitoAtual is not null)
+                {
+                    throw new KnowledgeGapConflictException("faq-conflict", conflitoAtual);
+                }
+
+                var novo = baseAtual with { Faq = baseAtual.Faq.Append(entrada).ToList() };
+                novo.Validate();
+
                 // A decisão primeiro: se outro administrador decidiu a mesma lacuna, o conflito sai antes de qualquer gravação do rascunho, e a transação desfaz tudo.
                 try
                 {

@@ -472,10 +472,22 @@ public sealed class KnowledgeGapsTests(PostgresFixture banco)
         Assert.Equal(KnowledgeGapStatus.Promoted, Assert.Single(await LacunasAsync(a)).Status);
     }
 
+    /// <summary>
+    /// A corrida só aparece quando uma promoção lê a base ANTES de outra confirmar e grava DEPOIS (o rascunho ainda não existia na leitura): a janela é de milissegundos, então uma única rodada passava na maioria das
+    /// execuções e falhava de vez em quando (defeito real: gravar o FAQ inteiro por cima apagava a entrada da outra promoção). Várias rodadas independentes tornam a detecção determinística na prática.
+    /// </summary>
     [Fact]
     public async Task Lacunas_diferentes_enviadas_ao_mesmo_tempo_nunca_perdem_entrada_em_silencio()
     {
-        var a = await CenarioDeAgentes.CriarAsync(banco, "lacrace2");
+        for (var rodada = 0; rodada < 12; rodada++)
+        {
+            await RodadaDePromocoesConcorrentesAsync($"lacrace2r{rodada}");
+        }
+    }
+
+    private async Task RodadaDePromocoesConcorrentesAsync(string slug)
+    {
+        var a = await CenarioDeAgentes.CriarAsync(banco, slug);
         for (var i = 0; i < 4; i++)
         {
             await RegistrarAsync(a, Candidata(a, $"pergunta {i}"));
@@ -484,10 +496,13 @@ public sealed class KnowledgeGapsTests(PostgresFixture banco)
         var lacunas = await LacunasAsync(a);
         var antes = (await a.C.ComoAsync(a.Admin, sp => sp.GetRequiredService<AgentDefinitionService>().GetPublishedAsync()))!.Content.Faq.Count;
 
-        var vencedoras = await Task.WhenAll(lacunas.Select(async (g, i) =>
+        // Largada simultânea: todas as promoções esperam o mesmo sinal, para a janela de leitura-antes-da-confirmação de outra ficar o mais aberta possível.
+        var largada = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var tarefas = lacunas.Select(async (g, i) =>
         {
             try
             {
+                await largada.Task;
                 var r = await ComoAsync(a, a.Admin, s => s.PromoteAsync(g.Id, new PromoteKnowledgeGapRequest($"Entrada {i}?", null, $"Resposta {i}.")));
                 return r is not null;
             }
@@ -495,7 +510,9 @@ public sealed class KnowledgeGapsTests(PostgresFixture banco)
             {
                 return false; // perdeu a corrida do rascunho: conflito explícito, nada gravado por esta
             }
-        }));
+        }).ToList();
+        largada.SetResult();
+        var vencedoras = await Task.WhenAll(tarefas);
 
         var rascunho = await a.C.ComoAsync(a.Admin, sp => sp.GetRequiredService<AgentDefinitionService>().GetDraftAsync());
         var promovidas = (await LacunasAsync(a)).Count(g => g.Status == KnowledgeGapStatus.Promoted);

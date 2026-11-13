@@ -411,6 +411,8 @@ internal sealed class InMemoryDefinitionStore : IAgentDefinitionStore
 
     public Task<T> InTransactionAsync<T>(Func<Task<T>> work, CancellationToken cancellationToken) => work();
 
+    public Task LockDefinitionAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
     public Task SaveAsync(CancellationToken cancellationToken)
     {
         if (FailNextSave)

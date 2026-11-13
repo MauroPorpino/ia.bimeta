@@ -83,6 +83,12 @@ public interface IAgentDefinitionStore : IAgentDefinitionReader
     /// <summary>Roda o trabalho (com várias gravações) numa transação do banco: ou tudo fica, ou nada.</summary>
     Task<T> InTransactionAsync<T>(Func<Task<T>> work, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Bloqueio EXCLUSIVO da definição do tenant até o fim da transação corrente (só vale dentro de <see cref="InTransactionAsync{T}"/>): serializa quem lê o rascunho para alterá-lo e grava o resultado. Sem ele, duas
+    /// alterações que leem a mesma base e gravam o conteúdo INTEIRO se sobrescrevem em silêncio (a segunda apaga a entrada da primeira) quando o rascunho ainda não existia na leitura.
+    /// </summary>
+    Task LockDefinitionAsync(CancellationToken cancellationToken);
+
     /// <summary>Grava tudo numa transação. Alteração concorrente do mesmo ponto de partida: <see cref="AgentDefinitionConflictException"/>.</summary>
     Task SaveAsync(CancellationToken cancellationToken);
 }

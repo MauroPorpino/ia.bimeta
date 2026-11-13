@@ -45,6 +45,19 @@ internal sealed class AgentDefinitionStore : IAgentDefinitionStore
         return resultado;
     }
 
+    public async Task LockDefinitionAsync(CancellationToken cancellationToken)
+    {
+        // Bloqueio consultivo de TRANSAÇÃO (liberado no commit ou rollback), por tenant: o hash é de 64 bits do identificador do tenant com um sal próprio desta finalidade.
+        var chave = $"agents.definition:{_db.CurrentTenantId:N}";
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({chave}, 0))", cancellationToken);
+
+        // Com o bloqueio em mãos, o que este contexto já leu das versões (antes da espera) pode estar defasado, e o EF não atualiza uma entidade já rastreada: solta-as para a próxima leitura vir do banco.
+        foreach (var entrada in _db.ChangeTracker.Entries<AgentDefinitionVersion>().Where(e => e.State == EntityState.Unchanged).ToList())
+        {
+            entrada.State = EntityState.Detached;
+        }
+    }
+
     public async Task SaveAsync(CancellationToken cancellationToken)
     {
         try
