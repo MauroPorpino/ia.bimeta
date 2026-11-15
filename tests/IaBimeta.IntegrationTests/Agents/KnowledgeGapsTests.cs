@@ -473,8 +473,7 @@ public sealed class KnowledgeGapsTests(PostgresFixture banco)
     }
 
     /// <summary>
-    /// A corrida só aparece quando uma promoção lê a base ANTES de outra confirmar e grava DEPOIS (o rascunho ainda não existia na leitura): a janela é de milissegundos, então uma única rodada passava na maioria das
-    /// execuções e falhava de vez em quando (defeito real: gravar o FAQ inteiro por cima apagava a entrada da outra promoção). Várias rodadas independentes tornam a detecção determinística na prática.
+    /// Exercita várias rajadas de promoções sem controlar a ordem. O teste com a trava abaixo força a janela em que a leitura ficava defasada.
     /// </summary>
     [Fact]
     public async Task Lacunas_diferentes_enviadas_ao_mesmo_tempo_nunca_perdem_entrada_em_silencio()
@@ -515,10 +514,102 @@ public sealed class KnowledgeGapsTests(PostgresFixture banco)
         var vencedoras = await Task.WhenAll(tarefas);
 
         var rascunho = await a.C.ComoAsync(a.Admin, sp => sp.GetRequiredService<AgentDefinitionService>().GetDraftAsync());
-        var promovidas = (await LacunasAsync(a)).Count(g => g.Status == KnowledgeGapStatus.Promoted);
+        var promovidas = (await LacunasAsync(a)).Where(g => g.Status == KnowledgeGapStatus.Promoted).Select(g => g.Id).ToHashSet();
         Assert.Contains(true, vencedoras);
-        Assert.Equal(vencedoras.Count(v => v), promovidas); // cada sucesso marcou uma lacuna, e cada lacuna marcada tem a entrada no rascunho
-        Assert.Equal(antes + promovidas, rascunho!.Content.Faq.Count);
+        Assert.Equal(antes + promovidas.Count, rascunho!.Content.Faq.Count);
+        for (var i = 0; i < vencedoras.Length; i++)
+        {
+            Assert.Equal(vencedoras[i], promovidas.Contains(lacunas[i].Id));
+            Assert.Equal(vencedoras[i], rascunho.Content.Faq.Any(f => f.Question == $"Entrada {i}?" && f.Answer == $"Resposta {i}."));
+        }
+    }
+
+    [Fact]
+    public async Task Segunda_promocao_rele_rascunho_quando_a_primeira_ainda_nao_confirmou()
+    {
+        var a = await CenarioDeAgentes.CriarAsync(banco, "lacrace-controlada");
+        await RegistrarAsync(a, Candidata(a, "primeira lacuna"));
+        await RegistrarAsync(a, Candidata(a, "segunda lacuna"));
+        var lacunas = await LacunasAsync(a);
+        var tenant = a.Tenant.TenantId.Value;
+        var travaDeTeste = $"test.faq:{tenant:N}";
+        var travaDaDefinicao = $"agents.definition:{tenant:N}";
+        var trigger = $"test_promote_{tenant:N}";
+
+        await using var observador = new NpgsqlConnection(banco.ConnectionString);
+        await observador.OpenAsync();
+        await using (var instalar = new NpgsqlCommand($$"""
+            CREATE FUNCTION agents.{{trigger}}() RETURNS trigger LANGUAGE plpgsql AS $body$
+            BEGIN
+                PERFORM pg_advisory_xact_lock(hashtextextended('{{travaDeTeste}}', 0));
+                RETURN NEW;
+            END;
+            $body$;
+            CREATE TRIGGER {{trigger}} BEFORE UPDATE ON agents.knowledge_gaps
+                FOR EACH ROW WHEN (OLD.tenant_id = '{{tenant:D}}' AND OLD.status <> NEW.status
+                    AND NEW.status = {{(short)KnowledgeGapStatus.Promoted}})
+                EXECUTE FUNCTION agents.{{trigger}}();
+            """, observador))
+        {
+            await instalar.ExecuteNonQueryAsync();
+        }
+
+        try
+        {
+            using var prazo = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            await using var porta = new NpgsqlConnection(banco.ConnectionString);
+            await porta.OpenAsync(prazo.Token);
+            await using var transacao = await porta.BeginTransactionAsync(prazo.Token);
+            await using var bloquear = new NpgsqlCommand("SELECT pg_advisory_xact_lock(hashtextextended(@chave, 0))", porta, transacao);
+            bloquear.Parameters.AddWithValue("chave", travaDeTeste);
+            await bloquear.ExecuteNonQueryAsync(prazo.Token);
+
+            var primeira = ComoAsync(a, a.Admin, s => s.PromoteAsync(lacunas[0].Id,
+                new PromoteKnowledgeGapRequest("Primeira entrada controlada?", null, "Primeira resposta."), prazo.Token));
+            Task? segunda = null;
+            try
+            {
+                await AguardarPromocoesBloqueadasAsync(observador, travaDeTeste, travaDaDefinicao, 1, prazo.Token);
+                segunda = ComoAsync(a, a.Admin, s => s.PromoteAsync(lacunas[1].Id,
+                    new PromoteKnowledgeGapRequest("Segunda entrada controlada?", null, "Segunda resposta."), prazo.Token));
+                // Sem a correção, a segunda já leu a base antiga e espera no gatilho. Com a correção, espera na definição antes de reler.
+                await AguardarPromocoesBloqueadasAsync(observador, travaDeTeste, travaDaDefinicao, 2, prazo.Token);
+            }
+            finally
+            {
+                await transacao.RollbackAsync();
+                await Task.WhenAll(primeira, segunda ?? Task.CompletedTask);
+            }
+
+            var rascunho = await a.C.ComoAsync(a.Admin, sp => sp.GetRequiredService<AgentDefinitionService>().GetDraftAsync());
+            Assert.Equal(3, rascunho!.Content.Faq.Count);
+            Assert.Contains(rascunho.Content.Faq, f => f.Question == "Primeira entrada controlada?" && f.Answer == "Primeira resposta.");
+            Assert.Contains(rascunho.Content.Faq, f => f.Question == "Segunda entrada controlada?" && f.Answer == "Segunda resposta.");
+            Assert.All(await LacunasAsync(a), g => Assert.Equal((KnowledgeGapStatus.Promoted, rascunho.Number), (g.Status, g.PromotedVersion)));
+        }
+        finally
+        {
+            await using var remover = new NpgsqlCommand($"DROP TRIGGER {trigger} ON agents.knowledge_gaps; DROP FUNCTION agents.{trigger}()", observador);
+            await remover.ExecuteNonQueryAsync();
+        }
+    }
+
+    private static async Task AguardarPromocoesBloqueadasAsync(NpgsqlConnection conexao, string travaDeTeste, string travaDaDefinicao,
+        int esperadas, CancellationToken cancellationToken)
+    {
+        await using var comando = new NpgsqlCommand("""
+            SELECT count(*)
+            FROM pg_locks
+            WHERE locktype = 'advisory' AND NOT granted AND objsubid = 1
+                AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+                AND ((classid::bigint << 32) | objid::bigint) IN (hashtextextended(@teste, 0), hashtextextended(@definicao, 0))
+            """, conexao);
+        comando.Parameters.AddWithValue("teste", travaDeTeste);
+        comando.Parameters.AddWithValue("definicao", travaDaDefinicao);
+        while ((long)(await comando.ExecuteScalarAsync(cancellationToken))! < esperadas)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(10), cancellationToken);
+        }
     }
 
     [Fact]
