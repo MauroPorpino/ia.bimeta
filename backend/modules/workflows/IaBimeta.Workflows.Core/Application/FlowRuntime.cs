@@ -95,6 +95,12 @@ public sealed class FlowRuntime
     /// <summary>Roda a instância até não haver mais o que fazer agora (ou o limite de passadas). Idempotente: pode ser chamado de novo a qualquer momento.</summary>
     public async Task<FlowRunOutcome> RunAsync(Guid instanceId, CancellationToken cancellationToken = default)
     {
+        await using var executionLock = await _store.TryLockExecutionAsync(instanceId, cancellationToken);
+        if (executionLock is null)
+        {
+            return FlowRunOutcome.Yielded;
+        }
+
         for (var tentativa = 0; tentativa < 3; tentativa++)
         {
             try
@@ -116,6 +122,11 @@ public sealed class FlowRuntime
         if (inst is null)
         {
             return FlowRunOutcome.NotFound;
+        }
+
+        if (inst.Status == FlowStatus.Cancelled && inst.FailureCode == "operator-drain")
+        {
+            return FlowRunOutcome.Finished;
         }
 
         var graph = await LoadGraphAsync(inst, cancellationToken);
@@ -525,7 +536,13 @@ public sealed class FlowRuntime
             e.Start();
             await _store.SaveAsync(ct);
             var (sucesso, campos, codigo) = await CallCapabilityAsync(inst, e, ct);
-            e.Complete(sucesso ? EffectState.Done : EffectState.Failed, codigo, Now);
+            var estado = (sucesso, codigo) switch
+            {
+                (true, _) => EffectState.Done,
+                (false, "outcome-unknown") => EffectState.Unknown,
+                _ => EffectState.Failed,
+            };
+            Complete(e, estado, codigo);
             entrada = new CapabilityResultInput(e.Key, sucesso, campos, codigo);
         }
 
@@ -541,6 +558,7 @@ public sealed class FlowRuntime
 
         var conteudo = ReadPayload(e);
         var chave = conteudo.OperationKey ?? string.Empty;
+        var iniciouConsulta = false;
         try
         {
             using var limite = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -559,6 +577,7 @@ public sealed class FlowRuntime
                 parametros[nome] = ToJson(valor, declarados is not null && declarados.TryGetValue(nome, out var tipo) ? tipo : CapabilityParameterType.String);
             }
 
+            iniciouConsulta = true;
             var execucao = await _capabilities.ExecuteAsync(
                 new CapabilityInvocation(chave, parametros, CapabilityCaller.Workflow, null, inst.SessionId, $"wf-{inst.Id:N}-{e.Step}", inst.OrganizationId), limite.Token);
             if (execucao.Status == CapabilityExecutionStatus.Succeeded)
@@ -566,11 +585,14 @@ public sealed class FlowRuntime
                 return (true, Flatten(execucao.Output), null);
             }
 
-            return (false, null, execucao.Status == CapabilityExecutionStatus.Unknown ? "outcome-unknown" : execucao.Error?.Code ?? "failed");
+            var codigo = execucao.Error?.Code;
+            var incerto = execucao.Status == CapabilityExecutionStatus.Unknown || codigo == "timeout"
+                || (execucao.Status == CapabilityExecutionStatus.Cancelled && limite.IsCancellationRequested);
+            return (false, null, incerto ? "outcome-unknown" : codigo ?? "failed");
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            return (false, null, "timeout");
+            return (false, null, iniciouConsulta ? "outcome-unknown" : "timeout");
         }
         catch (AccessDeniedException)
         {

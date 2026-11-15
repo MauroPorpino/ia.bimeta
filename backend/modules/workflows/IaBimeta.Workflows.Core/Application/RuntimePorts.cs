@@ -16,6 +16,9 @@ public interface IFlowRuntimeStore
 
     Task<FlowInstance?> FindInstanceAsync(Guid id, CancellationToken cancellationToken);
 
+    /// <summary>Exclui outra execução e a drenagem até o descarte da trava. Nulo se outra operação a detém.</summary>
+    Task<IAsyncDisposable?> TryLockExecutionAsync(Guid instanceId, CancellationToken cancellationToken);
+
     Task<FlowInstance?> FindActiveBySessionAsync(Guid sessionId, CancellationToken cancellationToken);
 
     Task<int> CountActiveAsync(CancellationToken cancellationToken);

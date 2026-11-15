@@ -37,7 +37,7 @@ public sealed class WorkflowsDbContext : DbContext
     public DbSet<FlowStepRecord> Steps => Set<FlowStepRecord>();
 
     // O EF reavalia esta propriedade a cada execução de consulta (membro do DbContext no filtro global).
-    private TenantId TenantAtual => _contexto.GetRequired().TenantId;
+    internal TenantId TenantAtual => _contexto.GetRequired().TenantId;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

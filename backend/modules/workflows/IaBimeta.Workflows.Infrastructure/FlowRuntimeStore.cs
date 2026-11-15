@@ -43,6 +43,9 @@ internal sealed class FlowRuntimeStore : IFlowRuntimeStore
     public Task<FlowInstance?> FindInstanceAsync(Guid id, CancellationToken cancellationToken) =>
         _db.Instances.FirstOrDefaultAsync(i => i.Id == id, cancellationToken);
 
+    public Task<IAsyncDisposable?> TryLockExecutionAsync(Guid instanceId, CancellationToken cancellationToken) =>
+        FlowExecutionLock.TryAcquireAsync(_db, instanceId, cancellationToken);
+
     public Task<FlowInstance?> FindActiveBySessionAsync(Guid sessionId, CancellationToken cancellationToken) =>
         _db.Instances.FirstOrDefaultAsync(i => i.SessionId == sessionId && i.Status < FlowStatus.Completed, cancellationToken);
 
