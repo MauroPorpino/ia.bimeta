@@ -66,15 +66,18 @@ Recuperação: uma queda entre a gravação do efeito e a realização é recupe
 
 ### Procedimento de drenagem (desativar fluxos com instâncias ativas)
 
-Sem mecanismo novo: três passos e um comando.
+Antes da drenagem, aplique a migração `FlowDrainOutbox` e atualize o comando e todos os Workers que executam fluxos. A trava de execução é compartilhada entre eles.
 
 1. **Parar a entrada**: desligue todas as ativações do fluxo (Fluxos → Ativações). Conversas novas voltam ao agente; as em andamento seguem no fluxo.
-2. **Acompanhar**: `sudo ./scripts/cli.sh workflows status` mostra, por estado, as instâncias não terminadas. Repita até zerar (normalmente minutos; o limite é o tempo de espera dos nós de pergunta). Uma instância parada esperando o cliente só termina por resposta, pelo prazo do nó ou pela drenagem.
-3. **Drenar o que sobrar**, quando não puder esperar: `sudo ./scripts/cli.sh workflows drain --confirm [--tenant <slug>]`. Numa só transação, cada instância não terminada é cancelada (`operator-drain`), seus efeitos pendentes são descartados sem envio (variáveis apagadas) e a conversa **volta ao agente**; o comando imprime os totais. Sem `--confirm` nada é alterado. Depois de confirmar, o comando **avisa o agente** de cada conversa (evento `flow-released-to-agent`, o mesmo do retorno normal): o agente reavalia na hora uma mensagem do cliente que o fluxo não chegou a responder. O aviso é entregue pelo **Worker**, então ele precisa estar no ar (se estiver parado, o aviso fica no outbox e sai quando voltar). Se algum aviso falhar o comando sai com código 1 e lista a conversa; a conversa já é do agente e ele a retoma na próxima mensagem do cliente.
-   - **O que a drenagem não faz:** não reenvia nada (o que já foi enviado ao canal fica como está; só o que ainda estava por enviar é descartado), não apaga mensagens do cliente (ficam no histórico) e é idempotente: repetir não encontra nada ativo e não avisa de novo.
-4. Só então ponha `Workflows__Options__Enabled=false` e reinicie o Worker (`docker compose restart worker`).
+2. **Acompanhar**: `sudo ./scripts/cli.sh workflows status` lista as instâncias em execução ou pendentes de finalização. Uma instância esperando pelo cliente termina por resposta, pelo prazo do nó ou pela drenagem.
+3. **Drenar o que sobrar**, quando não puder esperar: `sudo ./scripts/cli.sh workflows drain --confirm [--tenant <slug>]`. O comando fixa as instâncias no início da transação. Cancela o conjunto selecionado (`operator-drain`), descarta os efeitos pendentes, limpa as variáveis e os conteúdos cifrados e grava no outbox do Workflows a retomada pelo Agents. Sem `--confirm`, o comando recusa a alteração.
+4. Confira `workflows status` de novo. Uma instância criada após a seleção deve terminar ou entrar na próxima drenagem. Para desligar o runtime globalmente, aguarde o status zerar em todas as empresas, ajuste `Workflows__Options__Enabled=false` em `deploy/app.env` e, em `deploy`, recrie o Worker com `docker compose up -d --no-deps --force-recreate worker`. O relay de retomada do Agents continua operando com os fluxos desligados.
 
-**Recuperação:** a drenagem é definitiva para as instâncias encerradas (o cliente continua com o agente e pode ser transferido normalmente). Para voltar a usar fluxos: `Enabled=true`, reiniciar o Worker e religar a ativação (só conversas novas entram). Um efeito de capacidade externa **ambíguo** nunca é reenviado: ele aparece no histórico da instância para decisão humana, não na drenagem automática.
+Se houver execução ativa ou efeito iniciado sem resultado confirmado, a drenagem inteira é recusada. Mantenha o executor habilitado para terminar ou recuperar o efeito e repita. Se houver transferência por falha sem finalização, confira o atendimento no ContactCenter antes de repetir. Mensagens já registradas no Conversations seguem o envio normal. Efeitos concluídos e efeitos com resultado incerto mantêm seus estados no histórico. Uma consulta externa ambígua segue a recuperação existente e seu resultado deve ser reconciliado no provedor.
+
+Se a confirmação do comando se perder após o commit, consulte `workflows status` e repita o comando. O evento de retomada já gravado será entregue pelo Worker. O comando operacional `status` monitora o outbox `workflows`.
+
+Para voltar a usar fluxos, ajuste `Workflows__Options__Enabled=true` em `app.env`, recrie o Worker com o mesmo comando e religue as ativações para conversas novas.
 
 ## 6. Segurança e privacidade
 
@@ -105,7 +108,7 @@ Workflows__Options__ExecutorParallelism=4
 Workflows__Options__Limits__MaxNodes=200
 ```
 
-Ordem para ligar em um ambiente: (1) aplicar as migrations (`migrate`: Conversations e Workflows têm migrations novas) em Api e Worker; (2) configurar `Workflows__Secrets__*` **no Worker** (e a política de saída/segredos do Capabilities, se houver nós de integração); (3) publicar um fluxo e criar a ativação **desligada**; (4) `Workflows__Options__Enabled=true` no Worker e reiniciar; (5) ligar a ativação para um canal/unidade de teste. O Worker precisa do mesmo banco e das mesmas chaves do Capabilities. O Api não executa fluxos.
+Ordem para ligar em um ambiente: (1) aplicar as migrations (`migrate`: Conversations e Workflows têm migrations novas) em Api e Worker; (2) configurar `Workflows__Secrets__*` **no Worker** (e a política de saída/segredos do Capabilities, se houver nós de integração); (3) publicar um fluxo e criar a ativação **desligada**; (4) ajustar `Workflows__Options__Enabled=true` em `app.env` e recriar o Worker conforme a §5; (5) ligar a ativação para um canal/unidade de teste. O Worker precisa do mesmo banco e das mesmas chaves do Capabilities. O Api não executa fluxos.
 
 ## 8. API (`/workflows`)
 

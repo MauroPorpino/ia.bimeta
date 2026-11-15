@@ -57,6 +57,7 @@ public sealed class WorkflowsDbContext : DbContext
 
         // Inbox do consumidor (BOUNDARIES.md §12.1): a idempotência por EventId do que este módulo consome do Conversations.
         modelBuilder.ConfigureInbox();
+        modelBuilder.ConfigureOutbox();
     }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)

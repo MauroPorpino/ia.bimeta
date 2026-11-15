@@ -153,6 +153,8 @@ public static class WorkerHost
             opcoes => builder.Configuration.GetSection("Workflows:Options").Bind(opcoes),
             segredos => builder.Configuration.GetSection("Workflows:Secrets").Bind(segredos));
         builder.Services.AddScoped<IFlowHandoffPort, FlowHandoffAdapter>();
+        // O Agents ainda precisa receber as devoluções confirmadas antes de desligar o runtime.
+        builder.Services.AddOutboxRelay<WorkflowsDbContext>();
 
         // O Knowledge (ADR 0034): o Worker vetoriza o conhecimento publicado (SemanticIndexer) e, no Pacote 2, busca por similaridade no turno. Desligado por padrão (Knowledge:Semantic:Enabled).
         builder.Services.AddOllamaProvider(ollama => builder.Configuration.GetSection("Knowledge:Providers:Ollama").Bind(ollama));
@@ -180,6 +182,7 @@ public static class WorkerHost
         builder.Services.AddInboxRetention<AgentsDbContext>("agents");
         builder.Services.AddAgentsRetention();
         builder.Services.AddWorkflowsRetention();
+        builder.Services.AddOutboxRetention<WorkflowsDbContext>("workflows");
         builder.Services.AddInboxRetention<ContactCenterDbContext>("contact_center");
         builder.Services.AddHostedService<RetentionSchedulerService>();
         builder.Services.AddHostedService<ContactCenterReconciliationService>();

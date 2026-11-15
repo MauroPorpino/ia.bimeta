@@ -4,6 +4,7 @@ using IaBimeta.ContactCenter.Infrastructure;
 using IaBimeta.Conversations.Infrastructure;
 using IaBimeta.Messaging;
 using IaBimeta.SharedKernel;
+using IaBimeta.Workflows.Infrastructure;
 
 namespace IaBimeta.Api.Operations;
 
@@ -19,6 +20,7 @@ internal static class OperationsComposition
 
         services.AddOutboxHealth<ConversationsDbContext>("conversations");
         services.AddOutboxHealth<ChannelsDbContext>("channels");
+        services.AddOutboxHealth<WorkflowsDbContext>("workflows");
         services.AddChannelsHealth();
         services.AddAgentsHealth();
         services.AddContactCenterHealth();

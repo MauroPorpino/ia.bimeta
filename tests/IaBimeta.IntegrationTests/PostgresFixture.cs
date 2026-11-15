@@ -204,6 +204,7 @@ public sealed class PostgresFixture : IAsyncLifetime
         if (mensageria)
         {
             colecao.AddOutboxRelay<ConversationsDbContext>();
+            colecao.AddOutboxRelay<IaBimeta.Workflows.Infrastructure.WorkflowsDbContext>();
         }
 
         // O AiGateway (C1.4), como no host: catálogo SINTÉTICO (nenhum provedor real), chave mestra própria de teste (aleatória a cada execução) e limites padrão generosos. Nenhum

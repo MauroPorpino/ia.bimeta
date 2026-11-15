@@ -50,6 +50,7 @@ public static class WorkflowsInfrastructureExtensions
         services.AddScoped<IWorkflowStore, WorkflowStore>();
         services.AddScoped<IFlowRuntimeStore, FlowRuntimeStore>();
         services.AddScoped<IFlowOperationsStore, FlowOperationsStore>();
+        services.AddScoped<FlowDrain>();
         services.AddScoped<WorkflowsAuthorizer>();
         services.AddScoped(p => new WorkflowDefinitionService(
             p.GetRequiredService<WorkflowsAuthorizer>(), p.GetRequiredService<IWorkflowStore>(), p.GetService<ICapabilityCatalog>(), p.GetRequiredService<WorkflowsOptions>(),

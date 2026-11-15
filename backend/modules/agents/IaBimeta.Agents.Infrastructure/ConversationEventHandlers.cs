@@ -300,3 +300,14 @@ internal sealed class FlowReleasedToAgentHandler : EventHandlerBase<FlowReleased
     protected override Task<HandlerResult> HandleAsync(EventEnvelope envelope, FlowReleasedToAgentV1 payload, CancellationToken cancellationToken) =>
         TurnHandling.RunAsync(_inbox, envelope, payload.SessionId, token => _scheduler.OnReturnedToAiAsync(payload.SessionId, token), cancellationToken);
 }
+
+/// <summary>Retoma a sessão mesmo quando o evento de entrada já foi consumido enquanto o fluxo era o dono.</summary>
+internal sealed class FlowDrainedToAgentHandler(InboxGate<AgentsDbContext> inbox, TurnScheduler scheduler) : EventHandlerBase<FlowDrainedToAgentV1>
+{
+    public override string EventType => FlowDrainedToAgentV1.EventType;
+
+    public override int EventVersion => 1;
+
+    protected override Task<HandlerResult> HandleAsync(EventEnvelope envelope, FlowDrainedToAgentV1 payload, CancellationToken cancellationToken) =>
+        TurnHandling.RunAsync(inbox, envelope, payload.SessionId, token => scheduler.OnReturnedToAiAsync(payload.SessionId, token), cancellationToken);
+}

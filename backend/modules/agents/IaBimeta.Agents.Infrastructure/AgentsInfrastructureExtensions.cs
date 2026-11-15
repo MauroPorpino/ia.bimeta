@@ -77,6 +77,7 @@ public static class AgentsInfrastructureExtensions
         services.AddEventHandler<SessionTransferredHandler>();
         services.AddEventHandler<ConversationLocaleChangedHandler>();
         services.AddEventHandler<FlowReleasedToAgentHandler>();
+        services.AddEventHandler<FlowDrainedToAgentHandler>();
 
         // A porta de conhecimento do chatbot visual (ADR 0037): o nó "knowledge" reaproveita o FAQ aprovado e o índice semântico, sem outro mecanismo de conhecimento.
         services.AddScoped<IFlowKnowledgeLookup, FlowKnowledgeLookup>();

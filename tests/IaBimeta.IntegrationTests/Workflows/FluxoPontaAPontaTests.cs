@@ -1,8 +1,10 @@
 using IaBimeta.Agents.Domain;
+using IaBimeta.Api.Operations;
 using IaBimeta.Capabilities.Application;
 using IaBimeta.Capabilities.Contracts;
 using IaBimeta.Capabilities.Domain;
 using IaBimeta.Capabilities.Infrastructure;
+using IaBimeta.Capabilities.Infrastructure.Outbound;
 using IaBimeta.Conversations.Contracts;
 using IaBimeta.IntegrationTests.Agents;
 using IaBimeta.SharedKernel;
@@ -436,7 +438,7 @@ public sealed class FluxoPontaAPontaTests(PostgresFixture banco)
         {
             var db = sp.GetRequiredService<WorkflowsDbContext>();
             await db.Database.ExecuteSqlRawAsync("UPDATE workflows.flow_effects SET state = 1, completed_at = NULL, result_code = NULL WHERE tenant_id = {0}", a.Tenant.TenantId.Value);
-            await db.Database.ExecuteSqlRawAsync("UPDATE workflows.flow_instances SET next_run_at = now() - interval '1 minute', lease_owner = NULL, lease_expires_at = NULL WHERE tenant_id = {0}", a.Tenant.TenantId.Value);
+            await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE workflows.flow_instances SET next_run_at = {a.Relogio.GetUtcNow()}, lease_owner = NULL, lease_expires_at = NULL WHERE tenant_id = {a.Tenant.TenantId.Value}");
             return 0;
         });
         await ProcessarAsync(a, 3);
@@ -548,6 +550,71 @@ public sealed class FluxoPontaAPontaTests(PostgresFixture banco)
     }
 
     [Fact]
+    public async Task Drenagem_recusa_execucao_ativa_e_nao_reenvia_mensagem_ou_consulta_ja_realizada()
+    {
+        var a = await CenarioAsync("fluxo-drena-em-voo");
+        var host = await OperacaoDeLeituraAsync(a);
+        var preco = Preco();
+        var continua = preco with
+        {
+            Nodes = [.. preco.Nodes.Where(n => n.Id != "fim"),
+                new FlowNode("fim", NodeType.Question, new NodeConfig(Prompt: "Quer consultar outro exame?", Variable: "exame")),
+                new FlowNode("encerra", NodeType.End)],
+            Edges = [.. preco.Edges, E("fim", "answered", "encerra"), E("fim", "invalid", "encerra")],
+        };
+        await PublicarAsync(a, "preco", continua);
+        await AtivarAsync(a, "preco", OnFailurePolicy.Agent);
+        var r = await a.EntrarAsync("cliente", "oi");
+        await ProcessarAsync(a);
+        var instancia = Assert.Single(await InstanciasAsync(a));
+        await a.EntrarAsync("cliente", "glicose");
+
+        var iniciou = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var concluir = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        banco.Erp.Roteiro = req =>
+        {
+            iniciou.TrySetResult();
+            concluir.Task.GetAwaiter().GetResult();
+            return ErpSimulado.RoteiroPadrao(req);
+        };
+
+        Task<FlowRunOutcome> RodarAsync() => a.C.ComoAsync(a.C.ContextoDeSistema,
+            sp => sp.GetRequiredService<FlowRuntime>().RunAsync(instancia.Id));
+
+        var execucao = Task.Run(RodarAsync);
+        try
+        {
+            await iniciou.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Contains(await EfeitosAsync(a), e => e.Kind == EffectKind.CallCapability && e.State == EffectState.InFlight);
+            var saida = new StringWriter();
+            Assert.Equal(1, await WorkflowsCommand.ExecuteAsync(a.Servicos, true, a.Tenant.Slug, saida));
+            Assert.Contains("execução ativa", saida.ToString());
+            Assert.Equal(AutomationOwner.Flow, (await DecisaoAsync(a, r.SessionId))!.Owner);
+        }
+        finally
+        {
+            concluir.TrySetResult();
+        }
+
+        Assert.Equal(FlowRunOutcome.Waiting, await execucao);
+        var realizados = (await EfeitosAsync(a)).Where(e => e.State == EffectState.Done).ToArray();
+        Assert.Contains(realizados, e => e.Kind == EffectKind.CallCapability);
+        Assert.Contains(realizados, e => e.Kind == EffectKind.SendMessage);
+        var antes = await BotAsync(a, r.SessionId);
+
+        Assert.Equal(0, await WorkflowsCommand.ExecuteAsync(a.Servicos, true, a.Tenant.Slug, new StringWriter()));
+        Assert.Equal(FlowRunOutcome.Finished, await RodarAsync());
+        Assert.Equal(AutomationOwner.Agent, (await DecisaoAsync(a, r.SessionId))!.Owner);
+        Assert.Single(banco.Erp.De(host));
+        Assert.Equal(antes.Select(m => m.Id), (await BotAsync(a, r.SessionId)).Select(m => m.Id));
+        foreach (var realizado in realizados)
+        {
+            var preservado = Assert.Single(await EfeitosAsync(a), e => e.Id == realizado.Id);
+            Assert.Equal((EffectState.Done, realizado.ResultCode, realizado.CompletedAt, ""), (preservado.State, preservado.ResultCode, preservado.CompletedAt, preservado.PayloadCipher));
+        }
+    }
+
+    [Fact]
     public async Task Falha_do_ERP_segue_a_porta_de_falha_do_fluxo_sem_transferir_nem_chamar_o_modelo()
     {
         var a = await CenarioAsync("fluxo-erp-falha");
@@ -564,6 +631,25 @@ public sealed class FluxoPontaAPontaTests(PostgresFixture banco)
         Assert.Equal(FlowStatus.Completed, Assert.Single(await InstanciasAsync(a)).Status);
         Assert.Equal(HandlingMode.AiAutonomous, (await a.C.SessaoAsync(r.SessionId))!.HandlingMode);
         Assert.Empty(a.PedidosAoModelo);
+    }
+
+    [Fact]
+    public async Task Timeout_depois_da_chamada_ao_ERP_preserva_resultado_incerto()
+    {
+        var a = await CenarioAsync("fluxo-erp-timeout");
+        var host = await OperacaoDeLeituraAsync(a);
+        banco.Erp.Roteiro = _ => throw new OutboundTimeoutException();
+        await PublicarAsync(a, "preco", Preco());
+        await AtivarAsync(a, "preco", OnFailurePolicy.Agent);
+        var r = await a.EntrarAsync("cliente", "oi");
+        await ProcessarAsync(a);
+        await a.EntrarAsync("cliente", "glicose");
+        await ProcessarAsync(a);
+
+        var efeito = Assert.Single(await EfeitosAsync(a), e => e.Kind == EffectKind.CallCapability);
+        Assert.Equal((EffectState.Unknown, "outcome-unknown"), (efeito.State, efeito.ResultCode));
+        Assert.Single(banco.Erp.De(host));
+        Assert.Contains("Não consegui consultar o preço agora.", (await BotAsync(a, r.SessionId)).Select(m => m.Text));
     }
 
     [Fact]
@@ -586,8 +672,12 @@ public sealed class FluxoPontaAPontaTests(PostgresFixture banco)
             var db = sp.GetRequiredService<WorkflowsDbContext>();
             await db.Database.ExecuteSqlRawAsync("UPDATE workflows.flow_effects SET state = 2, completed_at = NULL, result_code = NULL WHERE kind = 2 AND tenant_id = {0}", a.Tenant.TenantId.Value);
             await db.Database.ExecuteSqlRawAsync("UPDATE workflows.flow_effects SET state = 6 WHERE kind <> 2 AND tenant_id = {0} AND step > (SELECT step FROM workflows.flow_effects WHERE kind = 2 AND tenant_id = {0} LIMIT 1)", a.Tenant.TenantId.Value);
-            await db.Database.ExecuteSqlRawAsync(
-                "UPDATE workflows.flow_instances SET status = 3, node_id = 'consulta', pending_effect_key = (SELECT key FROM workflows.flow_effects WHERE kind = 2 AND tenant_id = {0} LIMIT 1), ended_at = NULL, next_run_at = now() - interval '1 minute', lease_owner = NULL, lease_expires_at = NULL, failure_code = NULL WHERE tenant_id = {0}", a.Tenant.TenantId.Value);
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                UPDATE workflows.flow_instances SET status = 3, node_id = 'consulta',
+                    pending_effect_key = (SELECT key FROM workflows.flow_effects WHERE kind = 2 AND tenant_id = {a.Tenant.TenantId.Value} LIMIT 1),
+                    ended_at = NULL, next_run_at = {a.Relogio.GetUtcNow()}, lease_owner = NULL, lease_expires_at = NULL, failure_code = NULL
+                WHERE tenant_id = {a.Tenant.TenantId.Value}
+                """);
             await db.Database.ExecuteSqlRawAsync("UPDATE workflows.routing_decisions SET owner = 2 WHERE tenant_id = {0}", a.Tenant.TenantId.Value);
             return 0;
         });

@@ -43,6 +43,7 @@ internal static class RetentionComposition
         services.AddAttachmentRetention();
         services.AddSingleton<IRetentionAuditSink, RetentionAuditSink>();
         services.AddOutboxRetention<ChannelsDbContext>("channels");
+        services.AddOutboxRetention<WorkflowsDbContext>("workflows");
         services.AddInboxRetention<ChannelsDbContext>("channels");
         services.AddInboxRetention<AgentsDbContext>("agents");
         services.AddAgentsRetention();
