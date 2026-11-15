@@ -47,6 +47,7 @@ internal static class RetentionInventory
         ["agents.semantic_decisions"] = (DataClass.Technical, "decisões da resposta por similaridade (ADR 0034): só números e códigos por turno (similaridade, desfecho, latência), nenhum texto de cliente"),
         ["agents.faq_suggestions"] = (DataClass.Technical, "sugestões da IA local para o FAQ (ADR 0034), conteúdo derivado de conversas e já redigido de dados pessoais; só as JÁ DECIDIDAS expiram (90 dias); as pendentes esperam a revisão"),
         ["workflows.inbox_message"] = (DataClass.Technical, "marcas de idempotência (só identificadores)"),
+        ["workflows.outbox_message"] = (DataClass.Technical, "retomada do Agents após a drenagem de fluxos (ADR 0038): só o identificador da sessão; mortos ficam até reenfileirar ou descartar com autorização"),
         ["workflows.flow_instances"] = (DataClass.Technical, "instâncias de fluxo do chatbot visual (ADR 0037 e 0038) JÁ ENCERRADAS: só identificadores, estados e códigos (as variáveis e o conteúdo dos efeitos são apagados no encerramento); as ativas nunca expiram por prazo"),
         ["workflows.flow_steps"] = (DataClass.Technical, "passos de uma instância de fluxo (nó e desfecho): só identificadores e códigos"),
         ["workflows.flow_effects"] = (DataClass.Technical, "efeitos de uma instância de fluxo (tipo, estado e código); o conteúdo cifrado é apagado no encerramento"),

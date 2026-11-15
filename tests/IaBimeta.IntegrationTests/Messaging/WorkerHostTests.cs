@@ -207,7 +207,7 @@ public sealed class WorkerHostTests(PostgresFixture banco)
         Assert.Contains("AgentsReconciliationService", servicos);
         await using var escopo = worker.Services.CreateAsyncScope();
 
-        // Os handlers do ContactCenter (4: três projeções de estado e o sinal de falha de envio), os do Agents (8: os sete de estado e o da liberação do fluxo ao agente) e os do Channels (3: as duas entradas do Inbox do provedor e o Sender): cada um só age no banco do próprio módulo (o Channels também chama o Conversations pelos
+        // Os handlers do ContactCenter (4: três projeções de estado e o sinal de falha de envio), os do Agents (9: os sete de estado, o da liberação do fluxo ao agente e o da retomada após a drenagem) e os do Channels (3: as duas entradas do Inbox do provedor e o Sender): cada um só age no banco do próprio módulo (o Channels também chama o Conversations pelos
         // Contracts), e o ContactCenter e o Agents consomem o mesmo evento, cada um com o inbox dele.
         var tipos = escopo.ServiceProvider.GetServices<IEventHandler>().Select(h => $"{h.EventType}/{h.EventVersion}").OrderBy(t => t, StringComparer.Ordinal).ToList();
         Assert.Equal(
@@ -229,6 +229,7 @@ public sealed class WorkerHostTests(PostgresFixture banco)
                 "conversations.session-closed/1",
                 "conversations.session-transferred/1",
                 "conversations.session-transferred/1",
+                "workflows.flow-drained-to-agent/1",
             },
             tipos);
 
@@ -238,7 +239,7 @@ public sealed class WorkerHostTests(PostgresFixture banco)
         Assert.Single(tipos, t => t.StartsWith("conversations.outbound-message-requested", StringComparison.Ordinal));
 
         // Dois relays: o do Conversations (os eventos de estado) e o do Channels (o Inbox do provedor).
-        Assert.Equal(new[] { "ChannelsDbContext", "ConversationsDbContext" }, worker.Services.GetServices<IOutboxRelay>().Select(r => r.Name).OrderBy(n => n, StringComparer.Ordinal).ToArray());
+        Assert.Equal(new[] { "ChannelsDbContext", "ConversationsDbContext", "WorkflowsDbContext" }, worker.Services.GetServices<IOutboxRelay>().Select(r => r.Name).OrderBy(n => n, StringComparer.Ordinal).ToArray());
         await Task.CompletedTask;
     }
 

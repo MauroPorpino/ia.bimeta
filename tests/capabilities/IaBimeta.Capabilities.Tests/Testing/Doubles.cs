@@ -170,7 +170,18 @@ internal sealed class InMemoryExecutions : IExecutionStore
 
     public List<CapabilityExecution> Rows { get; }
 
-    private IEnumerable<CapabilityExecution> Mine => Rows.Where(e => e.TenantId == _context.GetRequired().TenantId);
+    // Instantâneo sob a MESMA trava de TryAddAsync: execuções simultâneas acrescentam linhas enquanto outras contam as em andamento, e enumerar a lista viva falhava com "Collection was modified" (defeito do dublê, não do código sob teste).
+    private IEnumerable<CapabilityExecution> Mine
+    {
+        get
+        {
+            var tenant = _context.GetRequired().TenantId;
+            lock (_lock)
+            {
+                return Rows.Where(e => e.TenantId == tenant).ToList();
+            }
+        }
+    }
 
     public Task<(bool Added, CapabilityExecution Execution)> TryAddAsync(CapabilityExecution execution, CancellationToken cancellationToken)
     {
