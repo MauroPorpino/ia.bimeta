@@ -1,5 +1,7 @@
 # Roteiro único de homologação da V1 (13/11/2026)
 
+> **Versão candidata à homologação (15/11/2026):** branch `feature/mvp-c-ia-minima`, código até o commit `4eb19a7` (inclui `207ed6e`, `ed0719d` e a consolidação das correções da auditoria do Codex, aprovada tecnicamente). Gate do backend verde nesse commit; nada foi publicado (sem push) nem integrado à `main`. Implante **exatamente** esse commit (`git rev-parse HEAD` na VM) e registre-o no relatório da homologação. Mudança de código depois dele é nova candidata.
+
 Sequência para sair do código na branch `feature/mvp-c-ia-minima` até a V1 homologada numa **VM Ubuntu de teste**, cobrindo ContactCenter, Agents, Knowledge Engine, Capabilities e Workflows. Cada fase aponta para o documento de detalhe; **não repete** o que já está lá. Regra geral: **não avance de fase com um item falhando**; registre o resultado de cada item (data, quem, evidência).
 
 **O que já está provado (Windows, sem infraestrutura externa):** gate automático (backend e frontend verdes), testes de API com PostgreSQL real, teste funcional do editor de fluxos com a API real (`EditorDeFluxosComApiRealTests`). **O que nada disso prova:** Docker/Caddy/systemd, ClamAV real, pgvector/Ollama, Meta, OpenAI, ERP, navegador.
