@@ -52,10 +52,10 @@ O runtime nasce **desligado**. Ligar só depois das fases 2 a 4.
 
 1. **Editor no navegador** (o que o jsdom não cobre): arrastar nós, **conectar saídas com o mouse**, painel do nó, validação com nós em vermelho, simulador com o caminho destacado, navegação por teclado. Em seguida publicar (a versão fica imutável).
 2. **Ativação**: criar com organização, unidade e canal reais (os do tenant); testar a recusa de identificador inventado e de canal de outra organização; nasce desligada; ligar para **um canal de teste com parcela pequena**.
-3. `Workflows__Options__Enabled=true` **só no Worker**, reiniciar o Worker. Conversa nova no canal de teste: entra no fluxo, lista numerada legível, resposta por número/rótulo, janela de 24 h, falha de envio registrada sem reprocessar o fluxo.
+3. `Workflows__Options__Enabled=true` **só no Worker**: ajustar em `deploy/app.env` e **recriar** o Worker (`docker compose up -d --no-deps --force-recreate worker`; um simples `restart` não relê o `app.env`). Conversa nova no canal de teste: entra no fluxo, lista numerada legível, resposta por número/rótulo, janela de 24 h, falha de envio registrada sem reprocessar o fluxo.
 4. **Transferência** do fluxo para a fila real (aviso único, item na fila, atendente vê o histórico) e **entrega ao agente** (resposta única à última pergunta).
 5. **Integração** de um nó com o ERP de homologação (operação pública; falha e timeout seguem a política de falha).
-6. **Drenagem** (ensaio obrigatório antes do piloto): desligar a ativação; `cli.sh workflows status`; deixar uma instância parada esperando resposta; `cli.sh workflows drain --confirm --tenant <slug>`; conferir que a conversa voltou ao agente, que nada foi enviado ao cliente e que o status zerou; só então `Enabled=false` e reinício do Worker.
+6. **Drenagem** (ensaio obrigatório antes do piloto): desligar a ativação; `cli.sh workflows status`; deixar uma instância parada esperando resposta; `cli.sh workflows drain --confirm --tenant <slug>`; conferir que a conversa voltou ao agente, que nada foi enviado ao cliente e que o status zerou; só então `Enabled=false` em `app.env` e recriação do Worker. Antes: `migrate` aplicou `FlowDrainOutbox` e o CLI e **todos** os Workers estão na versão nova. A drenagem é **recusada por inteiro** se houver execução ativa ou efeito em voo (repita depois); a retomada do Agents sai pelo relay do outbox do Workflows mesmo com o runtime desligado, e sobrevive a queda do CLI depois do commit.
 7. Retenção (`Retention__Days__FlowInstances`) definida por empresa.
 
 ## Fase 7. Segurança, operação e encerramento
@@ -69,7 +69,7 @@ O runtime nasce **desligado**. Ligar só depois das fases 2 a 4.
 
 | O que | Como desligar |
 |---|---|
-| Fluxos | ativação desligada → drenagem → `Workflows__Options__Enabled=false` (Worker) |
+| Fluxos | ativação desligada → drenagem → `Workflows__Options__Enabled=false` em `app.env` e recriar o Worker |
 | FAQ automático | modo `Off` no Knowledge; `AutoReply` desligado por entrada |
 | Consulta do agente ao ERP | `Agents__Options__IntegrationLookupsEnabled=false` |
 | IA do tenant | desligar o agente da fila (conversas vão ao atendente) |
