@@ -1,3 +1,4 @@
+using IaBimeta.Conversations.Contracts.Commands;
 using IaBimeta.SharedKernel;
 using IaBimeta.Tenancy.Contracts.Queries;
 using IaBimeta.Workflows.Core.Domain;
@@ -15,6 +16,9 @@ namespace IaBimeta.Api.Operations;
 internal static class WorkflowsCommand
 {
     public const string Verb = "workflows";
+
+    /// <summary>A origem do contexto de SISTEMA com que a drenagem avisa o agente (sem usuário; o tenant vem da instância encerrada, nunca de argumento livre).</summary>
+    internal const string Origin = "workflows-drain";
 
     internal const string Usage = "Uso: workflows status | workflows drain --confirm [--tenant <slug>]";
 
@@ -97,6 +101,7 @@ internal static class WorkflowsCommand
 
         var agora = DateTimeOffset.UtcNow;
         await using var transacao = await db.Database.BeginTransactionAsync(cancellationToken);
+        var afetadas = await ativas().Select(i => new { i.TenantId, i.SessionId }).Distinct().ToListAsync(cancellationToken);
         var ids = ativas().Select(i => i.Id);
         var sessoes = ativas().Select(i => i.SessionId);
 
@@ -113,6 +118,35 @@ internal static class WorkflowsCommand
         await transacao.CommitAsync(cancellationToken);
 
         await output.WriteLineAsync($"Drenagem concluída: {instancias} instância(s) encerrada(s), {decisoes} conversa(s) devolvida(s) ao agente, {efeitos} efeito(s) descartado(s).");
+
+        // Avisa o agente: SEM este sinal ele só reavalia a conversa na próxima mensagem do cliente, e uma mensagem que chegou enquanto o fluxo era o dono (e que o fluxo, já cancelado, nunca respondeu) ficaria sem
+        // resposta em silêncio. O comando é o mesmo que o runtime usa ao devolver uma conversa; é idempotente (o Agents reavalia o estado real e responde uma só vez), então repetir é seguro.
+        var falhas = 0;
+        foreach (var porEmpresa in afetadas.GroupBy(a => a.TenantId))
+        {
+            await using var escopoEmpresa = root.CreateAsyncScope();
+            escopoEmpresa.ServiceProvider.GetRequiredService<RequestContextHolder>().Set(new RequestContext(porEmpresa.Key, Origin));
+            var comandos = escopoEmpresa.ServiceProvider.GetRequiredService<IFlowCommands>();
+            foreach (var sessao in porEmpresa.Select(a => a.SessionId).Distinct())
+            {
+                try
+                {
+                    await comandos.ReleaseSessionToAgentAsync(new ReleaseFlowCommand(sessao, "operator-drain"), cancellationToken);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    falhas++;
+                    await output.WriteLineAsync($"  AVISO: não foi possível avisar o agente sobre a conversa {sessao:N} ({ex.GetType().Name}). A conversa já é do agente e ele a retoma na próxima mensagem do cliente.");
+                }
+            }
+        }
+
+        if (falhas > 0)
+        {
+            await output.WriteLineAsync($"{falhas} conversa(s) sem o aviso imediato ao agente: confira com o atendimento se há mensagem do cliente sem resposta.");
+            return 1;
+        }
+
         return 0;
     }
 }

@@ -1,6 +1,9 @@
 using IaBimeta.Api.Operations;
 using IaBimeta.Conversations.Contracts;
 using IaBimeta.IntegrationTests.Api;
+using IaBimeta.IntegrationTests.Conversations;
+using IaBimeta.IntegrationTests.ContactCenter;
+using IaBimeta.IntegrationTests.Messaging;
 using IaBimeta.Workflows.Contracts;
 using IaBimeta.Workflows.Core.Domain;
 using IaBimeta.Workflows.Infrastructure;
@@ -87,5 +90,64 @@ public sealed class DrenagemDeFluxosTests(PostgresFixture banco)
         Assert.Equal(0, await WorkflowsCommand.ExecuteAsync(api.Services, drain: true, a.Slug, repetida));
         Assert.Contains("0 instância(s) encerrada(s)", repetida.ToString());
         Assert.Equal(1, await WorkflowsCommand.ExecuteAsync(api.Services, drain: true, "empresa-que-nao-existe", new StringWriter()));
+    }
+
+    /// <summary>
+    /// A conversa que o fluxo possuía volta ao agente COM o aviso do Conversations (<c>flow-released-to-agent</c>): sem ele o Agents só reavaliaria na próxima mensagem do cliente, e uma mensagem recebida enquanto o fluxo era
+    /// o dono (e que ele, já cancelado, nunca respondeu) ficaria sem resposta. Um aviso por conversa, nenhum para outra empresa e nenhum ao repetir. O que já foi enviado ao canal (efeito concluído) não é tocado.
+    /// </summary>
+    [Fact]
+    public async Task A_drenagem_avisa_o_agente_uma_vez_por_conversa_e_so_da_empresa_pedida_e_nao_toca_no_que_ja_foi_enviado()
+    {
+        banco.RelogioDaMensageria.Sincronizar();
+        var a = await CenarioDeConversas.CriarAsync(banco, "drena-aviso-a", mensageria: true);
+        var b = await CenarioDeConversas.CriarAsync(banco, "drena-aviso-b", mensageria: true);
+        var sessaoA = await a.NovaConversaAsync();
+        var sessaoB = await b.NovaConversaAsync();
+        var enviadoA = Guid.Empty;
+
+        async Task SemearAsync(CenarioDeConversas c, Guid sessao, bool comEfeitoEnviado)
+        {
+            await using var escopo = banco.NovoEscopo(PostgresFixture.Contexto(c.Tenant));
+            var db = escopo.ServiceProvider.GetRequiredService<WorkflowsDbContext>();
+            var agora = DateTimeOffset.UtcNow;
+            var i = FlowInstance.Create(c.Tenant.TenantId, sessao, c.OrganizacaoId, Guid.NewGuid(), "aviso", 1, null, OnFailurePolicy.Agent, "v1:x", "k1", agora.AddHours(-1));
+            i.Apply(new FlowState(FlowStatus.WaitingInput, "menu", new Dictionary<string, string>(), 0, 1, null, null), "v1:x", "k1", 1, false, agora);
+            db.Instances.Add(i);
+            db.Decisions.Add(RoutingDecision.Create(c.Tenant.TenantId, sessao, AutomationOwner.Flow, null, agora));
+            if (comEfeitoEnviado)
+            {
+                var enviado = FlowEffectRecord.Create(c.Tenant.TenantId, Guid.NewGuid(), i.Id, "1:0", 1, 0, EffectKind.SendMessage, "menu", "v1:conteudo", "k1", agora);
+                enviadoA = enviado.Id;
+                enviado.Complete(EffectState.Done, "ok", agora);
+                db.Effects.Add(enviado);
+            }
+
+            await db.SaveChangesAsync();
+        }
+
+        await SemearAsync(a, sessaoA, comEfeitoEnviado: true);
+        await SemearAsync(b, sessaoB, comEfeitoEnviado: false);
+        await using var api = await ApiServer.StartAsync("Production", ApiServer.ConfiguracaoDeProducao());
+
+        static int Avisos(IEnumerable<IaBimeta.Messaging.OutboxMessage> linhas) => linhas.Count(l => l.EventType == "conversations.flow-released-to-agent");
+        Assert.Equal(0, Avisos(await a.LinhasDoOutboxDaSessaoAsync(sessaoA)));
+
+        var saida = new StringWriter();
+        Assert.Equal(0, await WorkflowsCommand.ExecuteAsync(api.Services, drain: true, a.Tenant.Slug, saida));
+        Assert.Contains("1 instância(s) encerrada(s)", saida.ToString());
+        Assert.Equal(1, Avisos(await a.LinhasDoOutboxDaSessaoAsync(sessaoA))); // o agente foi avisado
+        Assert.Equal(0, Avisos(await b.LinhasDoOutboxDaSessaoAsync(sessaoB))); // a outra empresa, não
+
+        // O efeito que JÁ foi enviado continua "concluído": a drenagem nunca o reabre nem o reenvia.
+        await using (var escopo = banco.NovoEscopo(PostgresFixture.Contexto(a.Tenant)))
+        {
+            var efeito = await escopo.ServiceProvider.GetRequiredService<WorkflowsDbContext>().Effects.AsNoTracking().SingleAsync(e => e.Id == enviadoA);
+            Assert.Equal(EffectState.Done, efeito.State);
+        }
+
+        // Repetir não avisa de novo (nada ativo): idempotente.
+        Assert.Equal(0, await WorkflowsCommand.ExecuteAsync(api.Services, drain: true, a.Tenant.Slug, new StringWriter()));
+        Assert.Equal(1, Avisos(await a.LinhasDoOutboxDaSessaoAsync(sessaoA)));
     }
 }
