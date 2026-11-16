@@ -59,6 +59,45 @@ public sealed class LoginThrottlePersistenceTests(PostgresFixture banco)
         Assert.Equal(5, contagem.FailedCount);
     }
 
+    /// <summary>
+    /// E1-R (achado preexistente da redefinição de senha): a falha de quem PERDEU a corrida do token se enfileirava com a limpeza que o vencedor faz da contagem. O INSERT ... DO NOTHING enxergava a linha, o vencedor a apagava e o SELECT ... FOR UPDATE
+    /// seguinte não achava mais nada: <c>Sequence contains no elements</c>, 500. A contagem agora é garantida e travada na MESMA instrução.
+    /// </summary>
+    [Fact]
+    public async Task Falhas_concorrentes_com_a_limpeza_da_contagem_nunca_quebram_nem_perdem_a_linha_travada()
+    {
+        var tenant = await banco.RegistrarTenantAsync("limpa");
+        var agora = DateTimeOffset.UtcNow;
+        var semBloqueio = new LoginThrottlePolicy(100000, TimeSpan.FromHours(1), TimeSpan.FromHours(1));
+        var excecoes = new System.Collections.Concurrent.ConcurrentBag<Exception>();
+
+        async Task LimparAsync()
+        {
+            await using var escopo = banco.NovoEscopo();
+            await escopo.ServiceProvider.GetRequiredService<IAuthenticationStore>().ClearLoginThrottleAsync(tenant.TenantId, "ana@teste.local", default);
+        }
+
+        async Task Seguro(Func<Task> acao)
+        {
+            try
+            {
+                await acao();
+            }
+            catch (Exception ex)
+            {
+                excecoes.Add(ex);
+            }
+        }
+
+        for (var rodada = 0; rodada < 60; rodada++)
+        {
+            var tarefas = Enumerable.Range(0, 8).Select(i => i % 3 == 0 ? Seguro(LimparAsync) : Seguro(() => FalharAsync(tenant, "ana@teste.local", agora, semBloqueio)));
+            await Task.WhenAll(tarefas);
+        }
+
+        Assert.Empty(excecoes.Select(e => e.GetType().Name + ": " + e.Message));
+    }
+
     [Fact]
     public async Task A_contagem_e_isolada_por_tenant_e_por_e_mail()
     {
