@@ -43,9 +43,16 @@
 		-Server
 	}
 
-	# Registro de acesso em JSON na saida padrao (docker compose logs web); sem corpo nem cabecalho de autorizacao.
+	# Registro de acesso em JSON na saida padrao (docker compose logs web). O Caddy registra os cabecalhos da requisicao, e embora ele proprio
+	# oculte Authorization e Cookie, NAO oculta os cabecalhos de assinatura do Embedded (X-IaB-Signature, X-IaB-Nonce, X-IaB-Key-Id) nem outros
+	# que um cliente invente. Por isso NENHUM cabecalho de requisicao vai ao log (E1-R): o filtro apaga o campo inteiro. Corpo nunca e registrado.
 	log {
 		output stdout
-		format json
+		format filter {
+			wrap json
+			fields {
+				request>headers delete
+			}
+		}
 	}
 }

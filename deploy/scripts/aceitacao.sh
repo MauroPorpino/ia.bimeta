@@ -126,7 +126,12 @@ for arquivo in .env app.env backup.env; do
     case "$nome" in *PASSWORD*|*Keys__*|*KnowledgeGapHashKey*|BACKUP_PASSPHRASE) [ "${#valor}" -ge 16 ] && printf '%s\n' "$valor" >> "$segredos" ;; esac
   done < "$DEPLOY_DIR/$arquivo"
 done
+# E1-R: os cabecalhos de autenticacao do Embedded (e um cabecalho qualquer inventado) nao podem aparecer no registro de acesso do Caddy: envia uma requisicao com valores-canario e procura por eles nos logs.
+canario="canario-$(date +%s)-${RANDOM}"
+curl_local -o /dev/null -X POST -H "X-IaB-Signature: ${canario}-assinatura" -H "X-IaB-Nonce: ${canario}-nonce" -H "X-IaB-Key-Id: ibk_${canario}" -H "Authorization: Bearer ibe_${canario}" -H "X-Cabecalho-Inventado: ${canario}-inventado" -H "Content-Type: application/json" --data "{}" "https://${DOMAIN}/api/embed/v1/launch-tickets" || true
+sleep 3
 compose logs --no-color > "$registros" 2>&1
+if grep -q "$canario" "$registros"; then falhou "um cabecalho de requisicao (assinatura, nonce, chave ou Authorization) apareceu no log de acesso do Caddy"; else passou "nenhum cabecalho de requisicao do Embedded aparece no log do Caddy"; fi
 if grep -F -q -f "$segredos" "$registros"; then falhou "um SEGREDO apareceu nos logs dos conteineres"; else passou "nenhum segredo (senha, chave ou frase) aparece nos logs"; fi
 rm -f "$segredos" "$registros"
 

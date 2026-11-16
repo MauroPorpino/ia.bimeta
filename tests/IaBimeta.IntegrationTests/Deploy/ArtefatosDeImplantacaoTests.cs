@@ -253,6 +253,28 @@ public sealed class ArtefatosDeImplantacaoTests
         Assert.Contains("max_size", caddy, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// E1-R: o registro de acesso do Caddy NÃO pode conter cabeçalho de requisição algum (o Caddy oculta Authorization e Cookie sozinho, mas não X-IaB-Signature, X-IaB-Nonce, X-IaB-Key-Id nem um cabeçalho inventado). Aqui só o TEXTO da
+    /// configuração é conferido; que o Caddy implantado de fato se comporta assim é provado por <c>aceitacao.sh</c> na VM (requisição com valores-canário e busca nos logs).
+    /// </summary>
+    [Fact]
+    public void O_registro_de_acesso_do_proxy_apaga_todos_os_cabecalhos_da_requisicao_e_a_aceitacao_prova_com_um_canario()
+    {
+        var caddy = Ler("web/Caddyfile");
+        var log = Regex.Match(caddy, @"\tlog \{(?<corpo>.*?)\n\t\}", RegexOptions.Singleline);
+
+        Assert.True(log.Success, "O Caddyfile precisa de um bloco log.");
+        Assert.Contains("format filter {", log.Groups["corpo"].Value, StringComparison.Ordinal);
+        Assert.Contains("wrap json", log.Groups["corpo"].Value, StringComparison.Ordinal);
+        Assert.Matches(@"request>headers\s+delete", log.Groups["corpo"].Value);
+        Assert.DoesNotContain("format json", log.Groups["corpo"].Value, StringComparison.Ordinal); // o formato sem filtro registraria os cabeçalhos
+        Assert.DoesNotContain("log_credentials", caddy, StringComparison.Ordinal);
+
+        var aceitacao = Ler("scripts/aceitacao.sh");
+        Assert.Contains("X-IaB-Signature", aceitacao, StringComparison.Ordinal);
+        Assert.Contains("canario", aceitacao, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void O_papel_do_banco_da_aplicacao_nao_e_superusuario_e_a_senha_entra_como_literal_citado()
     {
