@@ -16,7 +16,7 @@ public sealed class User : ITenantOwned
     private static readonly Regex EmailPattern = new(@"^[^@\s]+@[^@\s]+\.[^@\s]+$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     // Usado pela fábrica e pelo EF Core (que liga os parâmetros às propriedades pelo nome).
-    private User(Guid id, TenantId tenantId, string email, string displayName, string passwordHash, DateTimeOffset createdAt, Locale? preferredLocale)
+    private User(Guid id, TenantId tenantId, string email, string displayName, string passwordHash, DateTimeOffset createdAt, Locale? preferredLocale, UserAuthMode authMode)
     {
         Id = id;
         TenantId = tenantId;
@@ -25,6 +25,7 @@ public sealed class User : ITenantOwned
         PasswordHash = passwordHash;
         CreatedAt = createdAt;
         PreferredLocale = preferredLocale;
+        AuthMode = authMode;
     }
 
     public Guid Id { get; }
@@ -43,13 +44,36 @@ public sealed class User : ITenantOwned
     /// <summary>O idioma que o usuário prefere para a interface (BCP 47), ou <c>null</c> se ainda não escolheu. Não é o idioma de nenhuma conversa.</summary>
     public Locale? PreferredLocale { get; private set; }
 
+    /// <summary>Como o usuário prova quem é. O usuário federado nunca faz login por senha.</summary>
+    public UserAuthMode AuthMode { get; }
+
+    /// <summary>O "hash" de um usuário federado: não é um hash válido, então nenhuma senha o confere.</summary>
+    public const string FederatedPasswordSentinel = "!federated";
+
+    /// <summary>O domínio reservado (RFC 2606) do e-mail sintético dos usuários federados: nunca coincide com um e-mail real.</summary>
+    public const string FederatedEmailDomain = "federated.invalid";
+
+    /// <summary>
+    /// Cria o usuário que a federação (<c>JitAttendant</c>) precisa: e-mail sintético e único (nunca o do ERP, para que coincidência de e-mail jamais vincule a uma conta existente), sem senha utilizável.
+    /// O nome vem do ERP como informação de exibição.
+    /// </summary>
+    public static User CreateFederated(TenantId tenantId, string? displayName, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(tenantId);
+
+        var nome = (displayName ?? string.Empty).Trim();
+        nome = nome.Length == 0 ? "Usuário externo" : nome.Length > DisplayNameMaxLength ? nome[..DisplayNameMaxLength].TrimEnd() : nome;
+        var id = Guid.CreateVersion7();
+        return new User(id, tenantId, $"fed.{id:N}@{FederatedEmailDomain}", nome, FederatedPasswordSentinel, now, null, UserAuthMode.Federated);
+    }
+
     public static User Create(TenantId tenantId, string? email, string? displayName, string passwordHash, DateTimeOffset now, Locale? preferredLocale = null)
     {
         ArgumentNullException.ThrowIfNull(tenantId);
         ArgumentException.ThrowIfNullOrWhiteSpace(passwordHash);
 
         var (emailNormalizado, nome) = ValidateProfile(email, displayName);
-        return new User(Guid.CreateVersion7(), tenantId, emailNormalizado, nome, passwordHash, now, preferredLocale);
+        return new User(Guid.CreateVersion7(), tenantId, emailNormalizado, nome, passwordHash, now, preferredLocale, UserAuthMode.Password);
     }
 
     /// <summary>

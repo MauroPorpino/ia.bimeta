@@ -13,6 +13,9 @@ internal sealed class SessionTenantContextSource : ITenantContextSource
 {
     public const string Origin = "session";
 
+    /// <summary>A origem do contexto de uma sessão embutida (federada por ticket do servidor do ERP).</summary>
+    public const string EmbeddedOrigin = "embedded-session";
+
     private const string BearerPrefix = "Bearer ";
 
     private readonly SessionAuthenticator _autenticador;
@@ -42,9 +45,10 @@ internal sealed class SessionTenantContextSource : ITenantContextSource
             return null;
         }
 
+        // A sessão embutida (ADR 0039) tem origem própria: é a marca que a lista fechada de rotas do host (EmbeddedRouteGuard) usa.
         return new RequestContext(
             principal.TenantId,
-            Origin,
+            principal.Kind == Identity.Domain.SessionKind.Embedded ? EmbeddedOrigin : Origin,
             new ActorPrincipal(principal.UserId, principal.SessionId, principal.Permissions));
     }
 }

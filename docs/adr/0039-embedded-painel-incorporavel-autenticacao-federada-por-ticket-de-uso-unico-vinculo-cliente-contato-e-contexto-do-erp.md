@@ -1,6 +1,6 @@
 # ADR 0039 — ia.bimeta Embedded: painel incorporável, autenticação federada por ticket de uso único, vínculo cliente-contato e contexto do ERP
 
-- **Status:** **Aceito em princípio** (planejamento aprovado pelo decisor em 16/11/2026, parte obrigatória da V1). O texto detalhado será ratificado ao fim da etapa E0; ajustes de cada etapa entram no registro de implementação abaixo.
+- **Status:** **Aceito** (planejamento aprovado em 16/11/2026, parte obrigatória da V1; texto ratificado pelo decisor ao fim da E0, em 16/11/2026). Ajustes de cada etapa entram no registro de implementação abaixo.
 - **Data:** 16/11/2026
 - **Decisor:** Mauro Porpino
 - **Referências:** ADR 0005 e `BOUNDARIES.md` (módulos, camadas, matriz), 0035 e 0036 (Capabilities e Agents), 0027 (modelos de mensagem), 0040 (início ativo e consentimento), `docs/architecture/EMBEDDED-SPIKES.md`
@@ -93,4 +93,19 @@ SSE/WebSocket; escrita pelo painel; SSO por OIDC/SAML de provedores externos; ca
 Isolamento entre tenants (chave, ticket, identidade, vínculo, grants), replay, expiração, challenge e origem errados, nonce repetido, chave revogada, usuário federado sem senha, lista de rotas, histórico por cliente no escopo, e testes de navegador no Edge com `playwright-core` contra o ERP fictício em outra origem (embutir de origem não autorizada, logout que revoga, ponte `postMessage`).
 
 ## Registro da implementação
-(a preencher por etapa)
+### E1 — Identity federado (16/11/2026)
+
+Implementado como o texto acima, com estes ajustes e esclarecimentos (nenhum muda uma decisão aprovada):
+
+- **Nonce assinado:** o `nonce` entra na string assinada (`v1 ⏎ timestamp ⏎ nonce ⏎ MÉTODO ⏎ caminho ⏎ sha256hex(corpo)`), além do timestamp, método, caminho e corpo; só é registrado DEPOIS de a assinatura conferir. O caminho assinado é o que o Api enxerga, **sem** o prefixo `/api` do proxy.
+- **Sem teto absoluto de 8 h:** a sessão embutida dura 30 min e **nunca é estendida** (renovar é trocar outro ticket); logo não há coluna de teto absoluto. A 8 h do texto é o limite máximo aceito na configuração (`Identity:EmbeddedSessionLifetime`).
+- **Sem `RequestContext` nas rotas assinadas:** `launch-tickets`, `context-tickets` e `sessions/revoke` não criam contexto algum (nem de sistema, que passaria por toda permissão): os serviços recebem o tenant explícito da conexão autenticada.
+- **Ticket queimado em qualquer tentativa:** o ticket é consumido de forma atômica ANTES das demais conferências; verifier, origem do pai, conexão ou vínculo errados também o invalidam. O ticket de contexto fica preso ao usuário externo e à conexão da sessão que o resgata (sem coluna de sessão).
+- **Papel novo `Attendant`:** `Role.Attendant = 4` (OrganizationRead, StructureRead, ConversationRead, ConversationManage, ChannelRead, QueueRead), concedido pelo `JitAttendant`. `Permission.EmbedManage = 25` só na concessão de escopo do tenant do administrador.
+- **Teto de permissões e elegibilidade:** a sessão embutida só carrega as permissões de `EmbeddedSessionPolicy.AllowedPermissions`, só da organização da conexão (nunca escopo de tenant). Conta administrativa (papel `OrganizationAdmin` em qualquer organização ou qualquer concessão de escopo de tenant) ou sem acesso à organização da conexão não entra por federação nem mapeada, e perde a sessão embutida na hora se passar a sê-lo (a sessão é conferida contra o estado atual a CADA requisição, inclusive conexão e vínculo).
+- **Usuário federado:** e-mail sintético `fed.<guid>@federated.invalid`, `AuthMode = Federated`, hash que nenhuma senha confere; o login por senha o recusa e uma sessão interativa dele não vale.
+- **Lista fechada de rotas:** `EmbeddedRoutePolicy` (Host), 23 rotas (atendimento, `/embed/v1/session` e `/embed/v1/context`), default negar, inclusive rota inexistente. Protegida por `EmbeddedRoutePolicyTests` (lista aprovada literal, nenhuma rota administrativa, toda rota da lista existe e **toda rota da API fora dela responde 403** à sessão embutida).
+- **Onde ficou:** a administração (`/embedded/connections…`) e o protocolo (`/embed/v1…`) estão em `Identity.Presentation`; o Host só registra os limites de taxa, as chaves mestras (`Identity:Secrets`), a origem de contexto `embedded-session` e o guarda de rotas. Sem aresta nova na matriz.
+- **Migration** `EmbeddedFederation` (aditiva): `identity.integration_connections`, `integration_keys`, `integration_nonces`, `launch_tickets`, `external_identities`, `session_customer_grants`; colunas `users.auth_mode`, `sessions.kind`, `sessions.integration_id`, `sessions.external_user_id`, `sessions.parent_origin` (com padrão para as linhas existentes). Reversão: `Down` remove as colunas e as tabelas.
+- **Retenção:** categoria `EmbeddedTickets` (1 dia) para tickets e nonces; sessões embutidas seguem a retenção das sessões; clientes em foco morrem com a sessão. Todas as tabelas novas estão classificadas no `RetentionInventory`.
+- **Pendente (E2 em diante):** a consulta por cliente, o vínculo cliente-contato e o histórico (E2); o painel e o `postMessage` (E4); `ConversationStart` e a flag `AllowStartConversation` são só colunas/permissão futura (E3); a verificação em navegador real (E5); a revisão independente do Codex.

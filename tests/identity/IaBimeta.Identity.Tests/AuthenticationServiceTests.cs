@@ -31,7 +31,9 @@ public class AuthenticationServiceTests
 
         public AuthenticationService Autenticacao => new(Tenants, Dados, Dados, Hasher, Opcoes, Relogio, Auditoria, Holder);
 
-        public SessionAuthenticator Autenticador => new(Dados, Tenants, Relogio);
+        public EmbeddedEmMemoria Embedded { get; } = new();
+
+        public SessionAuthenticator Autenticador => new(Dados, Embedded, Tenants, Relogio);
 
         public User NovoUsuario(string email = "ana@exemplo.com", string senha = Senhas.Valida, TenantInfo? tenant = null, string? hash = null)
         {
@@ -374,7 +376,7 @@ public class AuthenticationServiceTests
         var login = await c.Autenticacao.LoginAsync("lab-c", "ana@exemplo.com", Senhas.Valida);
         Assert.NotNull(await c.Autenticador.AuthenticateAsync(login.Token));
 
-        var autenticador = new SessionAuthenticator(c.Dados, new TenantSuspensoDiretorio(tenantQueSeraSuspenso.TenantId), c.Relogio);
+        var autenticador = new SessionAuthenticator(c.Dados, c.Embedded, new TenantSuspensoDiretorio(tenantQueSeraSuspenso.TenantId), c.Relogio);
 
         Assert.Null(await autenticador.AuthenticateAsync(login.Token));
     }

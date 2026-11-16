@@ -81,7 +81,8 @@ public sealed class AuthenticationService
             ? _hasher.Verify(password!, usuario?.PasswordHash)
             : PasswordVerification.Failed;
 
-        if (verificacao == PasswordVerification.Failed || usuario is null)
+        // Usuário federado (Embedded, ADR 0039) nunca entra por senha, nem que alguém grave um hash para ele: a mesma recusa de credencial.
+        if (verificacao == PasswordVerification.Failed || usuario is null || usuario.AuthMode == UserAuthMode.Federated)
         {
             // A contagem vem primeiro: é a proteção, e não pode depender de a trilha de auditoria estar disponível.
             var bloqueou = chave is not null

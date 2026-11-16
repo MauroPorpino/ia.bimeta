@@ -10,7 +10,13 @@ internal sealed class RequestContextMiddleware
 {
     // Rotas que não usam contexto: o /health não exige tenant nem depende do banco, o login é anterior a qualquer sessão e o webhook do provedor é anônimo (o Receiver cria o contexto do tenant pela URL, depois de
     // resolver a conta: nunca por cabeçalho nem por sessão).
-    private static readonly string[] RotasSemContexto = { "/health", "/auth/login", "/webhooks" };
+    // O Embedded (ADR 0039): as chamadas assinadas do servidor do ERP (autenticadas por HMAC, o tenant vem da chave) e a troca do ticket no iframe (anônima, com o verifier) são anteriores a qualquer sessão. As demais rotas
+    // /embed/v1 (context, session) usam o contexto normal da sessão embutida.
+    private static readonly string[] RotasSemContexto =
+    {
+        "/health", "/auth/login", "/webhooks",
+        "/embed/v1/launch-tickets", "/embed/v1/context-tickets", "/embed/v1/sessions/revoke", "/embed/v1/exchange",
+    };
 
     private readonly RequestDelegate _next;
 

@@ -1,4 +1,5 @@
 using IaBimeta.Identity.Domain;
+using IaBimeta.Identity.Infrastructure.Configurations;
 using IaBimeta.SharedKernel;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -14,6 +15,8 @@ public static class IdentityRetentionExtensions
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IRetentionTask, SessionRetentionTask>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IRetentionTask, PasswordResetTokenRetentionTask>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IRetentionTask, LoginThrottleRetentionTask>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IRetentionTask, LaunchTicketRetentionTask>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IRetentionTask, IntegrationNonceRetentionTask>());
         return services;
     }
 }
@@ -98,5 +101,35 @@ internal sealed class LoginThrottleRetentionTask : IdentityRetentionTask<LoginTh
     {
         var parados = db.LoginThrottles.IgnoreQueryFilters().Where(t => t.WindowStartedAt < cutoff && (t.LockedUntil == null || t.LockedUntil < cutoff));
         return own is not null ? parados.Where(t => t.TenantId == own) : parados.Where(t => !excluded.Contains(t.TenantId));
+    }
+}
+
+/// <summary>Tickets do Embedded (usados ou não) cujo prazo terminou antes do corte. Um ticket ainda utilizável nunca é expurgado (o corte é sempre no passado).</summary>
+internal sealed class LaunchTicketRetentionTask : IdentityRetentionTask<LaunchTicket>
+{
+    public LaunchTicketRetentionTask(IServiceScopeFactory scopes)
+        : base(scopes, "identity.launch_tickets", RetentionCategory.EmbeddedTickets)
+    {
+    }
+
+    protected override IQueryable<LaunchTicket> Eligible(IdentityDbContext db, DateTimeOffset cutoff, TenantId? own, List<TenantId> excluded)
+    {
+        var vencidos = db.LaunchTickets.IgnoreQueryFilters().Where(t => t.ExpiresAt < cutoff);
+        return own is not null ? vencidos.Where(t => t.TenantId == own) : vencidos.Where(t => !excluded.Contains(t.TenantId));
+    }
+}
+
+/// <summary>Nonces das chamadas assinadas cuja memória terminou antes do corte (a janela de assinatura é de minutos, e o corte é de dias).</summary>
+internal sealed class IntegrationNonceRetentionTask : IdentityRetentionTask<IntegrationNonce>
+{
+    public IntegrationNonceRetentionTask(IServiceScopeFactory scopes)
+        : base(scopes, "identity.integration_nonces", RetentionCategory.EmbeddedTickets)
+    {
+    }
+
+    protected override IQueryable<IntegrationNonce> Eligible(IdentityDbContext db, DateTimeOffset cutoff, TenantId? own, List<TenantId> excluded)
+    {
+        var vencidos = db.IntegrationNonces.IgnoreQueryFilters().Where(n => n.ExpiresAt < cutoff);
+        return own is not null ? vencidos.Where(n => n.TenantId == own) : vencidos.Where(n => !excluded.Contains(n.TenantId));
     }
 }

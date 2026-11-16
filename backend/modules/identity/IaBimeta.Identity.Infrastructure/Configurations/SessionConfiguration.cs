@@ -20,6 +20,13 @@ internal sealed class SessionConfiguration : IEntityTypeConfiguration<Session>
         builder.Property(s => s.ExpiresAt).HasColumnName("expires_at");
         builder.Property(s => s.RevokedAt).HasColumnName("revoked_at");
 
+        // Embedded (ADR 0039): o tipo da sessão e, na embutida, a conexão, o usuário externo e a origem do pai. Sessões antigas são Interactive.
+        builder.Property(s => s.Kind).HasColumnName("kind").HasConversion<string>().HasMaxLength(20).IsRequired().HasDefaultValue(SessionKind.Interactive);
+        builder.Property(s => s.IntegrationId).HasColumnName("integration_id");
+        builder.Property(s => s.ExternalUserId).HasColumnName("external_user_id").HasMaxLength(ExternalIdentity.ExternalUserIdMaxLength);
+        builder.Property(s => s.ParentOrigin).HasColumnName("parent_origin").HasMaxLength(IntegrationConnection.OriginMaxLength);
+        builder.HasIndex(s => new { s.TenantId, s.IntegrationId, s.ExternalUserId }).HasDatabaseName("ix_sessions_tenant_id_integration_id_external_user_id");
+
         builder.HasOne<User>().WithMany().HasForeignKey(s => new { s.TenantId, s.UserId }).OnDelete(DeleteBehavior.Cascade);
 
         // O token apresentado é achado pelo hash, antes de existir tenant: o hash é único na tabela inteira.

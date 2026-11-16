@@ -16,7 +16,8 @@ public static class IdentityInfrastructureExtensions
     public static IServiceCollection AddIdentityModule(
         this IServiceCollection services,
         Func<IServiceProvider, string> connectionString,
-        Action<IdentityOptions>? configure = null)
+        Action<IdentityOptions>? configure = null,
+        Action<IdentitySecretOptions>? configureSecrets = null)
     {
         ArgumentNullException.ThrowIfNull(connectionString);
 
@@ -24,8 +25,14 @@ public static class IdentityInfrastructureExtensions
 
         var opcoes = new IdentityOptions();
         configure?.Invoke(opcoes);
+        opcoes.ValidateEmbedded();
         services.AddSingleton(opcoes);
         services.AddSingleton<PasswordHasher>();
+
+        // As chaves mestras dos segredos de integração do Embedded (Identity:Secrets). Sem chave ativa, criar chave de integração falha fechado; o resto do Identity segue funcionando.
+        var segredos = new IdentitySecretOptions();
+        configureSecrets?.Invoke(segredos);
+        services.AddSingleton<IIntegrationSecretProtector>(new AesGcmIntegrationSecretProtector(segredos));
 
         services.AddDbContext<IdentityDbContext>((provider, options) =>
             options.UseNpgsql(
@@ -36,6 +43,7 @@ public static class IdentityInfrastructureExtensions
         services.AddScoped<IGrantRepository, GrantRepository>();
         services.AddScoped<ISessionRepository, SessionRepository>();
         services.AddScoped<IAuthenticationStore, AuthenticationStore>();
+        services.AddScoped<IEmbeddedStore, EmbeddedStore>();
 
         services.AddScoped<AuthenticationService>();
         services.AddScoped<PasswordService>();
@@ -43,6 +51,13 @@ public static class IdentityInfrastructureExtensions
         services.AddScoped<UserService>();
         services.AddScoped<UserDirectory>();
         services.AddScoped<IUserDirectory>(provider => provider.GetRequiredService<UserDirectory>());
+
+        services.AddScoped<IntegrationAdminService>();
+        services.AddScoped<IntegrationRequestAuthenticator>();
+        services.AddScoped<EmbeddedTicketService>();
+        services.AddScoped<EmbeddedExchangeService>();
+        services.AddScoped<EmbeddedContextQuery>();
+        services.AddScoped<IEmbeddedContextQuery>(provider => provider.GetRequiredService<EmbeddedContextQuery>());
 
         return services;
     }

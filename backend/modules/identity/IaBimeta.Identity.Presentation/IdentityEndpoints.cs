@@ -114,20 +114,50 @@ public static class IdentityEndpoints
             return Results.NoContent();
         });
 
+        // Administração das conexões de integração do Embedded (ADR 0039): só EmbedManage (escopo do tenant).
+        app.MapEmbeddedAdminEndpoints();
+
+        // O protocolo de federação do Embedded (/embed/v1): chamadas assinadas do servidor do ERP, troca do ticket no iframe e rotas da sessão embutida.
+        app.MapEmbeddedFederationEndpoints();
+
         return app;
     }
+
+    internal static IDictionary<string, object?> Code(string code) => new Dictionary<string, object?> { ["code"] = code };
 
     private static bool TryParseRole(string? texto, out Role papel) =>
         Enum.TryParse(texto, ignoreCase: true, out papel) && Enum.IsDefined(papel);
 
     private static IResult RoleInvalido() =>
-        Results.Problem(title: "Dados inválidos", detail: "O papel deve ser User, Manager ou OrganizationAdmin.", statusCode: StatusCodes.Status400BadRequest);
+        Results.Problem(title: "Dados inválidos", detail: "O papel deve ser User, Attendant, Manager ou OrganizationAdmin.", statusCode: StatusCodes.Status400BadRequest);
 
-    private static async ValueTask<object?> TratarErrosDoIdentity(EndpointFilterInvocationContext contexto, EndpointFilterDelegate proximo)
+    internal static async ValueTask<object?> TratarErrosDoIdentity(EndpointFilterInvocationContext contexto, EndpointFilterDelegate proximo)
     {
         try
         {
             return await proximo(contexto);
+        }
+        catch (EmbeddedAuthenticationException)
+        {
+            // A mesma resposta para qualquer falha de assinatura, chave, nonce, ticket, verifier ou origem: nada revela o que falhou.
+            return Results.Problem(title: "Autenticação do Embedded recusada", detail: "Autenticação do Embedded recusada.", statusCode: StatusCodes.Status401Unauthorized, extensions: Code("embedded-authentication-failed"));
+        }
+        catch (ExternalIdentityNotAllowedException)
+        {
+            return Results.Problem(title: "Acesso negado", detail: "O usuário externo não tem acesso por esta conexão.", statusCode: StatusCodes.Status403Forbidden, extensions: Code("external-identity-not-allowed"));
+        }
+        catch (ExternalIdentityTargetNotAllowedException ex)
+        {
+            return Results.Problem(title: "Vínculo recusado", detail: ex.Message, statusCode: StatusCodes.Status422UnprocessableEntity, extensions: Code("external-identity-target-not-allowed"));
+        }
+        catch (EmbeddedConflictException ex)
+        {
+            return Results.Problem(title: "Conflito", detail: ex.Message, statusCode: StatusCodes.Status409Conflict, extensions: Code("embedded-conflict"));
+        }
+        catch (EmbeddedUnavailableException ex)
+        {
+            // Sem chave mestra configurada (ou segredo ilegível): falha fechada, sem repetir segredo nem texto cifrado.
+            return Results.Problem(title: "Indisponível", detail: "O segredo das integrações não está disponível.", statusCode: StatusCodes.Status503ServiceUnavailable, extensions: Code(ex.Code));
         }
         catch (InvalidCredentialsException)
         {

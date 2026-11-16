@@ -81,4 +81,7 @@ public enum Permission
 
     /// <summary>Simular fluxos (sem chamada real a IA, sistema externo ou canal).</summary>
     WorkflowTest = 24,
+
+    /// <summary>Administrar as conexões de integração do Embedded (origens, chaves, identidades externas e sessões embutidas; ADR 0039). Só existe com concessão de escopo do tenant: quem administra a federação não é um atendente.</summary>
+    EmbedManage = 25,
 }

@@ -1,6 +1,6 @@
 # ADR 0040 — Início ativo de conversas: modelos aprovados, consentimento rastreável, limites e recuperação sem duplicidade
 
-- **Status:** **Aceito em princípio** (planejamento aprovado pelo decisor em 16/11/2026, parte obrigatória da V1). O texto detalhado será ratificado ao fim da etapa E0; ajustes de cada etapa entram no registro de implementação.
+- **Status:** **Aceito** (planejamento aprovado em 16/11/2026, parte obrigatória da V1; texto ratificado pelo decisor ao fim da E0, em 16/11/2026). Ajustes de cada etapa entram no registro de implementação abaixo.
 - **Data:** 16/11/2026
 - **Decisor:** Mauro Porpino
 - **Referências:** ADR 0027 (modelos de mensagem, que deixou o início ativo fora do escopo), 0007 e `CONVERSATION-LIFECYCLE.md` (reenvio delegado, falha definitiva de envio), 0014, 0018 a 0020 (Sender, vazão, pausa, `SendUnknown`), 0039 (Embedded), `BOUNDARIES.md` §6 e §12, `docs/architecture/EMBEDDED-SPIKES.md`

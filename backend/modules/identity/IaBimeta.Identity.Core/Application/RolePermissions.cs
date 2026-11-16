@@ -32,6 +32,17 @@ public static class RolePermissions
         Permission.WorkflowTest,
     };
 
+    // O atendente (papel da federação, ADR 0039): lê a organização, atende e transfere dentro das filas de que participa. Nada de estrutura, usuários, canais, integrações, fluxos nem auditoria.
+    private static readonly Permission[] AttendantPermissions =
+    {
+        Permission.OrganizationRead,
+        Permission.StructureRead,
+        Permission.ConversationRead,
+        Permission.ConversationManage,
+        Permission.ChannelRead,
+        Permission.QueueRead,
+    };
+
     // Quem gere a organização gere os canais dela: o cadastro dos números e das unidades autorizadas muda quem pode atender.
     // E gere as filas: quem entra em cada fila muda quem atende quem.
     private static readonly Permission[] AdminPermissions =
@@ -63,6 +74,7 @@ public static class RolePermissions
         Permission.OrganizationCreate,
         Permission.AuditRead,
         Permission.TenantSettingsManage,
+        Permission.EmbedManage,
     };
 
     /// <param name="organizationId">A organização da concessão, ou nulo para a concessão de escopo do tenant.</param>
@@ -72,6 +84,7 @@ public static class RolePermissions
         {
             Role.User => UserPermissions,
             Role.Manager => ManagerPermissions,
+            Role.Attendant => AttendantPermissions,
             Role.OrganizationAdmin => AdminPermissions,
             _ => Array.Empty<Permission>(),
         };

@@ -49,6 +49,16 @@ internal sealed class LoginRateLimitOptions
     public int WindowSeconds { get; set; } = 60;
 }
 
+/// <summary>Limites de taxa do Embedded por origem de rede (seção <c>Embedded:RateLimit</c>): as chamadas assinadas do servidor do ERP (por chave) e a troca do ticket no iframe (por origem).</summary>
+internal sealed class EmbeddedRateLimitOptions
+{
+    public int IntegrationPermitLimit { get; set; } = 120;
+
+    public int ExchangePermitLimit { get; set; } = 30;
+
+    public int WindowSeconds { get; set; } = 60;
+}
+
 public static class ApiHost
 {
     /// <summary>
@@ -73,7 +83,9 @@ public static class ApiHost
         builder.Services.AddTenancy(provider => ConnectionStringOf(provider, "Tenancy"));
         builder.Services.AddIdentityModule(
             provider => ConnectionStringOf(provider, "Identity"),
-            opcoes => builder.Configuration.GetSection("Identity").Bind(opcoes));
+            opcoes => builder.Configuration.GetSection("Identity").Bind(opcoes),
+            // As chaves mestras dos segredos das chaves de integração do Embedded (ADR 0039): do ambiente, nunca de arquivo versionado. Sem chave ativa, criar chave de integração falha fechado.
+            segredos => builder.Configuration.GetSection("Identity:Secrets").Bind(segredos));
 
         // Etapa 4: os eventos duráveis vão para o OUTBOX do módulo emissor, gravados na mesma transação da mudança de estado
         // (BOUNDARIES.md §12.9). Quem os entrega aos consumidores (o relay) é o Worker, que roda como processo à parte: o Api
@@ -197,9 +209,32 @@ public static class ApiHost
         // e-mail inexistente, que não têm contagem própria. Atrás de proxy a origem é a do proxy: só com ForwardedHeaders ligado
         // (ADR 0033, proxies e redes confiáveis explícitos) o endereço usado aqui é o do cliente de verdade.
         var limiteDeLogin = builder.Configuration.GetSection("Identity:LoginRateLimit").Get<LoginRateLimitOptions>() ?? new LoginRateLimitOptions();
+        var limiteEmbedded = builder.Configuration.GetSection("Embedded:RateLimit").Get<EmbeddedRateLimitOptions>() ?? new EmbeddedRateLimitOptions();
         builder.Services.AddRateLimiter(opcoes =>
         {
             opcoes.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+            // Chamadas assinadas do servidor do ERP: uma cota por identificador de chave informado (a chave desconhecida cai na cota da origem de rede, para o excesso de lixo não passar).
+            opcoes.AddPolicy(EmbeddedRateLimits.IntegrationPolicy, http => RateLimitPartition.GetFixedWindowLimiter(
+                Embedded.EmbeddedHostPolicies.IntegrationPartition(http),
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = limiteEmbedded.IntegrationPermitLimit,
+                    Window = TimeSpan.FromSeconds(limiteEmbedded.WindowSeconds),
+                    QueueLimit = 0,
+                    AutoReplenishment = true,
+                }));
+
+            // Troca do ticket (anônima): por origem de rede, antes de qualquer consulta ao banco.
+            opcoes.AddPolicy(EmbeddedRateLimits.ExchangePolicy, http => RateLimitPartition.GetFixedWindowLimiter(
+                http.Connection.RemoteIpAddress?.ToString() ?? "origem-desconhecida",
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = limiteEmbedded.ExchangePermitLimit,
+                    Window = TimeSpan.FromSeconds(limiteEmbedded.WindowSeconds),
+                    QueueLimit = 0,
+                    AutoReplenishment = true,
+                }));
             opcoes.AddPolicy(IdentityEndpoints.LoginRateLimitPolicy, http => RateLimitPartition.GetFixedWindowLimiter(
                 http.Connection.RemoteIpAddress?.ToString() ?? "origem-desconhecida",
                 _ => new FixedWindowRateLimiterOptions
@@ -233,6 +268,9 @@ public static class ApiHost
         app.UseMiddleware<PublicIngressGuard>(ingressoPublico);
         app.UseRateLimiter();
         app.UseMiddleware<RequestContextMiddleware>();
+
+        // A sessão embutida (Embedded, ADR 0039) só alcança a lista fechada de rotas; o resto responde 403, existindo ou não.
+        app.UseMiddleware<Embedded.EmbeddedRouteGuard>();
 
         app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
         app.MapIdentityEndpoints();

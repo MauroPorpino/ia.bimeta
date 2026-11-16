@@ -40,6 +40,8 @@ internal static class RetentionInventory
         ["identity.sessions"] = (DataClass.Technical, "sessões vencidas ou revogadas; só o hash do token"),
         ["identity.password_reset_tokens"] = (DataClass.Technical, "tokens de redefinição encerrados; só o hash"),
         ["identity.login_throttles"] = (DataClass.Technical, "contadores de falha de login parados"),
+        ["identity.launch_tickets"] = (DataClass.Technical, "tickets de uso único do Embedded (ADR 0039): só hashes, identificadores e instantes; valem segundos"),
+        ["identity.integration_nonces"] = (DataClass.Technical, "nonces das chamadas assinadas do Embedded (anti-replay): só identificadores e instantes"),
         ["conversations.outbox_message"] = (DataClass.Technical, "eventos processados; mortos ficam até reenfileirar ou descartar com autorização"),
         ["channels.outbox_message"] = (DataClass.Technical, "o payload do evento do canal carrega o texto do cliente; mortos ficam até reenfileirar ou descartar com autorização"),
         ["channels.inbox_message"] = (DataClass.Technical, "marcas de idempotência (só identificadores)"),
@@ -73,6 +75,8 @@ internal static class RetentionInventory
         ["workflows.routing_decisions"] = (DataClass.Personal, "quem responde a cada atendimento (ADR 0038): só a referência à sessão, o dono (fluxo ou agente) e a ativação; nenhum conteúdo"),
         ["identity.users"] = (DataClass.Personal, "cadastro dos colaboradores (e-mail, nome, hash de senha)"),
         ["identity.user_organization_grants"] = (DataClass.Personal, "papéis dos colaboradores"),
+        ["identity.external_identities"] = (DataClass.Personal, "vínculo entre o usuário do ERP e o usuário interno (Embedded, ADR 0039): identificador externo e usuário"),
+        ["identity.session_customer_grants"] = (DataClass.Personal, "clientes do ERP em foco numa sessão embutida (identificador opaco do cliente); morre com a sessão"),
 
         // Registros de referência (não se apagam por prazo)
         ["audit.audit_events"] = (DataClass.LegalRecord, "trilha de auditoria"),
@@ -81,6 +85,8 @@ internal static class RetentionInventory
 
         // Cadastro e configuração
         ["tenancy.tenants"] = (DataClass.Configuration, "empresas"),
+        ["identity.integration_connections"] = (DataClass.Configuration, "conexões de integração do Embedded (ADR 0039): modo, origens permitidas e situação; nenhum segredo"),
+        ["identity.integration_keys"] = (DataClass.Configuration, "chaves de assinatura do Embedded: identificador público e segredo CIFRADO (AES-GCM); revogação e rotação por procedimento próprio"),
         ["tenancy.organizations"] = (DataClass.Configuration, "organizações"),
         ["tenancy.business_units"] = (DataClass.Configuration, "unidades"),
         ["tenancy.departments"] = (DataClass.Configuration, "setores"),

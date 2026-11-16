@@ -54,6 +54,12 @@ internal sealed class TenantsEmMemoria : ITenantDirectory
         return info;
     }
 
+    public void Suspender(TenantId tenantId)
+    {
+        var indice = _tenants.FindIndex(t => t.TenantId == tenantId);
+        _tenants[indice] = _tenants[indice] with { Status = TenantStatus.Suspended };
+    }
+
     public Task<TenantInfo?> FindBySlugAsync(string slug, CancellationToken cancellationToken = default) =>
         Task.FromResult(_tenants.FirstOrDefault(t => t.Slug == (slug ?? string.Empty).Trim().ToLowerInvariant()));
 

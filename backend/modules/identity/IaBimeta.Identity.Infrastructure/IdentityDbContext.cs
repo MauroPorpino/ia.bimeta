@@ -35,6 +35,18 @@ public sealed class IdentityDbContext : DbContext
 
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
 
+    public DbSet<IntegrationConnection> IntegrationConnections => Set<IntegrationConnection>();
+
+    public DbSet<IntegrationKey> IntegrationKeys => Set<IntegrationKey>();
+
+    internal DbSet<IntegrationNonce> IntegrationNonces => Set<IntegrationNonce>();
+
+    public DbSet<LaunchTicket> LaunchTickets => Set<LaunchTicket>();
+
+    public DbSet<ExternalIdentity> ExternalIdentities => Set<ExternalIdentity>();
+
+    public DbSet<SessionCustomerGrant> SessionCustomerGrants => Set<SessionCustomerGrant>();
+
     // O EF reavalia esta propriedade a cada execução de consulta (membro do DbContext no filtro global).
     private TenantId TenantAtual => _tenantDaAutenticacao ?? _contexto.GetRequired().TenantId;
 
@@ -47,12 +59,24 @@ public sealed class IdentityDbContext : DbContext
         modelBuilder.ApplyConfiguration(new SessionConfiguration());
         modelBuilder.ApplyConfiguration(new LoginThrottleConfiguration());
         modelBuilder.ApplyConfiguration(new PasswordResetTokenConfiguration());
+        modelBuilder.ApplyConfiguration(new IntegrationConnectionConfiguration());
+        modelBuilder.ApplyConfiguration(new IntegrationKeyConfiguration());
+        modelBuilder.ApplyConfiguration(new IntegrationNonceConfiguration());
+        modelBuilder.ApplyConfiguration(new LaunchTicketConfiguration());
+        modelBuilder.ApplyConfiguration(new ExternalIdentityConfiguration());
+        modelBuilder.ApplyConfiguration(new SessionCustomerGrantConfiguration());
 
         modelBuilder.Entity<LoginThrottle>().HasQueryFilter(t => t.TenantId == TenantAtual);
         modelBuilder.Entity<User>().HasQueryFilter(u => u.TenantId == TenantAtual);
         modelBuilder.Entity<UserOrganizationGrant>().HasQueryFilter(g => g.TenantId == TenantAtual);
         modelBuilder.Entity<Session>().HasQueryFilter(s => s.TenantId == TenantAtual);
         modelBuilder.Entity<PasswordResetToken>().HasQueryFilter(t => t.TenantId == TenantAtual);
+        modelBuilder.Entity<IntegrationConnection>().HasQueryFilter(c => c.TenantId == TenantAtual);
+        modelBuilder.Entity<IntegrationKey>().HasQueryFilter(k => k.TenantId == TenantAtual);
+        modelBuilder.Entity<IntegrationNonce>().HasQueryFilter(n => n.TenantId == TenantAtual);
+        modelBuilder.Entity<LaunchTicket>().HasQueryFilter(t => t.TenantId == TenantAtual);
+        modelBuilder.Entity<ExternalIdentity>().HasQueryFilter(i => i.TenantId == TenantAtual);
+        modelBuilder.Entity<SessionCustomerGrant>().HasQueryFilter(g => g.TenantId == TenantAtual);
     }
 
     /// <summary>

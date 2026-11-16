@@ -44,6 +44,11 @@ public enum RetentionCategory
     /// Servem ao histórico e às métricas; passado o prazo, são apagadas. Uma instância ATIVA nunca expira por prazo.
     /// </summary>
     FlowInstances = 10,
+
+    /// <summary>
+    /// Os tickets de uso único e os nonces das chamadas assinadas do Embedded (ADR 0039): só hashes, identificadores e instantes. Valem por segundos; passado o prazo (1 dia por padrão) são apagados. Um ticket ainda utilizável nunca expira por esta tarefa.
+    /// </summary>
+    EmbeddedTickets = 11,
 }
 
 /// <summary>
@@ -69,6 +74,7 @@ public sealed class RetentionOptions
         [RetentionCategory.SemanticDecisions] = 90,
         [RetentionCategory.FaqSuggestions] = 90,
         [RetentionCategory.FlowInstances] = 30,
+        [RetentionCategory.EmbeddedTickets] = 1,
     };
 
     /// <summary>Sobrescritas por empresa (o slug do tenant), só das categorias citadas.</summary>

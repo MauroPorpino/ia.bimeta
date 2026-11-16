@@ -176,6 +176,7 @@ public sealed class IdentityIsolationTests(PostgresFixture banco)
 
         await using var escopo = banco.NovoEscopo();
         var loja = escopo.ServiceProvider.GetRequiredService<IAuthenticationStore>();
+        var embutido = escopo.ServiceProvider.GetRequiredService<IEmbeddedStore>();
 
         Assert.NotNull(await loja.FindUserByEmailAsync(a.Tenant.TenantId, a.Admin.Email, default));
         Assert.Null(await loja.FindUserByEmailAsync(b.Tenant.TenantId, a.Admin.Email, default));
@@ -210,6 +211,7 @@ public sealed class IdentityIsolationTests(PostgresFixture banco)
 
         await using var escopo = banco.NovoEscopo(PostgresFixture.Contexto(b.Tenant));
         var loja = escopo.ServiceProvider.GetRequiredService<IAuthenticationStore>();
+        var embutido = escopo.ServiceProvider.GetRequiredService<IEmbeddedStore>();
         var (_, hash) = SessionTokens.Generate();
         var sessaoDeA = Session.Create(a.Tenant.TenantId, a.Admin.Id, hash, DateTimeOffset.UtcNow, TimeSpan.FromHours(1));
 
@@ -332,9 +334,10 @@ public sealed class IdentityIsolationTests(PostgresFixture banco)
         await using var escopo = banco.NovoEscopo();
         var tenants = escopo.ServiceProvider.GetRequiredService<ITenantDirectory>();
         var loja = escopo.ServiceProvider.GetRequiredService<IAuthenticationStore>();
+        var embutido = escopo.ServiceProvider.GetRequiredService<IEmbeddedStore>();
 
-        var noLimite = new SessionAuthenticator(loja, tenants, new RelogioFixoEm(DateTimeOffset.UtcNow.AddHours(8).AddMinutes(-1)));
-        var depois = new SessionAuthenticator(loja, tenants, new RelogioFixoEm(DateTimeOffset.UtcNow.AddHours(8).AddMinutes(1)));
+        var noLimite = new SessionAuthenticator(loja, embutido, tenants, new RelogioFixoEm(DateTimeOffset.UtcNow.AddHours(8).AddMinutes(-1)));
+        var depois = new SessionAuthenticator(loja, embutido, tenants, new RelogioFixoEm(DateTimeOffset.UtcNow.AddHours(8).AddMinutes(1)));
 
         Assert.NotNull(await noLimite.AuthenticateAsync(login.Token));
         Assert.Null(await depois.AuthenticateAsync(login.Token));
