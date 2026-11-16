@@ -474,6 +474,20 @@ Todos usam o PostgreSQL 17 local (porta 5433) com dados sintéticos e dublês: u
 | **Resistência** | 1 hora de carga contínua observando inchaço das tabelas de fila, autovacuum, memória e rotatividade de lease |
 | **Calibração** | escritas por mensagem trocada (amplificação), latência de aquisição de lane e profundidade sustentável: dão os limiares para a decisão sobre o broker |
 
+## 13. Embedded e início ativo (ADR 0039 e 0040)
+
+O painel incorporável, a autenticação federada, o vínculo cliente-contato e o início ativo de conversas **não criam módulo nem aresta**: ficam nos módulos existentes, com a matriz `module-dependencies.json` v0.3 idêntica em arestas à v0.2.
+
+| Módulo | Responsabilidade nova | Fronteira |
+|---|---|---|
+| Identity | conexões de integração e chaves, tickets de uso único, identidades externas, sessão embutida, revogação; `IEmbeddedContextQuery` em `Identity.Contracts` | o Capabilities lê o contexto só por esse contrato (aresta `Capabilities -> Identity` já existente) |
+| Conversations | vínculo cliente do ERP ↔ contato, consentimento rastreável, alias de contato, sessão iniciada pela empresa | dono de contato e sessão; guarda só o identificador opaco da conexão (sem referência ao Identity) |
+| ContactCenter | rotas por cliente e orquestração do início ativo (sessão, item, mensagem) | usa os contratos do Conversations; o envio segue pela porta do host do ADR 0027 |
+| Capabilities | origem `EmbeddedPanel`, parâmetro de contexto, operações do painel | a autorização continua do usuário; o `customerRef` vem do contexto da sessão |
+| Host (Api) | rotas `/embed/v1/*`, autenticação HMAC, **lista fechada de rotas** da sessão embutida, cabeçalhos | a lista não pode ser vazia nem conter rota administrativa (teste de arquitetura) |
+
+Regras: tenant e permissões só pelo `RequestContext` criado pelo Host; o ERP afirma a identidade e **nunca** concede permissão; o início ativo é sempre confirmado por atendente humano (`InitiatedBy` diferente de `Human` é recusado até haver ADR); consentimento sem evidência, finalidade, origem e data é recusado; nenhuma chamada real à Meta em desenvolvimento.
+
 ## Histórico de alterações
 
 | Data | Versão | Resumo | Aprovador | ADR |
@@ -491,3 +505,4 @@ Todos usam o PostgreSQL 17 local (porta 5433) com dados sintéticos e dublês: u
 | 03/11/2026 | 0.4.8 | Registro: o ADR 0017 (etapa 6a, AiGateway e Agents mínimos) foi **aceito** pelo decisor, e os projetos da seção 1 que ele prevê foram aprovados como planejamento (nenhum criado). Nenhuma regra, camada, aresta ou texto normativo mudou; a matriz não mudou | Mauro Porpino | 0017 (aceito) |
 | 12/11/2026 | 0.4.9 | §1: o módulo `Workflows` é ativado (ADR 0037 e 0038): interpretador determinístico e independente de canal, grafo versionado e imutável, efeitos duráveis idempotentes, variáveis pessoais cifradas. Sem Agents, Knowledge, AiGateway ou ContactCenter na matriz do módulo: portas em `Workflows.Contracts` implementadas pelo Agents e por adaptador do host. Um único dono por sessão (roteador com índice único). Contrato aditivo no Conversations (`RegisterFlowMessage`, autor `Bot`) preservando turno, época, estado, modo, idempotência e defasagem. A matriz não mudou | Mauro Porpino | 0037, 0038 |
 | 12/11/2026 | 0.4.10 | §1: registra os projetos do `Workflows` (Contracts, Core, Infrastructure, Presentation) e as arestas que a matriz já permitia e agora existem: `Workflows -> Conversations`, `Workflows -> Capabilities`, `Workflows -> Audit` e `Agents -> Workflows` (só os Contracts: o roteador e a porta de conhecimento). O `Conversations` ganhou, de forma aditiva, o comando de mensagem de fluxo e o evento de liberação ao agente (ADR 0038). Nenhuma aresta nova na matriz; o runtime nasce desligado | Mauro Porpino | 0037, 0038 |
+| 16/11/2026 | 0.4.11 | §13 (novo): registra o Embedded e o início ativo de conversas (ADR 0039 e 0040), parte obrigatória da V1: responsabilidades nos módulos existentes, lista fechada de rotas da sessão embutida, regras de confiança, consentimento e início humano. Nenhuma aresta nova na matriz (versão 0.3, idêntica em arestas); só contratos aditivos | Mauro Porpino | 0039, 0040 |

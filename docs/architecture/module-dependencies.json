@@ -1,6 +1,6 @@
 {
   "descricao": "Matriz de dependências entre os módulos do ia.bimeta. Fonte única (ver docs/architecture/BOUNDARIES.md, seção 3). Cada módulo lista os módulos cujos Contracts ele pode referenciar. Aresta nova exige ADR.",
-  "versao": "0.2",
+  "versao": "0.3",
   "modulos": {
     "Audit": [],
     "Tenancy": ["Audit"],
