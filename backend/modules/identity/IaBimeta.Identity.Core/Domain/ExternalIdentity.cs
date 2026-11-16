@@ -43,7 +43,13 @@ public sealed class ExternalIdentity : ITenantOwned
 
     public Guid? CreatedByUserId { get; }
 
+    /// <summary>Marca de revogação (logout do ERP ou emergência): sessão criada ATÉ este instante, e ticket emitido até ele, não valem mais. É o que fecha a corrida entre a troca de um ticket e a revogação.</summary>
+    public DateTimeOffset? SessionsRevokedAt { get; private set; }
+
     public bool IsActive => Status == ExternalIdentityStatus.Active;
+
+    /// <summary>Marca a revogação (logout do ERP): só avança no tempo.</summary>
+    public void MarkSessionsRevoked(DateTimeOffset now) => SessionsRevokedAt = SessionsRevokedAt is { } atual && atual > now ? atual : now;
 
     public static ExternalIdentity Create(TenantId tenantId, Guid connectionId, string? externalUserId, Guid userId, IdentitySource source, DateTimeOffset now, Guid? createdByUserId)
     {

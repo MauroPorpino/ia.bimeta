@@ -1098,6 +1098,16 @@ public sealed class QueueItemService
             ? (await _queues.ListMembershipsOfUserAsync(id, cancellationToken)).Select(m => m.QueueId).ToList()
             : new List<Guid>();
 
+        // Sessão embutida (ADR 0039): só as filas da organização da conexão, e nenhuma no modo CustomerOnly. A participação em fila é acesso fora das concessões, então o limite é aplicado aqui.
+        if (contexto.Principal?.Embedded is not null && participacoes.Count > 0)
+        {
+            var dentro = (await _queues.ListQueuesOfMemberAsync(usuario!.Value, cancellationToken))
+                .Where(f => !contexto.IsOutsideEmbeddedScope(f.OrganizationId))
+                .Select(f => f.Id)
+                .ToHashSet();
+            participacoes = participacoes.Where(dentro.Contains).ToList();
+        }
+
         if (organizacoes is { Count: 0 } && participacoes.Count == 0)
         {
             throw new AccessDeniedException(Permission.QueueRead);
@@ -1501,6 +1511,14 @@ public sealed class QueueItemService
 
         if (!recibo.Matches(esperado.Kind, contexto.Principal?.UserId, esperado.ItemId, esperado.QueueId, esperado.SessionId)
             || (esperado.CheckTarget && !recibo.HasTarget(esperado.TargetUserId)))
+        {
+            throw new QueueItemConflictException(
+                QueueItemConflict.RequestIdReused, "O identificador do pedido já foi usado por outra operação. Use um identificador novo.");
+        }
+
+        // Sessão embutida (ADR 0039): o recibo de uma operação sobre item de OUTRA organização (ou qualquer um, no modo CustomerOnly) nunca é devolvido nem concluído por ela. A resposta é a mesma do reuso indevido.
+        if (contexto.Principal?.Embedded is not null
+            && (await _items.FindItemReadOnlyAsync(recibo.ItemId, cancellationToken) is not { } doRecibo || contexto.IsOutsideEmbeddedScope(doRecibo.OrganizationId)))
         {
             throw new QueueItemConflictException(
                 QueueItemConflict.RequestIdReused, "O identificador do pedido já foi usado por outra operação. Use um identificador novo.");

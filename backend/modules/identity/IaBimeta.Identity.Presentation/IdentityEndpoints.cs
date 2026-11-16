@@ -154,6 +154,11 @@ public static class IdentityEndpoints
         {
             return Results.Problem(title: "Conflito", detail: ex.Message, statusCode: StatusCodes.Status409Conflict, extensions: Code("embedded-conflict"));
         }
+        catch (EmbeddedRateLimitedException ex)
+        {
+            contexto.HttpContext.Response.Headers.RetryAfter = Math.Max(1, (int)Math.Ceiling(ex.RetryAfter.TotalSeconds)).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            return Results.Problem(title: "Limite excedido", detail: "Requisições demais para esta chave.", statusCode: StatusCodes.Status429TooManyRequests, extensions: Code("embedded-rate-limited"));
+        }
         catch (EmbeddedUnavailableException ex)
         {
             // Sem chave mestra configurada (ou segredo ilegível): falha fechada, sem repetir segredo nem texto cifrado.

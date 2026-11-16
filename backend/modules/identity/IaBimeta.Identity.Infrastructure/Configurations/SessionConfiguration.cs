@@ -24,6 +24,7 @@ internal sealed class SessionConfiguration : IEntityTypeConfiguration<Session>
         builder.Property(s => s.Kind).HasColumnName("kind").HasConversion<string>().HasMaxLength(20).IsRequired().HasDefaultValue(SessionKind.Interactive);
         builder.Property(s => s.IntegrationId).HasColumnName("integration_id");
         builder.Property(s => s.ExternalUserId).HasColumnName("external_user_id").HasMaxLength(ExternalIdentity.ExternalUserIdMaxLength);
+        builder.Property(s => s.IssuerKeyId).HasColumnName("issuer_key_id");
         builder.Property(s => s.ParentOrigin).HasColumnName("parent_origin").HasMaxLength(IntegrationConnection.OriginMaxLength);
         builder.HasIndex(s => new { s.TenantId, s.IntegrationId, s.ExternalUserId }).HasDatabaseName("ix_sessions_tenant_id_integration_id_external_user_id");
 

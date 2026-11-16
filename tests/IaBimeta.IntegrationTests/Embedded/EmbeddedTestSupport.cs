@@ -23,7 +23,7 @@ internal sealed record TicketDto(string Ticket, DateTimeOffset ExpiresAt);
 
 internal sealed record UsuarioDaTrocaDto(Guid Id, string DisplayName);
 
-internal sealed record TrocaDto(string Token, DateTimeOffset ExpiresAt, string Mode, Guid OrganizationId, string? CustomerRef, UsuarioDaTrocaDto User);
+internal sealed record TrocaDto(string Token, DateTimeOffset ExpiresAt, string Mode, Guid OrganizationId, string? CustomerRef, UsuarioDaTrocaDto User, Guid SessionId);
 
 internal sealed record SessaoEmbutidaDto(Guid SessionId, string Mode, Guid OrganizationId, List<string> CustomerRefs, DateTimeOffset ExpiresAt);
 
@@ -87,9 +87,9 @@ internal sealed class ErpAssinante(ApiServer api, string keyId, string segredo, 
         return (await resposta.Content.ReadFromJsonAsync<TicketDto>())!;
     }
 
-    public async Task<TicketDto> EmitirContextoAsync(string externalUserId, string cliente)
+    public async Task<TicketDto> EmitirContextoAsync(string externalUserId, string cliente, Guid sessionId)
     {
-        using var resposta = await EnviarAsync("/embed/v1/context-tickets", new { externalUserId, customer = new { @ref = cliente } });
+        using var resposta = await EnviarAsync("/embed/v1/context-tickets", new { externalUserId, sessionId, customer = new { @ref = cliente } });
         Assert.Equal(HttpStatusCode.Created, resposta.StatusCode);
         return (await resposta.Content.ReadFromJsonAsync<TicketDto>())!;
     }
@@ -209,4 +209,22 @@ internal sealed class EmbeddedCenario
     }
 
     public Task<HttpResponseMessage> ComoAsync(string token, HttpMethod metodo, string caminho, object? corpo = null) => Api.EnviarAsync(token, metodo, caminho, corpo);
+}
+
+/// <summary>Captura os erros que o servidor registra em log, para o teste mostrá-los quando um status inesperado (500) aparecer sob concorrência.</summary>
+internal sealed class CapturaDeErros(System.Collections.Concurrent.ConcurrentBag<string> registros) : Microsoft.Extensions.Logging.ILoggerProvider, Microsoft.Extensions.Logging.ILogger
+{
+    public Microsoft.Extensions.Logging.ILogger CreateLogger(string categoria) => this;
+
+    public void Dispose()
+    {
+    }
+
+    public IDisposable? BeginScope<TState>(TState estado)
+        where TState : notnull => null;
+
+    public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel nivel) => nivel >= Microsoft.Extensions.Logging.LogLevel.Error;
+
+    public void Log<TState>(Microsoft.Extensions.Logging.LogLevel nivel, Microsoft.Extensions.Logging.EventId evento, TState estado, Exception? excecao, Func<TState, Exception?, string> formatador) =>
+        registros.Add(formatador(estado, excecao) + " :: " + excecao);
 }

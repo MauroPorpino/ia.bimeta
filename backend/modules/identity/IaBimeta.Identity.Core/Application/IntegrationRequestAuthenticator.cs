@@ -10,14 +10,13 @@ namespace IaBimeta.Identity.Application;
 
 /// <summary>
 /// Autentica as chamadas assinadas (HMAC-SHA256) do servidor do ERP (ADR 0039, seção 3). A assinatura cobre a versão, o instante, o nonce, o método, o caminho e o SHA-256 do corpo bruto:
-/// <c>v1 ⏎ timestamp ⏎ nonce ⏎ MÉTODO ⏎ caminho ⏎ sha256hex(corpo)</c>. O caminho assinado é o que o Api enxerga, SEM o prefixo <c>/api</c> do proxy (o prefixo, se presente, é ignorado). O instante precisa estar na
+/// <c>v1 ⏎ timestamp ⏎ nonce ⏎ MÉTODO ⏎ caminho ⏎ sha256hex(corpo)</c>. O caminho assinado é EXATAMENTE o que o Api enxerga, SEM o prefixo <c>/api</c> do proxy (que o Caddy já removeu); com o prefixo, sem ele, com barra final ou com outra caixa, a assinatura é outra. O instante precisa estar na
 /// janela, o nonce não pode se repetir (só é registrado DEPOIS de a assinatura conferir), a chave precisa estar utilizável, a conexão e o tenant ativos. Toda falha é a mesma <see cref="EmbeddedAuthenticationException"/>:
 /// nada revela qual verificação falhou. O tenant sai da conexão da chave, nunca da requisição.
 /// </summary>
 public sealed class IntegrationRequestAuthenticator
 {
     public const string SignatureVersion = "v1";
-    private const string ProxyPrefix = "/api";
 
     private readonly IEmbeddedStore _store;
     private readonly ITenantDirectory _tenants;
@@ -25,8 +24,9 @@ public sealed class IntegrationRequestAuthenticator
     private readonly IdentityOptions _options;
     private readonly TimeProvider _clock;
     private readonly IAuditWriter _audit;
+    private readonly IntegrationRateLimiter? _limiter;
 
-    public IntegrationRequestAuthenticator(IEmbeddedStore store, ITenantDirectory tenants, IIntegrationSecretProtector protector, IdentityOptions options, TimeProvider clock, IAuditWriter audit)
+    public IntegrationRequestAuthenticator(IEmbeddedStore store, ITenantDirectory tenants, IIntegrationSecretProtector protector, IdentityOptions options, TimeProvider clock, IAuditWriter audit, IntegrationRateLimiter? limiter = null)
     {
         _store = store;
         _tenants = tenants;
@@ -34,6 +34,7 @@ public sealed class IntegrationRequestAuthenticator
         _options = options;
         _clock = clock;
         _audit = audit;
+        _limiter = limiter;
     }
 
     /// <exception cref="EmbeddedAuthenticationException">Qualquer falha de autenticação (sempre a mesma).</exception>
@@ -50,14 +51,18 @@ public sealed class IntegrationRequestAuthenticator
         }
 
         var achada = await _store.FindKeyAsync(chaveId, cancellationToken) ?? throw new EmbeddedAuthenticationException();
+
+        // Chave conhecida com falhas demais na janela: recusa ANTES de gastar banco, assinatura e trilha. (A chave inexistente nem chega aqui: só gasta o limite da origem de rede, do host.)
+        _limiter?.ThrowIfKeyThrottled(chaveId);
         var tenantId = achada.Key.TenantId;
         var agora = _clock.GetUtcNow();
 
         // Daqui para baixo o tenant é conhecido: a recusa entra na trilha (uma entrada por tentativa; o limite de taxa do host contém o excesso).
         try
         {
-            var instante = DateTimeOffset.FromUnixTimeSeconds(segundos);
-            if ((agora - instante).Duration() > _options.IntegrationSignatureWindow
+            // Aritmética em segundos inteiros: um instante absurdo (ex.: 99999999999999999) é só mais uma assinatura fora da janela, nunca uma exceção de conversão de data (E1-R).
+            var distancia = Math.Abs(agora.ToUnixTimeSeconds() - segundos);
+            if (distancia > _options.IntegrationSignatureWindow.TotalSeconds
                 || !achada.Key.IsUsableAt(agora)
                 || !achada.Connection.IsActive)
             {
@@ -84,11 +89,13 @@ public sealed class IntegrationRequestAuthenticator
         }
         catch (Exception ex) when (ex is EmbeddedAuthenticationException or EmbeddedUnavailableException)
         {
+            _limiter?.RecordKeyFailure(chaveId);
             await _audit.WriteForAuthenticationAsync(tenantId, null, new AuditEntry("identity.embed.integration.authenticate", "integration_key", chaveId.ToString("N"), AuditOutcome.Denied), cancellationToken);
             throw new EmbeddedAuthenticationException();
         }
 
         var c = achada.Connection;
+        _limiter?.CheckConnection(c.Id);
         return new AuthenticatedIntegration(tenantId, c.Id, chaveId, c.OrganizationId, c.Mode, c.Provisioning, c.AllowedOrigins, c.AllowStartConversation);
     }
 
@@ -110,11 +117,9 @@ public sealed class IntegrationRequestAuthenticator
             new ProtectedIntegrationSecret(achada.Key.SecretKeyId, achada.Key.SecretCiphertext),
             new IntegrationSecretBinding(achada.Key.TenantId, achada.Key.ConnectionId, achada.Key.Id));
 
-    private static string NormalizePath(string path)
-    {
-        var caminho = path ?? string.Empty;
-        return caminho.StartsWith(ProxyPrefix + "/", StringComparison.Ordinal) ? caminho[ProxyPrefix.Length..] : caminho;
-    }
+    // O caminho assinado é EXATAMENTE o que o Api recebe (o proxy já removeu o /api): nenhuma forma alternativa (com /api, barra final, caixa diferente) vale a mesma assinatura (E1-R).
+    private static string NormalizePath(string path) => path ?? string.Empty;
+
 
     private static bool IsValidNonce(string? nonce)
     {

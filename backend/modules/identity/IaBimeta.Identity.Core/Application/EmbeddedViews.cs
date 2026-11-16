@@ -39,7 +39,7 @@ public sealed record TicketResult(string Ticket, DateTimeOffset ExpiresAt);
 
 public sealed record ExchangeUserView(Guid UserId, string DisplayName);
 
-public sealed record ExchangeResult(string Token, DateTimeOffset ExpiresAt, EmbeddedMode Mode, Guid OrganizationId, string? CustomerRef, ExchangeUserView User);
+public sealed record ExchangeResult(string Token, DateTimeOffset ExpiresAt, EmbeddedMode Mode, Guid OrganizationId, string? CustomerRef, ExchangeUserView User, Guid SessionId);
 
 /// <summary>Os clientes em foco da sessão embutida corrente, para a interface.</summary>
 public sealed record EmbeddedSessionView(Guid SessionId, EmbeddedMode Mode, Guid OrganizationId, IReadOnlyList<string> CustomerRefs, DateTimeOffset ExpiresAt);

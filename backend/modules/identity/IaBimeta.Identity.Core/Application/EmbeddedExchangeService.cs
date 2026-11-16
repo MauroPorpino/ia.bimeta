@@ -71,18 +71,25 @@ public sealed class EmbeddedExchangeService
                 throw new EmbeddedAuthenticationException();
             }
 
+            // Ticket emitido ATÉ a marca de revogação (logout do ERP, emergência) não vale; chave revogada não abre sessão. Junto com a mesma checagem a cada requisição, fecha a corrida entre a troca e a revogação.
+            if (consumido.CreatedAt <= conexao.SessionsRevokedAt || consumido.CreatedAt <= vinculo.SessionsRevokedAt
+                || (consumido.KeyId is { } chaveId && (await _store.FindKeyAsync(chaveId, cancellationToken) is not { } chave || chave.Key.Status == IntegrationKeyStatus.Revoked || chave.Key.ConnectionId != conexao.Id)))
+            {
+                throw new EmbeddedAuthenticationException();
+            }
+
             var concessoes = await _auth.ListGrantsAsync(tenantId, usuario.Id, cancellationToken);
             if (!EmbeddedSessionPolicy.IsEligible(concessoes, conexao.OrganizationId, out _))
             {
                 throw new EmbeddedAuthenticationException();
             }
 
-            var (token, tokenHash) = SessionTokens.Generate();
-            var sessao = Session.CreateEmbedded(tenantId, usuario.Id, tokenHash, agora, _options.EmbeddedSessionLifetime, conexao.Id, consumido.ExternalUserId, origem);
+            var (token, tokenHash) = SessionTokens.GenerateEmbedded();
+            var sessao = Session.CreateEmbedded(tenantId, usuario.Id, tokenHash, agora, _options.EmbeddedSessionLifetime, conexao.Id, consumido.ExternalUserId, origem, consumido.KeyId);
             await _store.AddEmbeddedSessionAsync(sessao, consumido.CustomerRef, _options.MaxEmbeddedSessionsPerUser, agora, cancellationToken);
 
             await _audit.WriteForAuthenticationAsync(tenantId, usuario.Id, new AuditEntry("identity.embed.exchange", "session", sessao.Id.ToString(), AuditOutcome.Success), cancellationToken);
-            return new ExchangeResult(token, sessao.ExpiresAt, conexao.Mode, conexao.OrganizationId, consumido.CustomerRef, new ExchangeUserView(usuario.Id, usuario.DisplayName));
+            return new ExchangeResult(token, sessao.ExpiresAt, conexao.Mode, conexao.OrganizationId, consumido.CustomerRef, new ExchangeUserView(usuario.Id, usuario.DisplayName), sessao.Id);
         }
         catch (EmbeddedAuthenticationException)
         {
@@ -113,6 +120,7 @@ public sealed class EmbeddedExchangeService
         if (consumido.TenantId != contexto.TenantId
             || consumido.Kind != TicketKind.Context
             || sessao is not { Kind: SessionKind.Embedded }
+            || consumido.SessionId != sessao.Id
             || sessao.IntegrationId != consumido.ConnectionId
             || sessao.UserId != consumido.UserId
             || !string.Equals(sessao.ExternalUserId, consumido.ExternalUserId, StringComparison.Ordinal)

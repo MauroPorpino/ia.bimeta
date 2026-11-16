@@ -1,3 +1,4 @@
+using IaBimeta.Identity.Contracts.Queries;
 using IaBimeta.Identity.Domain;
 using IaBimeta.SharedKernel;
 using IaBimeta.Tenancy.Contracts;
@@ -30,13 +31,14 @@ public sealed class SessionAuthenticator
 
     public async Task<AuthenticatedPrincipal?> AuthenticateAsync(string? token, CancellationToken cancellationToken = default)
     {
-        if (!SessionTokens.TryHash(token, out var hash))
+        if (!SessionTokens.TryHash(token, out var hash, out var embutido))
         {
             return null;
         }
 
         var sessao = await _store.FindSessionByTokenHashAsync(hash, cancellationToken);
-        if (sessao is null || !sessao.IsActiveAt(_clock.GetUtcNow()))
+        // O formato do token e o tipo da sessão têm de coincidir (ibs_ só para interativa, ibe_ só para embutida): nunca um tipo se passa pelo outro.
+        if (sessao is null || !sessao.IsActiveAt(_clock.GetUtcNow()) || (sessao.Kind == SessionKind.Embedded) != embutido)
         {
             return null;
         }
@@ -87,8 +89,27 @@ public sealed class SessionAuthenticator
             return null;
         }
 
+        // Origens autorizadas: a sessão só vale enquanto a origem do pai comprovada na troca CONTINUA na lista da conexão (o administrador tirou a origem = a sessão cai).
+        if (sessao.ParentOrigin is null || !conexao.IsOriginAllowed(sessao.ParentOrigin))
+        {
+            return null;
+        }
+
         var vinculo = await _embedded.FindIdentityAsync(sessao.TenantId, conexaoId, sessao.ExternalUserId, cancellationToken);
         if (vinculo is not { IsActive: true } || vinculo.UserId != usuario.Id)
+        {
+            return null;
+        }
+
+        // Revogação (logout do ERP, emergência): sessão criada até a marca não vale, mesmo que tenha sido gravada DEPOIS da revogação por uma troca que corria junto.
+        if (sessao.CreatedAt <= conexao.SessionsRevokedAt || sessao.CreatedAt <= vinculo.SessionsRevokedAt)
+        {
+            return null;
+        }
+
+        // Chave revogada: a sessão aberta com um ticket dela cai (chave só expirada pela rotação não derruba as sessões).
+        if (sessao.IssuerKeyId is { } chaveId
+            && (await _embedded.FindKeyAsync(chaveId, cancellationToken) is not { } chave || chave.Key.Status == IntegrationKeyStatus.Revoked || chave.Key.ConnectionId != conexaoId))
         {
             return null;
         }
@@ -99,10 +120,13 @@ public sealed class SessionAuthenticator
             return null;
         }
 
-        var permissoes = EmbeddedSessionPolicy.Filter(
-            concessoes.SelectMany(c => RolePermissions.Expand(c.Role, c.OrganizationId)),
-            conexao.OrganizationId);
+        // Modo CustomerOnly: nenhuma permissão por concessão e escopo que nega também as vias fora das concessões (fila, responsável, recibo) até existir a autorização por cliente (E2): bloqueio seguro por padrão.
+        var somenteCliente = conexao.Mode == EmbeddedMode.CustomerOnly;
+        var permissoes = somenteCliente
+            ? new List<PermissionGrant>()
+            : EmbeddedSessionPolicy.Filter(concessoes.SelectMany(c => RolePermissions.Expand(c.Role, c.OrganizationId)), conexao.OrganizationId);
 
-        return new AuthenticatedPrincipal(sessao.TenantId, usuario.Id, sessao.Id, permissoes, SessionKind.Embedded, conexaoId);
+        return new AuthenticatedPrincipal(
+            sessao.TenantId, usuario.Id, sessao.Id, permissoes, SessionKind.Embedded, conexaoId, new EmbeddedScope(conexao.OrganizationId, somenteCliente));
     }
 }

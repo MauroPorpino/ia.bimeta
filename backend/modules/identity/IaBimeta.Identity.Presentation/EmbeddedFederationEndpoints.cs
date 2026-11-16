@@ -4,6 +4,7 @@ using IaBimeta.Identity.Domain;
 using IaBimeta.SharedKernel;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Routing;
 
@@ -43,7 +44,7 @@ internal static class EmbeddedFederationEndpoints
         {
             var (integracao, corpo) = await AuthenticateAsync(http, autenticador, ct);
             var pedido = Parse<ContextTicketRequest>(corpo);
-            var resultado = await tickets.IssueContextTicketAsync(integracao, pedido.ExternalUserId, pedido.Customer?.Ref, ct);
+            var resultado = await tickets.IssueContextTicketAsync(integracao, pedido.ExternalUserId, pedido.SessionId, pedido.Customer?.Ref, ct);
             http.Response.Headers.CacheControl = "no-store";
             return Results.Json(new { ticket = resultado.Ticket, expiresAt = resultado.ExpiresAt }, statusCode: StatusCodes.Status201Created);
         }).RequireRateLimiting(EmbeddedRateLimits.IntegrationPolicy);
@@ -56,8 +57,10 @@ internal static class EmbeddedFederationEndpoints
             return Results.Ok(new { revoked = revogadas });
         }).RequireRateLimiting(EmbeddedRateLimits.IntegrationPolicy);
 
-        embed.MapPost("/exchange", async (ExchangeRequest pedido, HttpContext http, EmbeddedExchangeService troca, CancellationToken ct) =>
+        embed.MapPost("/exchange", async (HttpContext http, EmbeddedExchangeService troca, CancellationToken ct) =>
         {
+            // O corpo é lido com teto ANTES de qualquer processamento JSON (inclusive sem Content-Length): nada de o framework materializar um corpo enorme primeiro.
+            var pedido = Parse<ExchangeRequest>(await ReadBodyAsync(http, ct));
             var resultado = await troca.ExchangeAsync(pedido.Ticket, pedido.Verifier, pedido.ParentOrigin, ct);
 
             // O token aparece só nesta resposta: nada de guardar em cache de proxy ou de navegador.
@@ -69,13 +72,14 @@ internal static class EmbeddedFederationEndpoints
                 mode = resultado.Mode,
                 organizationId = resultado.OrganizationId,
                 customerRef = resultado.CustomerRef,
+                sessionId = resultado.SessionId,
                 user = new { id = resultado.User.UserId, displayName = resultado.User.DisplayName },
             });
         }).RequireRateLimiting(EmbeddedRateLimits.ExchangePolicy);
 
         // Daqui para baixo, a sessão embutida (Bearer) cria o contexto; a lista de rotas permitidas do host as admite.
-        embed.MapPost("/context", async (RedeemContextRequest pedido, EmbeddedExchangeService troca, CancellationToken ct) =>
-            Results.Ok(new { customerRef = await troca.RedeemContextTicketAsync(pedido.Ticket, ct) }));
+        embed.MapPost("/context", async (HttpContext http, EmbeddedExchangeService troca, CancellationToken ct) =>
+            Results.Ok(new { customerRef = await troca.RedeemContextTicketAsync(Parse<RedeemContextRequest>(await ReadBodyAsync(http, ct)).Ticket, ct) }));
 
         embed.MapGet("/session", async (EmbeddedExchangeService troca, CancellationToken ct) =>
             await troca.GetCurrentSessionAsync(ct) is { } sessao ? Results.Ok(sessao) : Results.NotFound());
@@ -85,6 +89,12 @@ internal static class EmbeddedFederationEndpoints
 
     private static async Task<(AuthenticatedIntegration Integration, byte[] Body)> AuthenticateAsync(HttpContext http, IntegrationRequestAuthenticator autenticador, CancellationToken ct)
     {
+        // As rotas assinadas não têm parâmetros de consulta: a assinatura cobre só método, caminho e corpo, então uma consulta seria dado NÃO assinado.
+        if (http.Request.QueryString.HasValue)
+        {
+            throw new IdentityValidationException("Esta rota não aceita parâmetros de consulta.");
+        }
+
         var corpo = await ReadBodyAsync(http, ct);
         var cabecalhos = http.Request.Headers;
         var requisicao = new IntegrationSignedRequest(
@@ -103,6 +113,12 @@ internal static class EmbeddedFederationEndpoints
 
     private static async Task<byte[]> ReadBodyAsync(HttpContext http, CancellationToken ct)
     {
+        // O teto também vale para o servidor (corpo sem Content-Length, em pedaços): estoura antes de qualquer leitura grande.
+        if (http.Features.Get<IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } limite)
+        {
+            limite.MaxRequestBodySize = MaxBodyBytes;
+        }
+
         if (http.Request.ContentLength is { } tamanho && tamanho > MaxBodyBytes)
         {
             throw new IdentityValidationException("Corpo grande demais.");

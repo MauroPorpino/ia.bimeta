@@ -15,7 +15,7 @@ public sealed class LaunchTicket : ITenantOwned
 
     private LaunchTicket(
         Guid id, TenantId tenantId, Guid connectionId, TicketKind kind, byte[] tokenHash, string? challenge, string? parentOrigin, string externalUserId, Guid userId,
-        string? customerRef, DateTimeOffset createdAt, DateTimeOffset expiresAt, DateTimeOffset? usedAt)
+        string? customerRef, DateTimeOffset createdAt, DateTimeOffset expiresAt, DateTimeOffset? usedAt, Guid? keyId, Guid? sessionId)
     {
         Id = id;
         TenantId = tenantId;
@@ -30,6 +30,8 @@ public sealed class LaunchTicket : ITenantOwned
         CreatedAt = createdAt;
         ExpiresAt = expiresAt;
         UsedAt = usedAt;
+        KeyId = keyId;
+        SessionId = sessionId;
     }
 
     public Guid Id { get; }
@@ -61,8 +63,14 @@ public sealed class LaunchTicket : ITenantOwned
 
     public DateTimeOffset? UsedAt { get; private set; }
 
+    /// <summary>A chave de integração que assinou a emissão: se for revogada, o ticket pendente deixa de valer e a sessão que dele nascer também.</summary>
+    public Guid? KeyId { get; }
+
+    /// <summary>No ticket de contexto, a sessão EXATA que pode resgatá-lo (o ERP a informa; outra sessão do mesmo usuário não vale).</summary>
+    public Guid? SessionId { get; }
+
     public static LaunchTicket CreateLaunch(
-        TenantId tenantId, Guid connectionId, byte[] tokenHash, string challenge, string parentOrigin, string externalUserId, Guid userId, string? customerRef, DateTimeOffset now, TimeSpan lifetime)
+        TenantId tenantId, Guid connectionId, byte[] tokenHash, string challenge, string parentOrigin, string externalUserId, Guid userId, string? customerRef, DateTimeOffset now, TimeSpan lifetime, Guid? keyId = null)
     {
         ArgumentNullException.ThrowIfNull(tenantId);
         ValidateHash(tokenHash);
@@ -72,16 +80,16 @@ public sealed class LaunchTicket : ITenantOwned
         }
 
         ArgumentException.ThrowIfNullOrWhiteSpace(parentOrigin);
-        return new LaunchTicket(Guid.CreateVersion7(), tenantId, connectionId, TicketKind.Launch, tokenHash, challenge, parentOrigin, externalUserId, userId, NormalizeCustomerRef(customerRef), now, now + lifetime, null);
+        return new LaunchTicket(Guid.CreateVersion7(), tenantId, connectionId, TicketKind.Launch, tokenHash, challenge, parentOrigin, externalUserId, userId, NormalizeCustomerRef(customerRef), now, now + lifetime, null, keyId, null);
     }
 
     public static LaunchTicket CreateContext(
-        TenantId tenantId, Guid connectionId, byte[] tokenHash, string externalUserId, Guid userId, string customerRef, DateTimeOffset now, TimeSpan lifetime)
+        TenantId tenantId, Guid connectionId, byte[] tokenHash, string externalUserId, Guid userId, string customerRef, DateTimeOffset now, TimeSpan lifetime, Guid? keyId = null, Guid? sessionId = null)
     {
         ArgumentNullException.ThrowIfNull(tenantId);
         ValidateHash(tokenHash);
         var cliente = NormalizeCustomerRef(customerRef) ?? throw new IdentityValidationException("O ticket de contexto exige o cliente do ERP.");
-        return new LaunchTicket(Guid.CreateVersion7(), tenantId, connectionId, TicketKind.Context, tokenHash, null, null, externalUserId, userId, cliente, now, now + lifetime, null);
+        return new LaunchTicket(Guid.CreateVersion7(), tenantId, connectionId, TicketKind.Context, tokenHash, null, null, externalUserId, userId, cliente, now, now + lifetime, null, keyId, sessionId);
     }
 
     /// <summary>O identificador do cliente do ERP: opaco, 1 a 128 caracteres, sem controle. <c>null</c> se vazio.</summary>

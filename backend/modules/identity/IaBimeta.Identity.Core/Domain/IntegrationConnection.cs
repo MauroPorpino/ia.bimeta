@@ -57,7 +57,13 @@ public sealed class IntegrationConnection : ITenantOwned
 
     public DateTimeOffset UpdatedAt { get; private set; }
 
+    /// <summary>Marca de revogação de emergência de TODAS as sessões e tickets da conexão (sessão ou ticket criado até este instante não vale).</summary>
+    public DateTimeOffset? SessionsRevokedAt { get; private set; }
+
     public bool IsActive => Status == ConnectionStatus.Active;
+
+    /// <summary>Marca a revogação de emergência de todas as sessões e tickets da conexão: só avança no tempo.</summary>
+    public void MarkSessionsRevoked(DateTimeOffset now) => SessionsRevokedAt = SessionsRevokedAt is { } atual && atual > now ? atual : now;
 
     public static IntegrationConnection Create(
         TenantId tenantId, Guid organizationId, string? name, EmbeddedMode mode, ProvisioningMode provisioning, IEnumerable<string>? allowedOrigins,

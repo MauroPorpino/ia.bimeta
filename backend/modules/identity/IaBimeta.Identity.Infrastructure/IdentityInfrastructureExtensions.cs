@@ -53,6 +53,7 @@ public static class IdentityInfrastructureExtensions
         services.AddScoped<IUserDirectory>(provider => provider.GetRequiredService<UserDirectory>());
 
         services.AddScoped<IntegrationAdminService>();
+        services.AddSingleton<IntegrationRateLimiter>();
         services.AddScoped<IntegrationRequestAuthenticator>();
         services.AddScoped<EmbeddedTicketService>();
         services.AddScoped<EmbeddedExchangeService>();

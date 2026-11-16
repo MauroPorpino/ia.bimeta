@@ -72,7 +72,14 @@ internal sealed class EmbeddedEmMemoria : IEmbeddedStore
     public Task<bool> RevokeKeyAsync(TenantId tenantId, Guid connectionId, Guid keyId, DateTimeOffset now, CancellationToken cancellationToken)
     {
         var chave = Chaves.FirstOrDefault(k => k.TenantId == tenantId && k.ConnectionId == connectionId && k.Id == keyId);
-        return Task.FromResult(chave is not null && chave.Revoke(now));
+        var revogada = chave is not null && chave.Revoke(now);
+        if (revogada)
+        {
+            Sessoes.Where(s => s.TenantId == tenantId && s.IssuerKeyId == keyId).ToList().ForEach(s => s.Revoke(now));
+            Tickets.Where(t => t.TenantId == tenantId && t.KeyId == keyId).ToList().ForEach(t => TicketsUsados.TryAdd(t.Id, now));
+        }
+
+        return Task.FromResult(revogada);
     }
 
     public Task<bool> TryRecordNonceAsync(TenantId tenantId, Guid keyId, string nonce, DateTimeOffset expiresAt, CancellationToken cancellationToken)
@@ -165,6 +172,16 @@ internal sealed class EmbeddedEmMemoria : IEmbeddedStore
     public Task<int> RevokeEmbeddedSessionsAsync(TenantId tenantId, Guid connectionId, string? externalUserId, DateTimeOffset now, CancellationToken cancellationToken)
     {
         var alvo = Sessoes.Where(s => s.TenantId == tenantId && s.IntegrationId == connectionId && (externalUserId is null || s.ExternalUserId == externalUserId) && s.IsActiveAt(now)).ToList();
+        if (externalUserId is null)
+        {
+            Conexoes.FirstOrDefault(c => c.TenantId == tenantId && c.Id == connectionId)?.MarkSessionsRevoked(now);
+        }
+        else
+        {
+            Vinculos.FirstOrDefault(i => i.TenantId == tenantId && i.ConnectionId == connectionId && i.ExternalUserId == externalUserId)?.MarkSessionsRevoked(now);
+        }
+
+        Tickets.Where(t => t.TenantId == tenantId && t.ConnectionId == connectionId && (externalUserId is null || t.ExternalUserId == externalUserId)).ToList().ForEach(t => TicketsUsados.TryAdd(t.Id, now));
         alvo.ForEach(s => s.Revoke(now));
         return Task.FromResult(alvo.Count);
     }

@@ -15,7 +15,7 @@ public sealed class Session : ITenantOwned
     // Usado pela fábrica e pelo EF Core (que liga os parâmetros às propriedades pelo nome).
     private Session(
         Guid id, TenantId tenantId, Guid userId, byte[] tokenHash, DateTimeOffset createdAt, DateTimeOffset expiresAt, DateTimeOffset? revokedAt,
-        SessionKind kind, Guid? integrationId, string? externalUserId, string? parentOrigin)
+        SessionKind kind, Guid? integrationId, string? externalUserId, string? parentOrigin, Guid? issuerKeyId)
     {
         Id = id;
         TenantId = tenantId;
@@ -28,6 +28,7 @@ public sealed class Session : ITenantOwned
         IntegrationId = integrationId;
         ExternalUserId = externalUserId;
         ParentOrigin = parentOrigin;
+        IssuerKeyId = issuerKeyId;
     }
 
     public Guid Id { get; }
@@ -55,13 +56,16 @@ public sealed class Session : ITenantOwned
     /// <summary>A origem do pai (o ERP) comprovada na troca do ticket.</summary>
     public string? ParentOrigin { get; }
 
+    /// <summary>A chave de integração cujo ticket abriu a sessão embutida: revogar a chave derruba a sessão.</summary>
+    public Guid? IssuerKeyId { get; }
+
     public static Session Create(TenantId tenantId, Guid userId, byte[] tokenHash, DateTimeOffset now, TimeSpan lifetime)
     {
         Validate(tenantId, tokenHash, lifetime);
-        return new Session(Guid.CreateVersion7(), tenantId, userId, tokenHash, now, now + lifetime, null, SessionKind.Interactive, null, null, null);
+        return new Session(Guid.CreateVersion7(), tenantId, userId, tokenHash, now, now + lifetime, null, SessionKind.Interactive, null, null, null, null);
     }
 
-    public static Session CreateEmbedded(TenantId tenantId, Guid userId, byte[] tokenHash, DateTimeOffset now, TimeSpan lifetime, Guid integrationId, string externalUserId, string parentOrigin)
+    public static Session CreateEmbedded(TenantId tenantId, Guid userId, byte[] tokenHash, DateTimeOffset now, TimeSpan lifetime, Guid integrationId, string externalUserId, string parentOrigin, Guid? issuerKeyId = null)
     {
         Validate(tenantId, tokenHash, lifetime);
         ArgumentException.ThrowIfNullOrWhiteSpace(externalUserId);
@@ -71,7 +75,7 @@ public sealed class Session : ITenantOwned
             throw new ArgumentException("A sessão embutida precisa da conexão.", nameof(integrationId));
         }
 
-        return new Session(Guid.CreateVersion7(), tenantId, userId, tokenHash, now, now + lifetime, null, SessionKind.Embedded, integrationId, externalUserId, parentOrigin);
+        return new Session(Guid.CreateVersion7(), tenantId, userId, tokenHash, now, now + lifetime, null, SessionKind.Embedded, integrationId, externalUserId, parentOrigin, issuerKeyId);
     }
 
     private static void Validate(TenantId tenantId, byte[] tokenHash, TimeSpan lifetime)

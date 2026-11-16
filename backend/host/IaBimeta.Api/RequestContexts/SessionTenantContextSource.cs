@@ -49,6 +49,6 @@ internal sealed class SessionTenantContextSource : ITenantContextSource
         return new RequestContext(
             principal.TenantId,
             principal.Kind == Identity.Domain.SessionKind.Embedded ? EmbeddedOrigin : Origin,
-            new ActorPrincipal(principal.UserId, principal.SessionId, principal.Permissions));
+            new ActorPrincipal(principal.UserId, principal.SessionId, principal.Permissions, principal.Embedded));
     }
 }

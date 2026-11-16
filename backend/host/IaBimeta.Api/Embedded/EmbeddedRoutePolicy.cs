@@ -52,6 +52,26 @@ internal static class EmbeddedRoutePolicy
         new("POST", "/embed/v1/context"),
     };
 
+    // O modo CustomerOnly (E1-R) não alcança a fila geral nem atendimento algum até a autorização por cliente (E2): só a própria sessão e o resgate do contexto.
+    private static readonly string[] CustomerOnlyPatterns = { "/auth/me", "/auth/logout", "/embed/v1/session", "/embed/v1/context" };
+
+    /// <summary>Se o método e o caminho estão na lista E, para a sessão <c>CustomerOnly</c>, no subconjunto que ela alcança.</summary>
+    public static bool IsAllowed(string? method, string? path, bool customerOnly)
+    {
+        if (!IsAllowed(method, path))
+        {
+            return false;
+        }
+
+        if (!customerOnly)
+        {
+            return true;
+        }
+
+        var caminho = path!.Length > 1 ? path.TrimEnd('/') : path;
+        return CustomerOnlyPatterns.Contains(caminho, StringComparer.OrdinalIgnoreCase);
+    }
+
     /// <summary>Se o método e o caminho (sem consulta) estão na lista. Sem exceção: caminho vazio, com <c>..</c>, barras duplas ou fora do padrão nega.</summary>
     public static bool IsAllowed(string? method, string? path)
     {
@@ -88,7 +108,8 @@ internal sealed class EmbeddedRouteGuard
 
     public async Task InvokeAsync(HttpContext http, RequestContextHolder holder)
     {
-        if (holder.Current is { Origin: RequestContexts.SessionTenantContextSource.EmbeddedOrigin } && !EmbeddedRoutePolicy.IsAllowed(http.Request.Method, http.Request.Path.Value))
+        if (holder.Current is { Origin: RequestContexts.SessionTenantContextSource.EmbeddedOrigin } embutido
+            && !EmbeddedRoutePolicy.IsAllowed(http.Request.Method, http.Request.Path.Value, embutido.Principal?.Embedded?.CustomerOnly ?? true))
         {
             var problema = new ProblemDetails
             {
@@ -109,10 +130,9 @@ internal sealed class EmbeddedRouteGuard
 /// <summary>Política de partição do limite de taxa das chamadas assinadas.</summary>
 internal static class EmbeddedHostPolicies
 {
-    /// <summary>A cota é por identificador de chave informado; sem cabeçalho (ou lixo), cai na origem de rede.</summary>
-    public static string IntegrationPartition(HttpContext http)
-    {
-        var chave = http.Request.Headers["X-IaB-Key-Id"].ToString();
-        return chave.Length is > 0 and <= 64 ? "k:" + chave : "ip:" + (http.Connection.RemoteIpAddress?.ToString() ?? "origem-desconhecida");
-    }
+    /// <summary>
+    /// A cota anterior à autenticação é SÓ por origem de rede (E1-R): nada que o chamador escolha (como o identificador de chave do cabeçalho, que ele inventaria a cada requisição para ganhar uma cota nova) define a partição.
+    /// O limite por chave conhecida (falhas) e por conexão autenticada vem depois, no Identity (<c>IntegrationRateLimiter</c>).
+    /// </summary>
+    public static string IntegrationPartition(HttpContext http) => "ip:" + (http.Connection.RemoteIpAddress?.ToString() ?? "origem-desconhecida");
 }

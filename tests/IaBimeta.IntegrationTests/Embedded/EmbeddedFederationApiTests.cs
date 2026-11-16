@@ -39,7 +39,7 @@ public sealed class EmbeddedFederationApiTests(PostgresFixture banco)
 
         var (troca, _) = await c.EntrarAsync("u-100", cliente: "CLI-1");
 
-        Assert.StartsWith("ibs_", troca.Token);
+        Assert.StartsWith("ibe_", troca.Token);
         Assert.Equal("FullAttendant", troca.Mode);
         Assert.Equal(c.Organizacao.Id, troca.OrganizationId);
         Assert.Equal("CLI-1", troca.CustomerRef);
@@ -546,7 +546,7 @@ public sealed class EmbeddedFederationApiTests(PostgresFixture banco)
         await using var servidor = c.Api;
         var (troca, _) = await c.EntrarAsync("u-ctx", cliente: "CLI-1");
 
-        var contexto = await c.Erp.EmitirContextoAsync("u-ctx", "CLI-2");
+        var contexto = await c.Erp.EmitirContextoAsync("u-ctx", "CLI-2", troca.SessionId);
         using var resgate = await c.Api.EnviarAsync(troca.Token, HttpMethod.Post, "/embed/v1/context", new { ticket = contexto.Ticket });
         Assert.Equal(HttpStatusCode.OK, resgate.StatusCode);
         Assert.Equal("CLI-2", (await resgate.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("customerRef").GetString());
@@ -563,9 +563,9 @@ public sealed class EmbeddedFederationApiTests(PostgresFixture banco)
         var c = await EmbeddedCenario.CriarAsync(banco, "contexto2");
         await using var servidor = c.Api;
         var (ana, _) = await c.EntrarAsync("u-ana");
-        _ = await c.EntrarAsync("u-beto");
+        var (beto, _) = await c.EntrarAsync("u-beto");
 
-        var doBeto = await c.Erp.EmitirContextoAsync("u-beto", "CLI-9");
+        var doBeto = await c.Erp.EmitirContextoAsync("u-beto", "CLI-9", beto.SessionId);
         Assert.Equal(HttpStatusCode.Unauthorized, await c.Api.StatusAsync(ana.Token, HttpMethod.Post, "/embed/v1/context", new { ticket = doBeto.Ticket }));
 
         var verifier = EmbeddedTestSupport.NovoVerifier();
@@ -582,7 +582,7 @@ public sealed class EmbeddedFederationApiTests(PostgresFixture banco)
         var c = await EmbeddedCenario.CriarAsync(banco, "contexto3");
         await using var servidor = c.Api;
 
-        using var resposta = await c.Erp.EnviarAsync("/embed/v1/context-tickets", new { externalUserId = "u-inexistente", customer = new { @ref = "CLI-1" } });
+        using var resposta = await c.Erp.EnviarAsync("/embed/v1/context-tickets", new { externalUserId = "u-inexistente", sessionId = Guid.NewGuid(), customer = new { @ref = "CLI-1" } });
 
         Assert.Equal(HttpStatusCode.Forbidden, resposta.StatusCode);
         Assert.Equal(0, await ContarAsync("SELECT count(*) FROM identity.users WHERE tenant_id = @t AND auth_mode = 'Federated'", ("t", c.Tenant.TenantId.Value)));
@@ -623,7 +623,7 @@ public sealed class EmbeddedFederationApiTests(PostgresFixture banco)
         Assert.Equal(1, await ContarAsync("SELECT count(*) FROM identity.external_identities WHERE tenant_id = @t AND external_user_id = 'mesmo-id'", ("t", b.Tenant.TenantId.Value)));
 
         // O ticket de contexto de A não vale na sessão de B (e a tentativa o queima).
-        var contextoDeA = await a.Erp.EmitirContextoAsync("mesmo-id", "CLI-A");
+        var contextoDeA = await a.Erp.EmitirContextoAsync("mesmo-id", "CLI-A", trocaA.SessionId);
         Assert.Equal(HttpStatusCode.Unauthorized, await a.Api.StatusAsync(trocaB.Token, HttpMethod.Post, "/embed/v1/context", new { ticket = contextoDeA.Ticket }));
         Assert.Equal(HttpStatusCode.Unauthorized, await a.Api.StatusAsync(trocaA.Token, HttpMethod.Post, "/embed/v1/context", new { ticket = contextoDeA.Ticket }));
         Assert.Empty((await a.Api.LerAsync<SessaoEmbutidaDto>(trocaB.Token, "/embed/v1/session")).CustomerRefs);

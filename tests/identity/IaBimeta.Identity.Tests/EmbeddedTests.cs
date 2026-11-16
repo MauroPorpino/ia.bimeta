@@ -131,7 +131,7 @@ public class EmbeddedDomainTests
     }
 
     [Fact]
-    public void Assinatura_HMAC_do_servidor_e_a_do_contrato_e_o_prefixo_do_proxy_e_ignorado()
+    public void Assinatura_HMAC_do_servidor_e_a_do_contrato_e_nenhuma_forma_alternativa_do_caminho_vale()
     {
         var corpo = Encoding.UTF8.GetBytes("{\"externalUserId\":\"u-1\"}");
         const string segredo = "ibsk_segredo-de-teste";
@@ -143,7 +143,10 @@ public class EmbeddedDomainTests
 
         Assert.Equal(canonico, IntegrationRequestAuthenticator.CanonicalString("1700000000", nonce, "post", "/embed/v1/launch-tickets", corpo));
         Assert.Equal(esperado, IntegrationRequestAuthenticator.ComputeSignature(segredo, "1700000000", nonce, "POST", "/embed/v1/launch-tickets", corpo));
-        Assert.Equal(esperado, IntegrationRequestAuthenticator.ComputeSignature(segredo, "1700000000", nonce, "POST", "/api/embed/v1/launch-tickets", corpo));
+        // O prefixo do proxy NÃO é ignorado (E1-R): com /api a assinatura é outra, ninguém assina uma forma alternativa do caminho.
+        Assert.NotEqual(esperado, IntegrationRequestAuthenticator.ComputeSignature(segredo, "1700000000", nonce, "POST", "/api/embed/v1/launch-tickets", corpo));
+        Assert.NotEqual(esperado, IntegrationRequestAuthenticator.ComputeSignature(segredo, "1700000000", nonce, "POST", "/embed/v1/launch-tickets/", corpo));
+        Assert.NotEqual(esperado, IntegrationRequestAuthenticator.ComputeSignature(segredo, "1700000000", nonce, "POST", "/EMBED/v1/launch-tickets", corpo));
         Assert.NotEqual(esperado, IntegrationRequestAuthenticator.ComputeSignature(segredo, "1700000001", nonce, "POST", "/embed/v1/launch-tickets", corpo));
         Assert.NotEqual(esperado, IntegrationRequestAuthenticator.ComputeSignature(segredo, "1700000000", nonce, "PUT", "/embed/v1/launch-tickets", corpo));
         Assert.NotEqual(esperado, IntegrationRequestAuthenticator.ComputeSignature(segredo, "1700000000", nonce, "POST", "/embed/v1/context-tickets", corpo));
@@ -301,6 +304,8 @@ public class EmbeddedServicesTests
             Conexao = IntegrationConnection.Create(
                 Tenant.TenantId, Organizacao, "ERP", EmbeddedMode.FullAttendant, provisionamento, new[] { "https://erp.exemplo.com.br" }, false, Relogio.GetUtcNow(), null);
             Embedded.Conexoes.Add(Conexao);
+            Chave = IntegrationKey.Create(Tenant.TenantId, Conexao.Id, Guid.NewGuid(), "id1", "cifrado", Relogio.GetUtcNow(), null);
+            Embedded.Chaves.Add(Chave);
         }
 
         public EmbeddedTicketService Tickets => new(Embedded, Dados, Opcoes, Relogio, Auditoria);
@@ -309,7 +314,9 @@ public class EmbeddedServicesTests
 
         public SessionAuthenticator Autenticador => new(Dados, Embedded, Tenants, Relogio);
 
-        public AuthenticatedIntegration Integracao => new(Tenant.TenantId, Conexao.Id, Guid.NewGuid(), Organizacao, Conexao.Mode, Conexao.Provisioning, Conexao.AllowedOrigins, false);
+        public IntegrationKey Chave { get; private set; } = null!;
+
+        public AuthenticatedIntegration Integracao => new(Tenant.TenantId, Conexao.Id, Chave.Id, Organizacao, Conexao.Mode, Conexao.Provisioning, Conexao.AllowedOrigins, false);
 
         public User NovoUsuario(string email, Role? papel, Guid? organizacao = null)
         {
@@ -394,7 +401,7 @@ public class EmbeddedServicesTests
 
         var troca = await c.Troca.ExchangeAsync(ticket.Ticket, Verifier, "https://erp.exemplo.com.br");
 
-        Assert.StartsWith("ibs_", troca.Token);
+        Assert.StartsWith("ibe_", troca.Token);
         Assert.Equal(c.Relogio.GetUtcNow().AddMinutes(30), troca.ExpiresAt);
         Assert.Equal("CLI-1", troca.CustomerRef);
         Assert.Equal(c.Organizacao, troca.OrganizationId);

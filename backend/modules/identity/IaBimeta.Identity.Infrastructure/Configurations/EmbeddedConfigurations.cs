@@ -50,6 +50,7 @@ internal sealed class IntegrationConnectionConfiguration : IEntityTypeConfigurat
         builder.Property(c => c.CreatedAt).HasColumnName("created_at");
         builder.Property(c => c.CreatedByUserId).HasColumnName("created_by_user_id");
         builder.Property(c => c.UpdatedAt).HasColumnName("updated_at");
+        builder.Property(c => c.SessionsRevokedAt).HasColumnName("sessions_revoked_at");
 
         // A organização pertence a outro esquema (Tenancy): sem chave estrangeira entre esquemas (DAD-2); o caso de uso valida.
         builder.HasIndex(c => new { c.TenantId, c.OrganizationId }).HasDatabaseName("ix_integration_connections_tenant_id_organization_id");
@@ -120,6 +121,8 @@ internal sealed class LaunchTicketConfiguration : IEntityTypeConfiguration<Launc
         builder.Property(t => t.CreatedAt).HasColumnName("created_at");
         builder.Property(t => t.ExpiresAt).HasColumnName("expires_at");
         builder.Property(t => t.UsedAt).HasColumnName("used_at");
+        builder.Property(t => t.KeyId).HasColumnName("key_id");
+        builder.Property(t => t.SessionId).HasColumnName("session_id");
 
         builder.HasOne<IntegrationConnection>().WithMany().HasForeignKey(t => new { t.TenantId, t.ConnectionId }).OnDelete(DeleteBehavior.Cascade);
 
@@ -152,6 +155,7 @@ internal sealed class ExternalIdentityConfiguration : IEntityTypeConfiguration<E
         builder.Property(i => i.Status).HasColumnName("status").HasConversion<string>().HasMaxLength(20).IsRequired();
         builder.Property(i => i.CreatedAt).HasColumnName("created_at");
         builder.Property(i => i.CreatedByUserId).HasColumnName("created_by_user_id");
+        builder.Property(i => i.SessionsRevokedAt).HasColumnName("sessions_revoked_at");
 
         builder.HasOne<IntegrationConnection>().WithMany().HasForeignKey(i => new { i.TenantId, i.ConnectionId }).OnDelete(DeleteBehavior.Cascade);
         builder.HasOne<User>().WithMany().HasForeignKey(i => new { i.TenantId, i.UserId }).OnDelete(DeleteBehavior.Cascade);

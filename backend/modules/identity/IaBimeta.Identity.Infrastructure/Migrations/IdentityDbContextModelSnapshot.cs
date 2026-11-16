@@ -51,6 +51,10 @@ namespace IaBimeta.Identity.Infrastructure.Migrations
                         .HasColumnType("character varying(128)")
                         .HasColumnName("external_user_id");
 
+                    b.Property<DateTimeOffset?>("SessionsRevokedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("sessions_revoked_at");
+
                     b.Property<string>("Source")
                         .IsRequired()
                         .HasMaxLength(20)
@@ -135,6 +139,10 @@ namespace IaBimeta.Identity.Infrastructure.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)")
                         .HasColumnName("provisioning");
+
+                    b.Property<DateTimeOffset?>("SessionsRevokedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("sessions_revoked_at");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -264,6 +272,10 @@ namespace IaBimeta.Identity.Infrastructure.Migrations
                         .HasColumnType("character varying(128)")
                         .HasColumnName("external_user_id");
 
+                    b.Property<Guid?>("KeyId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("key_id");
+
                     b.Property<string>("Kind")
                         .IsRequired()
                         .HasMaxLength(20)
@@ -274,6 +286,10 @@ namespace IaBimeta.Identity.Infrastructure.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)")
                         .HasColumnName("parent_origin");
+
+                    b.Property<Guid?>("SessionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("session_id");
 
                     b.Property<byte[]>("TokenHash")
                         .IsRequired()
@@ -412,6 +428,10 @@ namespace IaBimeta.Identity.Infrastructure.Migrations
                     b.Property<Guid?>("IntegrationId")
                         .HasColumnType("uuid")
                         .HasColumnName("integration_id");
+
+                    b.Property<Guid?>("IssuerKeyId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("issuer_key_id");
 
                     b.Property<string>("Kind")
                         .IsRequired()

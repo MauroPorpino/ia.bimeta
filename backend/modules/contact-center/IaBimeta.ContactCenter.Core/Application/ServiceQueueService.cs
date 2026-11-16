@@ -118,9 +118,12 @@ public sealed class ServiceQueueService
     /// <exception cref="AuthenticationRequiredException">O contexto não tem usuário autenticado.</exception>
     public async Task<IReadOnlyList<ServiceQueueView>> ListMineAsync(CancellationToken cancellationToken = default)
     {
-        var usuario = _context.GetRequired().RequirePrincipal().UserId;
+        var contexto = _context.GetRequired();
+        var usuario = contexto.RequirePrincipal().UserId;
         var filas = await _repository.ListQueuesOfMemberAsync(usuario, cancellationToken);
-        return filas.Select(ServiceQueueView.From).ToList();
+
+        // Sessão embutida (ADR 0039): só as filas da organização da conexão, e nenhuma no modo CustomerOnly.
+        return filas.Where(f => !contexto.IsOutsideEmbeddedScope(f.OrganizationId)).Select(ServiceQueueView.From).ToList();
     }
 
     /// <summary>Pausa a fila (idempotente: repetir não muda nada nem grava auditoria).</summary>

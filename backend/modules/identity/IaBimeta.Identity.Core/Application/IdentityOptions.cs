@@ -38,6 +38,15 @@ public sealed class IdentityOptions
     /// <summary>A tolerância do relógio nas chamadas assinadas do servidor do ERP (HMAC). O piso é 30 s e o teto, 10 minutos.</summary>
     public TimeSpan IntegrationSignatureWindow { get; set; } = TimeSpan.FromMinutes(2);
 
+    /// <summary>Janela do limite de taxa das chamadas assinadas por identidade autenticada ou conhecida (E1-R).</summary>
+    public TimeSpan IntegrationRateWindow { get; set; } = TimeSpan.FromMinutes(1);
+
+    /// <summary>Falhas de autenticação toleradas por chave conhecida e por janela; depois, a chave é recusada até a janela virar.</summary>
+    public int IntegrationPermitsPerKey { get; set; } = 30;
+
+    /// <summary>Chamadas autenticadas por conexão e por janela (todas as chaves dela somam).</summary>
+    public int IntegrationPermitsPerConnection { get; set; } = 600;
+
     /// <summary>Quanto tempo o nonce de uma chamada assinada fica registrado (precisa cobrir a janela dos dois lados).</summary>
     public TimeSpan IntegrationNonceRetention { get; set; } = TimeSpan.FromMinutes(10);
 

@@ -15,7 +15,7 @@ public sealed record EmbedCustomer(string? Ref);
 
 public sealed record LaunchTicketRequest(string? ExternalUserId, string? DisplayName, string? Challenge, string? ParentOrigin, EmbedCustomer? Customer);
 
-public sealed record ContextTicketRequest(string? ExternalUserId, EmbedCustomer? Customer);
+public sealed record ContextTicketRequest(string? ExternalUserId, Guid? SessionId, EmbedCustomer? Customer);
 
 public sealed record RevokeByIntegrationRequest(string? ExternalUserId);
 

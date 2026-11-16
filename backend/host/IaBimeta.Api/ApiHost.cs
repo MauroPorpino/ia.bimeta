@@ -214,7 +214,7 @@ public static class ApiHost
         {
             opcoes.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 
-            // Chamadas assinadas do servidor do ERP: uma cota por identificador de chave informado (a chave desconhecida cai na cota da origem de rede, para o excesso de lixo não passar).
+            // Chamadas assinadas do servidor do ERP: cota anterior à autenticação SÓ por origem de rede (nada do cabeçalho define a partição). A cota por chave conhecida e por conexão autenticada é do Identity.
             opcoes.AddPolicy(EmbeddedRateLimits.IntegrationPolicy, http => RateLimitPartition.GetFixedWindowLimiter(
                 Embedded.EmbeddedHostPolicies.IntegrationPartition(http),
                 _ => new FixedWindowRateLimiterOptions

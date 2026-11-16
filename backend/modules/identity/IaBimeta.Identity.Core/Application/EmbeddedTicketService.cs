@@ -50,7 +50,7 @@ public sealed class EmbeddedTicketService
         var vinculo = await ResolveIdentityAsync(integration, externo, request.DisplayName, agora, cancellationToken);
 
         var (token, hash) = TicketTokens.Generate();
-        var ticket = LaunchTicket.CreateLaunch(integration.TenantId, integration.ConnectionId, hash, request.Challenge!, origem, externo, vinculo.UserId, cliente, agora, _options.EmbeddedTicketLifetime);
+        var ticket = LaunchTicket.CreateLaunch(integration.TenantId, integration.ConnectionId, hash, request.Challenge!, origem, externo, vinculo.UserId, cliente, agora, _options.EmbeddedTicketLifetime, integration.KeyId);
         await _store.AddTicketAsync(ticket, cancellationToken);
 
         await _audit.WriteForAuthenticationAsync(integration.TenantId, vinculo.UserId, new AuditEntry("identity.embed.ticket.issue", "launch_ticket", ticket.Id.ToString(), AuditOutcome.Success), cancellationToken);
@@ -58,9 +58,10 @@ public sealed class EmbeddedTicketService
     }
 
     /// <summary>
-    /// Ticket de contexto: muda o cliente em foco de uma sessão embutida já aberta. Só para vínculo já existente e ativo (nunca provisiona).
+    /// Ticket de contexto: muda o cliente em foco de UMA sessão embutida já aberta, a EXATA que o ERP informa (<paramref name="sessionId"/>): o ticket fica preso a tenant, conexão, usuário externo e a essa sessão, e nenhuma outra sessão do mesmo usuário o resgata.
+    /// Só para vínculo já existente e ativo (nunca provisiona) e sessão ainda ativa da mesma conexão e do mesmo usuário externo.
     /// </summary>
-    public async Task<TicketResult> IssueContextTicketAsync(AuthenticatedIntegration integration, string? externalUserId, string? customerRef, CancellationToken cancellationToken = default)
+    public async Task<TicketResult> IssueContextTicketAsync(AuthenticatedIntegration integration, string? externalUserId, Guid? sessionId, string? customerRef, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(integration);
 
@@ -75,8 +76,21 @@ public sealed class EmbeddedTicketService
             throw new ExternalIdentityNotAllowedException();
         }
 
+        // A sessão que vai resgatar: tem de existir neste tenant, ser embutida, da MESMA conexão e do MESMO usuário externo, e estar ativa (não revogada, não expirada, não atingida pela marca de revogação).
+        var sessaoAlvo = sessionId is { } alvoId ? await _store.FindSessionAsync(integration.TenantId, alvoId, cancellationToken) : null;
+        if (sessaoAlvo is not { Kind: SessionKind.Embedded }
+            || sessaoAlvo.IntegrationId != integration.ConnectionId
+            || !string.Equals(sessaoAlvo.ExternalUserId, externo, StringComparison.Ordinal)
+            || sessaoAlvo.UserId != vinculo.UserId
+            || !sessaoAlvo.IsActiveAt(agora)
+            || sessaoAlvo.CreatedAt <= vinculo.SessionsRevokedAt)
+        {
+            await _audit.WriteForAuthenticationAsync(integration.TenantId, vinculo.UserId, new AuditEntry("identity.embed.context-ticket.issue", "integration_connection", integration.ConnectionId.ToString(), AuditOutcome.Denied), cancellationToken);
+            throw new ExternalIdentityNotAllowedException();
+        }
+
         var (token, hash) = TicketTokens.Generate();
-        var ticket = LaunchTicket.CreateContext(integration.TenantId, integration.ConnectionId, hash, externo, vinculo.UserId, cliente, agora, _options.EmbeddedTicketLifetime);
+        var ticket = LaunchTicket.CreateContext(integration.TenantId, integration.ConnectionId, hash, externo, vinculo.UserId, cliente, agora, _options.EmbeddedTicketLifetime, integration.KeyId, sessaoAlvo.Id);
         await _store.AddTicketAsync(ticket, cancellationToken);
 
         await _audit.WriteForAuthenticationAsync(integration.TenantId, vinculo.UserId, new AuditEntry("identity.embed.context-ticket.issue", "launch_ticket", ticket.Id.ToString(), AuditOutcome.Success), cancellationToken);

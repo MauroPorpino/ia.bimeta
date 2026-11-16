@@ -71,6 +71,18 @@ public static class AccessPolicy
         return organizacoes;
     }
 
+    /// <summary>
+    /// A sessão embutida só alcança recursos da organização da conexão, e a de modo <c>CustomerOnly</c> não alcança a fila geral nem atendimento algum até existir a autorização por cliente (E2): para ela, TUDO está fora do
+    /// limite. Contexto de sistema e sessão interativa nunca estão fora (a regra deles é a das concessões). Aplique em toda decisão de acesso que NÃO passe por <see cref="IsAllowed"/>
+    /// (participação em fila, responsável, recibo de operação).
+    /// </summary>
+    public static bool IsOutsideEmbeddedScope(this RequestContext context, Guid? organizationId)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        return context.Principal?.Embedded is { } escopo && (escopo.CustomerOnly || organizationId != escopo.OrganizationId);
+    }
+
     /// <exception cref="AuthenticationRequiredException">O contexto não tem usuário autenticado.</exception>
     public static ActorPrincipal RequirePrincipal(this RequestContext context)
     {

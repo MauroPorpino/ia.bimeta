@@ -12,11 +12,27 @@ internal sealed class RequestContextMiddleware
     // resolver a conta: nunca por cabeçalho nem por sessão).
     // O Embedded (ADR 0039): as chamadas assinadas do servidor do ERP (autenticadas por HMAC, o tenant vem da chave) e a troca do ticket no iframe (anônima, com o verifier) são anteriores a qualquer sessão. As demais rotas
     // /embed/v1 (context, session) usam o contexto normal da sessão embutida.
-    private static readonly string[] RotasSemContexto =
+    private static readonly string[] CaminhosSemContexto =
     {
-        "/health", "/auth/login", "/webhooks",
+        "/health", "/auth/login",
         "/embed/v1/launch-tickets", "/embed/v1/context-tickets", "/embed/v1/sessions/revoke", "/embed/v1/exchange",
     };
+
+    // O webhook do provedor tem o identificador do canal no caminho: único prefixo da lista. Os demais são EXATOS (E1-R): "/health/x", "/auth/login/x" ou "/embed/v1/exchange/x" não ganham a dispensa de contexto.
+    private const string PrefixoDoWebhook = "/webhooks/";
+
+    /// <summary>Se a rota é uma das que dispensam o contexto de usuário. Caminho exato (sem barra final), sem diferenciar maiúsculas; nada de prefixo, exceto o do webhook.</summary>
+    internal static bool SemContexto(PathString caminho)
+    {
+        var texto = caminho.Value ?? string.Empty;
+        if (texto.StartsWith(PrefixoDoWebhook, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var normalizado = texto.Length > 1 ? texto.TrimEnd('/') : texto;
+        return CaminhosSemContexto.Contains(normalizado, StringComparer.OrdinalIgnoreCase);
+    }
 
     private readonly RequestDelegate _next;
 
@@ -29,7 +45,7 @@ internal sealed class RequestContextMiddleware
     {
         // Resolver as fontes aqui, e não como parâmetro do método, evita que uma fonte que usa o banco quebre as
         // rotas sem contexto quando o banco não está configurado.
-        if (!RotasSemContexto.Any(rota => http.Request.Path.StartsWithSegments(rota)))
+        if (!SemContexto(http.Request.Path))
         {
             foreach (var fonte in http.RequestServices.GetServices<ITenantContextSource>())
             {

@@ -114,6 +114,21 @@ public sealed class EmbeddedRoutePolicyTests(PostgresFixture banco)
         Assert.Equal(esperado, EmbeddedRoutePolicy.IsAllowed(metodo, caminho));
     }
 
+    /// <summary>E1-R: o subconjunto que o modo CustomerOnly alcança é EXATAMENTE a própria sessão e o resgate do contexto; ampliá-lo exige editar este teste (e a E2 trará a autorização por cliente).</summary>
+    [Fact]
+    public void O_subconjunto_da_lista_para_CustomerOnly_e_exatamente_a_propria_sessao_e_o_resgate_do_contexto()
+    {
+        var alcancadas = EmbeddedRoutePolicy.Allowed
+            .Where(r => EmbeddedRoutePolicy.IsAllowed(r.Method, r.Pattern.Replace("{guid}", Guid.NewGuid().ToString()), customerOnly: true))
+            .Select(r => r.ToString())
+            .ToArray();
+
+        Assert.Equal(new[] { "GET /auth/me", "POST /auth/logout", "GET /embed/v1/session", "POST /embed/v1/context" }, alcancadas);
+        Assert.All(EmbeddedRoutePolicy.Allowed, r => Assert.True(EmbeddedRoutePolicy.IsAllowed(r.Method, r.Pattern.Replace("{guid}", Guid.NewGuid().ToString()), customerOnly: false)));
+        Assert.False(EmbeddedRoutePolicy.IsAllowed("GET", "/contact-center/items", customerOnly: true));
+        Assert.False(EmbeddedRoutePolicy.IsAllowed(null, "/auth/me", customerOnly: true));
+    }
+
     [Fact]
     public async Task Toda_rota_da_lista_existe_na_api_e_toda_rota_fora_dela_responde_403_para_a_sessao_embutida()
     {
