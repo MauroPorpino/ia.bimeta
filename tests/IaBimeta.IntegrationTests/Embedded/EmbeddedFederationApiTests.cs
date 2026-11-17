@@ -695,6 +695,9 @@ public sealed class EmbeddedFederationApiTests(PostgresFixture banco)
         var (troca, verifier) = await c.EntrarAsync("u-seg");
         var ticket = await c.Erp.EmitirAsync("u-seg", EmbeddedTestSupport.Challenge(EmbeddedTestSupport.NovoVerifier()));
 
+        // A auditoria do sucesso da troca é guardada na transação e entregue pelo Worker: aqui o teste faz a entrega.
+        Assert.True(await EmbeddedTestSupport.EntregarAuditoriaAsync(c.Api, c.Tenant.TenantId) >= 1);
+
         await using var conexao = new NpgsqlConnection(TestDatabase.ConnectionString);
         await conexao.OpenAsync();
         await using var comando = new NpgsqlCommand(

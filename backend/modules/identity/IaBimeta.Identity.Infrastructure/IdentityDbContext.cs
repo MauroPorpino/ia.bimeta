@@ -47,6 +47,8 @@ public sealed class IdentityDbContext : DbContext
 
     public DbSet<SessionCustomerGrant> SessionCustomerGrants => Set<SessionCustomerGrant>();
 
+    public DbSet<PendingAudit> AuditOutbox => Set<PendingAudit>();
+
     // O EF reavalia esta propriedade a cada execução de consulta (membro do DbContext no filtro global).
     private TenantId TenantAtual => _tenantDaAutenticacao ?? _contexto.GetRequired().TenantId;
 
@@ -65,6 +67,7 @@ public sealed class IdentityDbContext : DbContext
         modelBuilder.ApplyConfiguration(new LaunchTicketConfiguration());
         modelBuilder.ApplyConfiguration(new ExternalIdentityConfiguration());
         modelBuilder.ApplyConfiguration(new SessionCustomerGrantConfiguration());
+        modelBuilder.ApplyConfiguration(new PendingAuditConfiguration());
 
         modelBuilder.Entity<LoginThrottle>().HasQueryFilter(t => t.TenantId == TenantAtual);
         modelBuilder.Entity<User>().HasQueryFilter(u => u.TenantId == TenantAtual);
@@ -77,6 +80,7 @@ public sealed class IdentityDbContext : DbContext
         modelBuilder.Entity<LaunchTicket>().HasQueryFilter(t => t.TenantId == TenantAtual);
         modelBuilder.Entity<ExternalIdentity>().HasQueryFilter(i => i.TenantId == TenantAtual);
         modelBuilder.Entity<SessionCustomerGrant>().HasQueryFilter(g => g.TenantId == TenantAtual);
+        modelBuilder.Entity<PendingAudit>().HasQueryFilter(a => a.TenantId == TenantAtual);
     }
 
     /// <summary>

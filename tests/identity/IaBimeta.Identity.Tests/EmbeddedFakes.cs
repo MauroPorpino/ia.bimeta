@@ -162,6 +162,9 @@ internal sealed class EmbeddedEmMemoria : IEmbeddedStore
     /// <summary>Quando definida, a gravação que conclui a troca/resgate falha com ela (como uma contenção do banco). Modela o rollback: nada é consumido nem gravado.</summary>
     public Exception? FalhaAoConcluir { get; set; }
 
+    /// <summary>As entradas de auditoria do sucesso que o fake guardou JUNTO do efeito (o outbox).</summary>
+    public List<PendingAudit> AuditoriaPendente { get; } = new();
+
     public Task<LaunchTicket?> PeekTicketAsync(byte[] tokenHash, DateTimeOffset now, CancellationToken cancellationToken)
     {
         var ticket = Tickets.FirstOrDefault(t => t.TokenHash.AsSpan().SequenceEqual(tokenHash));
@@ -180,17 +183,19 @@ internal sealed class EmbeddedEmMemoria : IEmbeddedStore
         return true;
     }
 
-    public Task<bool> AddEmbeddedSessionAsync(Session session, string? customerRef, int maxActivePerUser, Guid ticketId, DateTimeOffset now, CancellationToken cancellationToken)
+    public Task<bool> AddEmbeddedSessionAsync(Session session, string? customerRef, int maxActivePerUser, LaunchTicket ticket, PendingAudit audit, DateTimeOffset now, CancellationToken cancellationToken)
     {
         if (FalhaAoConcluir is { } falha)
         {
             throw falha;
         }
 
-        if (!ConsumirNaTransacao(ticketId, now))
+        if (!ConsumirNaTransacao(ticket.Id, now))
         {
             return Task.FromResult(false);
         }
+
+        AuditoriaPendente.Add(audit);
 
         Sessoes.Add(session);
         Identidade?.Sessoes.Add(session);
@@ -222,17 +227,19 @@ internal sealed class EmbeddedEmMemoria : IEmbeddedStore
         return Task.FromResult(alvo.Count);
     }
 
-    public Task<bool> AddCustomerGrantAsync(TenantId tenantId, Guid sessionId, string customerRef, Guid ticketId, DateTimeOffset now, CancellationToken cancellationToken)
+    public Task<bool> AddCustomerGrantAsync(TenantId tenantId, Guid sessionId, string customerRef, LaunchTicket ticket, PendingAudit audit, DateTimeOffset now, CancellationToken cancellationToken)
     {
         if (FalhaAoConcluir is { } falha)
         {
             throw falha;
         }
 
-        if (!ConsumirNaTransacao(ticketId, now))
+        if (!ConsumirNaTransacao(ticket.Id, now))
         {
             return Task.FromResult(false);
         }
+
+        AuditoriaPendente.Add(audit);
 
         if (!Clientes.Contains((tenantId, sessionId, customerRef)))
         {

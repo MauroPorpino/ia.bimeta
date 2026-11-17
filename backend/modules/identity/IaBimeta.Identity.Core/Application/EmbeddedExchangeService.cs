@@ -37,12 +37,25 @@ public sealed class EmbeddedExchangeService
     /// <exception cref="EmbeddedAuthenticationException">Qualquer recusa (sempre a mesma).</exception>
     public async Task<ExchangeResult> ExchangeAsync(string? ticket, string? verifier, string? parentOrigin, CancellationToken cancellationToken = default)
     {
-        if (!TicketTokens.TryHash(ticket, out var hash) || !PkceVerifier.IsValidVerifier(verifier) || !IntegrationConnection.TryNormalizeOrigin(parentOrigin, out var origem))
+        if (!TicketTokens.TryHash(ticket, out var hash))
         {
             throw new EmbeddedAuthenticationException();
         }
 
         var agora = _clock.GetUtcNow();
+        var origemValida = IntegrationConnection.TryNormalizeOrigin(parentOrigin, out var origem);
+        if (!PkceVerifier.IsValidVerifier(verifier) || !origemValida)
+        {
+            // Verifier malformado ou origem inválida com um ticket que PODE ser identificado: é uma tentativa recusada como qualquer outra, e queima o ticket (uso único; a regra é uma só). A resposta é a mesma de sempre.
+            // Ticket desconhecido, vencido ou já usado não revela nada: não há o que queimar nem tenant a auditar.
+            if (await _store.ConsumeTicketAsync(hash, agora, cancellationToken) is { } queimado)
+            {
+                await _audit.WriteForAuthenticationAsync(queimado.TenantId, queimado.UserId, new AuditEntry("identity.embed.exchange", "launch_ticket", queimado.Id.ToString(), AuditOutcome.Denied), cancellationToken);
+            }
+
+            throw new EmbeddedAuthenticationException();
+        }
+
         var consumido = await _store.PeekTicketAsync(hash, agora, cancellationToken) ?? throw new EmbeddedAuthenticationException();
         var tenantId = consumido.TenantId;
 
@@ -87,12 +100,13 @@ public sealed class EmbeddedExchangeService
             var (token, tokenHash) = SessionTokens.GenerateEmbedded();
             var sessao = Session.CreateEmbedded(tenantId, usuario.Id, tokenHash, agora, _options.EmbeddedSessionLifetime, conexao.Id, consumido.ExternalUserId, origem, consumido.KeyId);
             // O consumo do ticket e a gravação da sessão são UMA transação: contenção (503) deixa o ticket pendente e o ERP repete; perder a corrida para outra troca do mesmo ticket é recusa.
-            if (!await _store.AddEmbeddedSessionAsync(sessao, consumido.CustomerRef, _options.MaxEmbeddedSessionsPerUser, consumido.Id, agora, cancellationToken))
+            // A auditoria do sucesso vai junto, na MESMA transação (outbox): nenhuma chamada fica DEPOIS do commit, então uma falha da trilha nunca mais deixa o ticket consumido com a resposta perdida (o Worker entrega depois).
+            var auditoria = PendingAudit.Create(tenantId, new AuditEntry("identity.embed.exchange", "session", sessao.Id.ToString(), AuditOutcome.Success), usuario.Id, PendingAudit.AuthenticationOrigin, agora);
+            if (!await _store.AddEmbeddedSessionAsync(sessao, consumido.CustomerRef, _options.MaxEmbeddedSessionsPerUser, consumido, auditoria, agora, cancellationToken))
             {
                 throw new EmbeddedAuthenticationException();
             }
 
-            await _audit.WriteForAuthenticationAsync(tenantId, usuario.Id, new AuditEntry("identity.embed.exchange", "session", sessao.Id.ToString(), AuditOutcome.Success), cancellationToken);
             return new ExchangeResult(token, sessao.ExpiresAt, conexao.Mode, conexao.OrganizationId, consumido.CustomerRef, new ExchangeUserView(usuario.Id, usuario.DisplayName), sessao.Id);
         }
         catch (EmbeddedAuthenticationException)
@@ -151,13 +165,16 @@ public sealed class EmbeddedExchangeService
         }
 
         // Consumo do ticket e gravação do cliente em foco são UMA transação: contenção (503) deixa o ticket pendente e o ERP repete.
-        if (!await _store.AddCustomerGrantAsync(contexto.TenantId, sessao.Id, consumido.CustomerRef, consumido.Id, agora, cancellationToken))
+        // A auditoria do sucesso vai junto, na MESMA transação (outbox), com o ator e a origem do contexto desta requisição: nenhuma chamada fica depois do commit.
+        var auditoria = PendingAudit.Create(contexto.TenantId, new AuditEntry("identity.embed.context", "session", sessao.Id.ToString(), AuditOutcome.Success), principal.UserId, contexto.Origin, agora);
+        if (!await _store.AddCustomerGrantAsync(contexto.TenantId, sessao.Id, consumido.CustomerRef, consumido, auditoria, agora, cancellationToken))
         {
+            // Outra requisição consumiu o ticket antes, ou a chave foi revogada entre a conferência e a gravação: recusa e queima (se ainda pendente).
+            await _store.ConsumeTicketAsync(hash, agora, cancellationToken);
             await _audit.WriteAsync(new AuditEntry("identity.embed.context", "session", principal.SessionId.ToString(), AuditOutcome.Denied), cancellationToken);
             throw new EmbeddedAuthenticationException();
         }
 
-        await _audit.WriteAsync(new AuditEntry("identity.embed.context", "session", sessao.Id.ToString(), AuditOutcome.Success), cancellationToken);
         return consumido.CustomerRef;
     }
 

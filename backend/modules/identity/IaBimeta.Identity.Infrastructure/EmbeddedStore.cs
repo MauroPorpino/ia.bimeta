@@ -343,13 +343,37 @@ internal sealed class EmbeddedStore : IEmbeddedStore
             .Where(t => t.TenantId == tenantId && t.Id == ticketId && t.UsedAt == null && t.ExpiresAt > now)
             .ExecuteUpdateAsync(set => set.SetProperty(t => t.UsedAt, now), cancellationToken) == 1;
 
-    public Task<bool> AddEmbeddedSessionAsync(Session session, string? customerRef, int maxActivePerUser, Guid ticketId, DateTimeOffset now, CancellationToken cancellationToken) =>
-        GuardAsync(() => AddEmbeddedSessionCoreAsync(session, customerRef, maxActivePerUser, ticketId, now, cancellationToken));
+    /// <summary>
+    /// Reconfere, DENTRO da transação final, que a chave que emitiu o ticket continua utilizável: trava a linha da chave em modo compartilhado (a revogação, que a atualiza, se enfileira com esta transação) e lê o estado commitado
+    /// DEPOIS de obter a trava. Ordem canônica: a chave vem antes do vínculo, dos tickets e das sessões. Ticket sem chave (emitido pela API do próprio produto) não tem o que conferir.
+    /// </summary>
+    private async Task<bool> TicketKeyStillValidAsync(LaunchTicket ticket, CancellationToken cancellationToken)
+    {
+        if (ticket.KeyId is not { } chaveId)
+        {
+            return true;
+        }
 
-    private async Task<bool> AddEmbeddedSessionCoreAsync(Session session, string? customerRef, int maxActivePerUser, Guid ticketId, DateTimeOffset now, CancellationToken cancellationToken)
+        var estados = await _db.Database
+            .SqlQuery<string>(
+                $"SELECT status AS \"Value\" FROM identity.integration_keys WHERE tenant_id = {ticket.TenantId.Value} AND id = {chaveId} AND connection_id = {ticket.ConnectionId} FOR SHARE")
+            .ToListAsync(cancellationToken);
+        return estados.Count == 1 && estados[0] != nameof(IntegrationKeyStatus.Revoked);
+    }
+
+    public Task<bool> AddEmbeddedSessionAsync(Session session, string? customerRef, int maxActivePerUser, LaunchTicket ticket, PendingAudit audit, DateTimeOffset now, CancellationToken cancellationToken) =>
+        GuardAsync(() => AddEmbeddedSessionCoreAsync(session, customerRef, maxActivePerUser, ticket, audit, now, cancellationToken));
+
+    private async Task<bool> AddEmbeddedSessionCoreAsync(Session session, string? customerRef, int maxActivePerUser, LaunchTicket ticket, PendingAudit audit, DateTimeOffset now, CancellationToken cancellationToken)
     {
         using var escopo = _db.UseAuthenticationTenant(session.TenantId);
         await using var transacao = await BeginAsync(cancellationToken);
+
+        // A chave primeiro (ordem canônica): se foi revogada entre a conferência e agora, a troca é recusada e nada é gravado.
+        if (!await TicketKeyStillValidAsync(ticket, cancellationToken))
+        {
+            return false;
+        }
 
         // Trava o vínculo do usuário externo: duas trocas simultâneas dele se enfileiram, e o teto de sessões ativas vale (sem a trava, cada uma contaria antes de a outra gravar).
         await _db.Database.ExecuteSqlInterpolatedAsync(
@@ -357,11 +381,13 @@ internal sealed class EmbeddedStore : IEmbeddedStore
             cancellationToken);
 
         // O ticket é consumido na MESMA transação da sessão (ordem canônica: vínculo, ticket, sessões): se qualquer passo falha, o rollback devolve o ticket a pendente. Quem perde a corrida pelo ticket não grava nada.
-        if (!await ConsumeTicketInTransactionAsync(session.TenantId, ticketId, now, cancellationToken))
+        if (!await ConsumeTicketInTransactionAsync(session.TenantId, ticket.Id, now, cancellationToken))
         {
             return false;
         }
 
+        // A auditoria do sucesso entra na MESMA transação (outbox): confirma junto com o efeito ou desfaz junto, e é entregue à trilha depois pelo Worker.
+        _db.AuditOutbox.Add(audit);
         _db.Sessions.Add(session);
         if (customerRef is not null)
         {
@@ -424,15 +450,22 @@ internal sealed class EmbeddedStore : IEmbeddedStore
                 cancellationToken);
         });
 
-    public Task<bool> AddCustomerGrantAsync(TenantId tenantId, Guid sessionId, string customerRef, Guid ticketId, DateTimeOffset now, CancellationToken cancellationToken) =>
-        GuardAsync(() => AddCustomerGrantCoreAsync(tenantId, sessionId, customerRef, ticketId, now, cancellationToken));
+    public Task<bool> AddCustomerGrantAsync(TenantId tenantId, Guid sessionId, string customerRef, LaunchTicket ticket, PendingAudit audit, DateTimeOffset now, CancellationToken cancellationToken) =>
+        GuardAsync(() => AddCustomerGrantCoreAsync(tenantId, sessionId, customerRef, ticket, audit, now, cancellationToken));
 
-    private async Task<bool> AddCustomerGrantCoreAsync(TenantId tenantId, Guid sessionId, string customerRef, Guid ticketId, DateTimeOffset now, CancellationToken cancellationToken)
+    private async Task<bool> AddCustomerGrantCoreAsync(TenantId tenantId, Guid sessionId, string customerRef, LaunchTicket ticket, PendingAudit audit, DateTimeOffset now, CancellationToken cancellationToken)
     {
+        using var escopo = _db.UseAuthenticationTenant(tenantId);
         await using var transacao = await BeginAsync(cancellationToken);
 
-        // O ticket primeiro (ordem canônica: tickets, depois sessões) e na MESMA transação do cliente em foco: contenção reverte o consumo e o ticket continua pendente.
-        if (!await ConsumeTicketInTransactionAsync(tenantId, ticketId, now, cancellationToken))
+        // A chave primeiro (ordem canônica: chave, tickets, sessões): revogada entre a conferência e agora, o resgate é recusado e nada é gravado.
+        if (!await TicketKeyStillValidAsync(ticket, cancellationToken))
+        {
+            return false;
+        }
+
+        // O ticket depois e na MESMA transação do cliente em foco: contenção reverte o consumo e o ticket continua pendente.
+        if (!await ConsumeTicketInTransactionAsync(tenantId, ticket.Id, now, cancellationToken))
         {
             return false;
         }
@@ -457,6 +490,10 @@ internal sealed class EmbeddedStore : IEmbeddedStore
                      WHERE tenant_id = {tenantId.Value} AND session_id = {sessionId}
                      ORDER BY granted_at DESC, customer_ref LIMIT {SessionCustomerGrant.MaxPerSession})",
             cancellationToken);
+
+        // A auditoria do sucesso entra na MESMA transação (outbox): confirma junto ou desfaz junto, e é entregue à trilha depois pelo Worker.
+        _db.AuditOutbox.Add(audit);
+        await _db.SaveChangesAsync(cancellationToken);
 
         await transacao.CommitAsync(cancellationToken);
         return true;

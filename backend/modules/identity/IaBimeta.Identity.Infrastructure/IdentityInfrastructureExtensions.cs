@@ -44,6 +44,7 @@ public static class IdentityInfrastructureExtensions
         services.AddScoped<ISessionRepository, SessionRepository>();
         services.AddScoped<IAuthenticationStore, AuthenticationStore>();
         services.AddScoped<IEmbeddedStore, EmbeddedStore>();
+        services.AddScoped<IIdentityAuditOutbox, IdentityAuditOutbox>();
 
         services.AddScoped<AuthenticationService>();
         services.AddScoped<PasswordService>();

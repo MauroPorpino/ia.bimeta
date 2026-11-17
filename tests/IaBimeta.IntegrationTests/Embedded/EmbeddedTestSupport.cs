@@ -8,6 +8,7 @@ using IaBimeta.Identity.Domain;
 using IaBimeta.IntegrationTests.Api;
 using IaBimeta.Tenancy.Application;
 using IaBimeta.Tenancy.Contracts;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace IaBimeta.IntegrationTests.Embedded;
 
@@ -98,6 +99,14 @@ internal sealed class ErpAssinante(ApiServer api, string keyId, string segredo, 
 internal static class EmbeddedTestSupport
 {
     public const string Origem = "https://erp.exemplo.com.br";
+
+    /// <summary>Faz o que o Worker faz (E1-R, quarta rodada): abre o contexto do tenant e entrega à trilha a auditoria do Embedded guardada na transação do consumo do ticket. Devolve quantas entregou.</summary>
+    public static async Task<int> EntregarAuditoriaAsync(ApiServer api, IaBimeta.SharedKernel.TenantId tenant)
+    {
+        using var escopo = api.Services.CreateScope();
+        escopo.ServiceProvider.GetRequiredService<IaBimeta.SharedKernel.RequestContextHolder>().Set(new IaBimeta.SharedKernel.RequestContext(tenant, "worker-reconciler"));
+        return await escopo.ServiceProvider.GetRequiredService<IaBimeta.Identity.Application.IIdentityAuditOutbox>().FlushAsync(100, CancellationToken.None);
+    }
 
     public static string NovoVerifier() => Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(32));
 

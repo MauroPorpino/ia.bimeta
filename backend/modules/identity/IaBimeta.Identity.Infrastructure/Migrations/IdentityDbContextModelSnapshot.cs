@@ -402,6 +402,62 @@ namespace IaBimeta.Identity.Infrastructure.Migrations
                     b.ToTable("password_reset_tokens", "identity");
                 });
 
+            modelBuilder.Entity("IaBimeta.Identity.Domain.PendingAudit", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("ActorOrigin")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("actor_origin");
+
+                    b.Property<Guid?>("ActorUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("actor_user_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Operation")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("operation");
+
+                    b.Property<short>("Outcome")
+                        .HasColumnType("smallint")
+                        .HasColumnName("outcome");
+
+                    b.Property<string>("ResourceId")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("resource_id");
+
+                    b.Property<string>("ResourceType")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)")
+                        .HasColumnName("resource_type");
+
+                    b.HasKey("TenantId", "Id");
+
+                    b.HasIndex("TenantId", "CreatedAt", "Id")
+                        .HasDatabaseName("ix_audit_outbox_tenant_id_created_at_id");
+
+                    b.ToTable("audit_outbox", "identity", t =>
+                        {
+                            t.HasCheckConstraint("ck_audit_outbox_outcome", "outcome > 0");
+                        });
+                });
+
             modelBuilder.Entity("IaBimeta.Identity.Domain.Session", b =>
                 {
                     b.Property<Guid>("TenantId")

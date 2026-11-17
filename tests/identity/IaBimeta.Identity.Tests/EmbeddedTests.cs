@@ -450,8 +450,29 @@ public class EmbeddedServicesTests
         Assert.Single(c.Embedded.Sessoes);
     }
 
+    [Fact]
+    public async Task O_sucesso_da_troca_e_auditado_pelo_outbox_junto_do_efeito_e_nao_pela_gravacao_sincrona()
+    {
+        var c = new Cenario();
+        var ticket = await c.Tickets.IssueLaunchTicketAsync(c.Integracao, c.Pedido("u-1", Verifier));
+
+        var troca = await c.Troca.ExchangeAsync(ticket.Ticket, Verifier, "https://erp.exemplo.com.br");
+
+        // Antes: o sucesso era gravado na trilha DEPOIS do commit (uma falha ali deixava o ticket consumido com a resposta perdida). Agora a entrada vai com o efeito, com o ator e a origem da hora da operação.
+        var pendente = Assert.Single(c.Embedded.AuditoriaPendente);
+        Assert.Equal("identity.embed.exchange", pendente.Operation);
+        Assert.Equal(troca.SessionId.ToString(), pendente.ResourceId);
+        Assert.Equal(IaBimeta.Audit.Contracts.AuditOutcome.Success, pendente.Outcome);
+        Assert.Equal(troca.User.UserId, pendente.ActorUserId);
+        Assert.Equal(PendingAudit.AuthenticationOrigin, pendente.ActorOrigin);
+        Assert.Equal(c.Relogio.GetUtcNow(), pendente.CreatedAt);
+        Assert.DoesNotContain(c.Auditoria.Eventos, e => e.Entrada.Operation == "identity.embed.exchange" && e.Entrada.Outcome == IaBimeta.Audit.Contracts.AuditOutcome.Success);
+    }
+
     [Theory]
     [InlineData("verifier")]
+    [InlineData("verifier-malformado")]
+    [InlineData("origem-invalida")]
     [InlineData("origem")]
     [InlineData("vencido")]
     [InlineData("conexao")]
@@ -468,6 +489,12 @@ public class EmbeddedServicesTests
         {
             case "verifier":
                 verifier = new string('w', 50);
+                break;
+            case "verifier-malformado":
+                verifier = "curto";
+                break;
+            case "origem-invalida":
+                origem = "nao-e-uma-origem";
                 break;
             case "origem":
                 origem = "https://outro.exemplo.com.br";

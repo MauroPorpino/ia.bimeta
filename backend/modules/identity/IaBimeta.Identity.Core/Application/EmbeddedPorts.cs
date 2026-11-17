@@ -86,10 +86,10 @@ public interface IEmbeddedStore
     Task<LaunchTicket?> PeekTicketAsync(byte[] tokenHash, DateTimeOffset now, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Consome o ticket (<paramref name="ticketId"/>) e grava a sessão embutida (e o cliente em foco, se houver) na MESMA transação, e revoga as mais antigas do mesmo usuário externo na conexão além do limite. Se a gravação falha
+    /// Consome o ticket (<paramref name="ticket"/>) e grava a sessão embutida (e o cliente em foco, se houver) E a entrada de auditoria do sucesso (<paramref name="audit"/>, outbox) na MESMA transação, depois de reconferir que a chave do ticket não foi revogada (devolve <c>false</c> sem gravar se foi), e revoga as mais antigas do mesmo usuário externo na conexão além do limite. Se a gravação falha
     /// (contenção, <see cref="EmbeddedBusyException"/>), nada acontece e o ticket continua pendente: repetir funciona. Devolve <c>false</c> (sem gravar) quando o ticket já não está pendente (outra troca o consumiu antes).
     /// </summary>
-    Task<bool> AddEmbeddedSessionAsync(Session session, string? customerRef, int maxActivePerUser, Guid ticketId, DateTimeOffset now, CancellationToken cancellationToken);
+    Task<bool> AddEmbeddedSessionAsync(Session session, string? customerRef, int maxActivePerUser, LaunchTicket ticket, PendingAudit audit, DateTimeOffset now, CancellationToken cancellationToken);
 
     Task<Session?> FindSessionAsync(TenantId tenantId, Guid sessionId, CancellationToken cancellationToken);
 
@@ -97,10 +97,24 @@ public interface IEmbeddedStore
     Task<int> RevokeEmbeddedSessionsAsync(TenantId tenantId, Guid connectionId, string? externalUserId, DateTimeOffset now, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Consome o ticket de contexto (<paramref name="ticketId"/>) e acrescenta o cliente em foco à sessão (ou renova a data dele), mantendo no máximo <see cref="SessionCustomerGrant.MaxPerSession"/>, na MESMA transação: se falha por
+    /// Consome o ticket de contexto (<paramref name="ticket"/>) e acrescenta o cliente em foco à sessão (ou renova a data dele), mantendo no máximo <see cref="SessionCustomerGrant.MaxPerSession"/>, na MESMA transação: se falha por
     /// contenção, o ticket continua pendente. Devolve <c>false</c> (sem gravar) quando o ticket já não está pendente.
     /// </summary>
-    Task<bool> AddCustomerGrantAsync(TenantId tenantId, Guid sessionId, string customerRef, Guid ticketId, DateTimeOffset now, CancellationToken cancellationToken);
+    Task<bool> AddCustomerGrantAsync(TenantId tenantId, Guid sessionId, string customerRef, LaunchTicket ticket, PendingAudit audit, DateTimeOffset now, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<string>> ListCustomerGrantsAsync(TenantId tenantId, Guid sessionId, CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// A entrega, à trilha de auditoria, das entradas do Embedded guardadas na transação do consumo do ticket (<c>identity.audit_outbox</c>, E1-R quarta rodada). Só o Worker a usa. <see cref="FlushAsync"/> roda no contexto de UM
+/// tenant (criado pelo host), entrega pelo menos uma vez e só apaga a linha depois de a trilha aceitar; <see cref="ListTenantsWithPendingAsync"/> e <see cref="PendingCountAsync"/> são de sistema (todos os tenants).
+/// </summary>
+public interface IIdentityAuditOutbox
+{
+    Task<IReadOnlyList<Guid>> ListTenantsWithPendingAsync(int take, CancellationToken cancellationToken);
+
+    Task<int> PendingCountAsync(CancellationToken cancellationToken);
+
+    /// <summary>Entrega até <paramref name="take"/> entradas do tenant do contexto. Devolve quantas entregou; uma falha da trilha deixa a linha para o próximo ciclo.</summary>
+    Task<int> FlushAsync(int take, CancellationToken cancellationToken);
 }

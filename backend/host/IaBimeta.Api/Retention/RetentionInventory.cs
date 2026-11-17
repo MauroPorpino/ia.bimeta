@@ -81,6 +81,7 @@ internal static class RetentionInventory
         // Registros de referência (não se apagam por prazo)
         ["audit.audit_events"] = (DataClass.LegalRecord, "trilha de auditoria"),
         ["contact_center.audit_outbox"] = (DataClass.LegalRecord, "auditoria pendente de entrega ao Audit"),
+        ["identity.audit_outbox"] = (DataClass.LegalRecord, "auditoria do Embedded pendente de entrega ao Audit (E1-R): guardada na transação do consumo do ticket, entregue pelo Worker e apagada só depois da entrega"),
         ["ai_gateway.ai_requests"] = (DataClass.LegalRecord, "ledger de consumo de IA (a correlação com o atendimento é a parte a pseudonimizar)"),
 
         // Cadastro e configuração

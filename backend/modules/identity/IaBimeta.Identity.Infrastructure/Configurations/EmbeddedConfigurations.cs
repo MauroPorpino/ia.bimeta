@@ -182,3 +182,25 @@ internal sealed class SessionCustomerGrantConfiguration : IEntityTypeConfigurati
         builder.HasOne<Session>().WithMany().HasForeignKey(g => new { g.TenantId, g.SessionId }).OnDelete(DeleteBehavior.Cascade);
     }
 }
+
+internal sealed class PendingAuditConfiguration : IEntityTypeConfiguration<PendingAudit>
+{
+    public void Configure(EntityTypeBuilder<PendingAudit> builder)
+    {
+        builder.ToTable("audit_outbox", table => table.HasCheckConstraint("ck_audit_outbox_outcome", "outcome > 0"));
+
+        builder.HasKey(a => new { a.TenantId, a.Id });
+        builder.Property(a => a.TenantId).HasColumnName("tenant_id").HasConversion(new TenantIdConverter()).ValueGeneratedNever();
+        builder.Property(a => a.Id).HasColumnName("id").ValueGeneratedNever();
+        builder.Property(a => a.Operation).HasColumnName("operation").HasMaxLength(PendingAudit.OperationMaxLength).IsRequired();
+        builder.Property(a => a.ResourceType).HasColumnName("resource_type").HasMaxLength(PendingAudit.ResourceTypeMaxLength).IsRequired();
+        builder.Property(a => a.ResourceId).HasColumnName("resource_id").HasMaxLength(PendingAudit.ResourceIdMaxLength);
+        builder.Property(a => a.Outcome).HasColumnName("outcome").HasConversion<short>();
+        builder.Property(a => a.ActorUserId).HasColumnName("actor_user_id");
+        builder.Property(a => a.ActorOrigin).HasColumnName("actor_origin").HasMaxLength(PendingAudit.ActorOriginMaxLength).IsRequired();
+        builder.Property(a => a.CreatedAt).HasColumnName("created_at");
+
+        // A entrega lê as mais antigas primeiro.
+        builder.HasIndex(a => new { a.TenantId, a.CreatedAt, a.Id }).HasDatabaseName("ix_audit_outbox_tenant_id_created_at_id");
+    }
+}

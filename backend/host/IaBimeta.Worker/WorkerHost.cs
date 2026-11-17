@@ -167,6 +167,10 @@ public static class WorkerHost
         builder.Services.AddHostedService<AiConfigurationReport>();
 
         builder.Services.AddSingleton<ContactCenterReconciler>();
+
+        // A entrega da auditoria do Embedded guardada na transação do consumo do ticket (identity.audit_outbox, E1-R quarta rodada).
+        builder.Services.AddSingleton<IdentityAuditReconciler>();
+        builder.Services.AddHostedService<IdentityAuditDeliveryService>();
         builder.Services.AddSingleton<AgentsTurnExecutor>();
         builder.Services.AddSingleton<AgentsReconciler>();
         builder.Services.AddHostedService<OutboxRelayService>();
