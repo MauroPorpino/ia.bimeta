@@ -53,6 +53,29 @@ public sealed class EmbeddedHardeningTests
         Assert.False(SessionTokens.TryHash(token, out _, out _));
     }
 
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(50, false)]
+    [InlineData(100, true)]
+    [InlineData(5000, true)]
+    [InlineData(30000, true)]
+    [InlineData(30001, false)]
+    public void O_tempo_maximo_de_espera_por_trava_tem_piso_e_teto_e_o_padrao_vale(int milissegundos, bool valido)
+    {
+        // Sem teto de espera, as requisições enfileiradas na mesma linha seguram uma conexão cada e esgotam o pool.
+        new IdentityOptions().ValidateEmbedded();
+        var opcoes = new IdentityOptions { EmbeddedLockTimeout = TimeSpan.FromMilliseconds(milissegundos) };
+
+        if (valido)
+        {
+            opcoes.ValidateEmbedded();
+        }
+        else
+        {
+            Assert.Throws<InvalidOperationException>(opcoes.ValidateEmbedded);
+        }
+    }
+
     private sealed class Relogio : TimeProvider
     {
         public DateTimeOffset Agora { get; set; } = new(2026, 11, 16, 12, 0, 0, TimeSpan.Zero);

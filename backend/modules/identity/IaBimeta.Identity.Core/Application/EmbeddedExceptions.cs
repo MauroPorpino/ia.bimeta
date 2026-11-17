@@ -39,6 +39,17 @@ public sealed class EmbeddedConflictException : Exception
     }
 }
 
+/// <summary>
+/// O banco não atendeu a operação por contenção transitória (deadlock, trava que passou do tempo, conexões esgotadas). Nada foi gravado: quem chama pode tentar de novo. Vira 503 com <c>Retry-After</c>, nunca 500.
+/// </summary>
+public sealed class EmbeddedBusyException : Exception
+{
+    public EmbeddedBusyException(Exception inner)
+        : base("Serviço temporariamente ocupado.", inner)
+    {
+    }
+}
+
 /// <summary>O segredo das chaves de integração não pode ser gravado nem lido (sem chave mestra configurada, texto alterado ou de outro contexto). Falha fechada, sem repetir segredo.</summary>
 public sealed class EmbeddedUnavailableException : Exception
 {

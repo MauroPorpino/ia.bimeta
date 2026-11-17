@@ -50,6 +50,12 @@ public sealed class IdentityOptions
     /// <summary>Quanto tempo o nonce de uma chamada assinada fica registrado (precisa cobrir a janela dos dois lados).</summary>
     public TimeSpan IntegrationNonceRetention { get; set; } = TimeSpan.FromMinutes(10);
 
+    /// <summary>
+    /// Quanto uma transação do Embedded espera por uma trava de linha antes de desistir (vira 503 com Retry-After). Sem teto, as requisições enfileiradas na mesma linha seguram uma conexão cada e esgotam o pool.
+    /// O piso é 100 ms e o teto, 30 s.
+    /// </summary>
+    public TimeSpan EmbeddedLockTimeout { get; set; } = TimeSpan.FromSeconds(5);
+
     /// <summary>A carência padrão das chaves antigas numa rotação.</summary>
     public TimeSpan IntegrationKeyRotationGrace { get; set; } = TimeSpan.FromHours(24);
 
@@ -82,6 +88,11 @@ public sealed class IdentityOptions
         if (MaxEmbeddedSessionsPerUser < 1 || MaxEmbeddedSessionsPerUser > 20)
         {
             throw new InvalidOperationException("Identity:MaxEmbeddedSessionsPerUser deve ficar entre 1 e 20.");
+        }
+
+        if (EmbeddedLockTimeout < TimeSpan.FromMilliseconds(100) || EmbeddedLockTimeout > TimeSpan.FromSeconds(30))
+        {
+            throw new InvalidOperationException("Identity:EmbeddedLockTimeout deve ficar entre 100 milissegundos e 30 segundos.");
         }
 
         if (IntegrationKeyRotationGrace <= TimeSpan.Zero || IntegrationKeyRotationGrace > TimeSpan.FromDays(7))

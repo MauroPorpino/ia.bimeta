@@ -369,6 +369,23 @@ public class EmbeddedServicesTests
     }
 
     [Fact]
+    public async Task Chave_revogada_entre_a_autenticacao_e_a_gravacao_nao_emite_ticket_de_abertura_nem_de_contexto()
+    {
+        // E1-R (2.ª rodada): a integração foi autenticada com a chave ainda ativa; a gravação do ticket acontece sob a trava da chave e a recusa se ela foi revogada no meio.
+        var c = new Cenario();
+        var integracao = c.Integracao;
+        _ = await c.Tickets.IssueLaunchTicketAsync(integracao, c.Pedido("u-1", Verifier)); // cria o vínculo e prova que a chave ativa emite
+        c.Chave.Revoke(c.Relogio.GetUtcNow());
+        var antes = c.Embedded.Tickets.Count;
+
+        await Assert.ThrowsAsync<EmbeddedAuthenticationException>(() => c.Tickets.IssueLaunchTicketAsync(integracao, c.Pedido("u-1", Verifier)));
+        await Assert.ThrowsAsync<ExternalIdentityNotAllowedException>(() => c.Tickets.IssueContextTicketAsync(integracao, "u-1", Guid.NewGuid(), "CLI-1")); // sem sessão alvo nem chega à gravação
+
+        Assert.Equal(antes, c.Embedded.Tickets.Count);
+        Assert.Contains(c.Auditoria.Eventos, e => e.Entrada.Operation == "identity.embed.ticket.issue" && e.Entrada.Outcome == IaBimeta.Audit.Contracts.AuditOutcome.Denied);
+    }
+
+    [Fact]
     public async Task Identidade_mapeada_para_conta_que_virou_administrativa_nao_recebe_ticket()
     {
         var c = new Cenario(ProvisioningMode.MappedOnly);

@@ -130,6 +130,18 @@ public sealed class EmbeddedExchangeService
             throw new EmbeddedAuthenticationException();
         }
 
+        // Mesma regra da troca: ticket de chave revogada, de conexão inativa ou emitido até a marca de revogação (logout, emergência) não vale, mesmo que a sessão que o resgata siga viva (aberta por OUTRA chave).
+        var conexao = await _store.FindConnectionAsync(contexto.TenantId, consumido.ConnectionId, forUpdate: false, cancellationToken);
+        var vinculo = await _store.FindIdentityAsync(contexto.TenantId, consumido.ConnectionId, consumido.ExternalUserId, cancellationToken);
+        if (conexao is null || !conexao.IsActive
+            || vinculo is not { IsActive: true }
+            || consumido.CreatedAt <= conexao.SessionsRevokedAt || consumido.CreatedAt <= vinculo.SessionsRevokedAt
+            || (consumido.KeyId is { } chaveId && (await _store.FindKeyAsync(chaveId, cancellationToken) is not { } chave || chave.Key.Status == IntegrationKeyStatus.Revoked || chave.Key.ConnectionId != conexao.Id)))
+        {
+            await _audit.WriteAsync(new AuditEntry("identity.embed.context", "session", principal.SessionId.ToString(), AuditOutcome.Denied), cancellationToken);
+            throw new EmbeddedAuthenticationException();
+        }
+
         await _store.AddCustomerGrantAsync(contexto.TenantId, sessao.Id, consumido.CustomerRef, agora, cancellationToken);
         await _audit.WriteAsync(new AuditEntry("identity.embed.context", "session", sessao.Id.ToString(), AuditOutcome.Success), cancellationToken);
         return consumido.CustomerRef;

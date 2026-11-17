@@ -70,7 +70,11 @@ public interface IEmbeddedStore
     /// <summary>Cria, juntos ou nenhum, o usuário federado, a concessão e o vínculo. Devolve <c>false</c> se o vínculo já existe (corrida entre duas primeiras entradas): quem chama relê o existente.</summary>
     Task<bool> TryProvisionFederatedUserAsync(User user, UserOrganizationGrant grant, ExternalIdentity identity, CancellationToken cancellationToken);
 
-    Task AddTicketAsync(LaunchTicket ticket, CancellationToken cancellationToken);
+    /// <summary>
+    /// Grava o ticket SOB a trava da chave que o emite: a revogação da chave e a gravação do ticket se enfileiram, então um ticket nunca nasce de uma chave já revogada. Devolve <c>false</c> (e não grava) quando a chave
+    /// deixou de ser utilizável (revogada, expirada ou de outra conexão) entre a autenticação da chamada e a gravação.
+    /// </summary>
+    Task<bool> AddTicketAsync(LaunchTicket ticket, DateTimeOffset now, CancellationToken cancellationToken);
 
     /// <summary>
     /// Consome o ticket de forma ATÔMICA: só devolve o ticket para quem o marcou como usado (não usado, não expirado). Duas trocas simultâneas têm no máximo um vencedor; uma tentativa errada também queima o

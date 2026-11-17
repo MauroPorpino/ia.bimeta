@@ -18,7 +18,9 @@ x-logging: &logging
 
 x-app-environment: &app-environment
   ASPNETCORE_ENVIRONMENT: Production
-  ConnectionStrings__Default: "Host=db;Port=5432;Database=iabimeta;Username=iabimeta;Password=${APP_DB_PASSWORD:?defina APP_DB_PASSWORD no .env}"
+  # Pool do Npgsql EXPLICITO (E1-R): o padrao (100) iguala o max_connections do PostgreSQL (100, com 3 reservadas) e sob rajada esgota o servidor (53300 => 500). Api e Worker usam este mesmo texto, cada um com seu pool de ate 30:
+  # 2 x 30 = 60, abaixo do limite do servidor com folga para backup, psql e ferramentas. Quem passa do pool espera (Timeout, em segundos) em vez de abrir conexao nova.
+  ConnectionStrings__Default: "Host=db;Port=5432;Database=iabimeta;Username=iabimeta;Password=${APP_DB_PASSWORD:?defina APP_DB_PASSWORD no .env};Maximum Pool Size=30;Timeout=15"
   Channels__Webhook__PublicBaseUrl: "https://${DOMAIN:?defina DOMAIN no .env}"
   Conversations__Attachments__RootPath: /var/lib/iabimeta/anexos
   Conversations__Attachments__Scanner__Mode: ClamAv

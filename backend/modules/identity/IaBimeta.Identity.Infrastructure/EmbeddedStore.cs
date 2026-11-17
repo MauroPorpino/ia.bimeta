@@ -3,6 +3,7 @@ using IaBimeta.Identity.Domain;
 using IaBimeta.Identity.Infrastructure.Configurations;
 using IaBimeta.SharedKernel;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace IaBimeta.Identity.Infrastructure;
 
@@ -13,10 +14,93 @@ namespace IaBimeta.Identity.Infrastructure;
 internal sealed class EmbeddedStore : IEmbeddedStore
 {
     private readonly IdentityDbContext _db;
+    private readonly IdentityOptions _options;
 
-    public EmbeddedStore(IdentityDbContext db)
+    public EmbeddedStore(IdentityDbContext db, IdentityOptions options)
     {
         _db = db;
+        _options = options;
+    }
+
+    // ORDEM CANÔNICA DE TRAVAS (E1-R, segunda rodada). Toda operação que trava mais de uma linha segue a mesma ordem, então duas delas nunca se esperam em ciclo (deadlock):
+    //   1. a chave (integration_keys), 2. o vínculo do usuário externo (external_identities), 3. os tickets (launch_tickets, por id), 4. as sessões (sessions, por id).
+    // A conexão (integration_connections) só leva a trava de TryAddKeyAsync (primeira e única). Cada linha de ticket e de sessão é travada por SELECT ... ORDER BY id FOR UPDATE, nunca na ordem do plano de um UPDATE
+    // multilinha. A SEGURANÇA da revogação não depende dessas atualizações em massa: ela está nas marcas (sessions_revoked_at) e na conferência da chave a cada uso; as atualizações só limpam o que já não vale.
+
+    /// <summary>Abre a transação com teto de espera por trava: quem passa do tempo desiste (vira 503) em vez de segurar uma conexão do pool indefinidamente.</summary>
+    private async Task<IDbContextTransaction> BeginAsync(CancellationToken cancellationToken)
+    {
+        var transacao = await _db.Database.BeginTransactionAsync(cancellationToken);
+        var ms = ((int)_options.EmbeddedLockTimeout.TotalMilliseconds).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT set_config('lock_timeout', {ms}, true)", cancellationToken);
+        return transacao;
+    }
+
+    /// <summary>Contenção transitória do banco vira <see cref="EmbeddedBusyException"/> (503 com Retry-After), nunca 500.</summary>
+    private static async Task<T> GuardAsync<T>(Func<Task<T>> operacao)
+    {
+        try
+        {
+            return await operacao();
+        }
+        catch (Exception ex) when (PostgresErrors.IsTransientContention(ex))
+        {
+            throw new EmbeddedBusyException(ex);
+        }
+    }
+
+    /// <summary>
+    /// Trava as linhas indicadas na ordem do id (ordem canônica) e devolve só as que ainda estão no estado esperado. Roda dentro da transação do chamador.
+    /// </summary>
+    private async Task LockSessionsAsync(TenantId tenantId, IReadOnlyCollection<Guid> ids, CancellationToken cancellationToken)
+    {
+        if (ids.Count == 0)
+        {
+            return;
+        }
+
+        var lista = ids.ToArray();
+        await _db.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT id FROM identity.sessions WHERE tenant_id = {tenantId.Value} AND id = ANY({lista}) ORDER BY id FOR UPDATE",
+            cancellationToken);
+    }
+
+    private async Task LockTicketsAsync(TenantId tenantId, IReadOnlyCollection<Guid> ids, CancellationToken cancellationToken)
+    {
+        if (ids.Count == 0)
+        {
+            return;
+        }
+
+        var lista = ids.ToArray();
+        await _db.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT id FROM identity.launch_tickets WHERE tenant_id = {tenantId.Value} AND id = ANY({lista}) ORDER BY id FOR UPDATE",
+            cancellationToken);
+    }
+
+    /// <summary>Consome (marca como usados) os tickets pendentes que casam com o filtro, travando-os na ordem do id. Cada chamada é uma transação curta própria.</summary>
+    private async Task ConsumePendingTicketsAsync(TenantId tenantId, System.Linq.Expressions.Expression<Func<LaunchTicket, bool>> filtro, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        await using var transacao = await BeginAsync(cancellationToken);
+        var ids = await _db.LaunchTickets.IgnoreQueryFilters().Where(t => t.TenantId == tenantId && t.UsedAt == null).Where(filtro).Select(t => t.Id).ToListAsync(cancellationToken);
+        await LockTicketsAsync(tenantId, ids, cancellationToken);
+        await _db.LaunchTickets.IgnoreQueryFilters()
+            .Where(t => t.TenantId == tenantId && ids.Contains(t.Id) && t.UsedAt == null)
+            .ExecuteUpdateAsync(set => set.SetProperty(t => t.UsedAt, now), cancellationToken);
+        await transacao.CommitAsync(cancellationToken);
+    }
+
+    /// <summary>Revoga as sessões embutidas ativas que casam com o filtro, travando-as na ordem do id. Devolve quantas revogou.</summary>
+    private async Task<int> RevokeSessionsMatchingAsync(TenantId tenantId, System.Linq.Expressions.Expression<Func<Session, bool>> filtro, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        await using var transacao = await BeginAsync(cancellationToken);
+        var ids = await _db.Sessions.IgnoreQueryFilters().Where(s => s.TenantId == tenantId && s.RevokedAt == null).Where(filtro).Select(s => s.Id).ToListAsync(cancellationToken);
+        await LockSessionsAsync(tenantId, ids, cancellationToken);
+        var total = await _db.Sessions.IgnoreQueryFilters()
+            .Where(s => s.TenantId == tenantId && ids.Contains(s.Id) && s.RevokedAt == null)
+            .ExecuteUpdateAsync(set => set.SetProperty(s => s.RevokedAt, now), cancellationToken);
+        await transacao.CommitAsync(cancellationToken);
+        return total;
     }
 
     public async Task AddConnectionAsync(IntegrationConnection connection, CancellationToken cancellationToken)
@@ -63,10 +147,13 @@ internal sealed class EmbeddedStore : IEmbeddedStore
             .OrderBy(k => k.CreatedAt)
             .ToListAsync(cancellationToken);
 
-    public async Task<bool> TryAddKeyAsync(IntegrationKey key, DateTimeOffset? expireOthersAt, DateTimeOffset now, CancellationToken cancellationToken)
+    public Task<bool> TryAddKeyAsync(IntegrationKey key, DateTimeOffset? expireOthersAt, DateTimeOffset now, CancellationToken cancellationToken) =>
+        GuardAsync(() => TryAddKeyCoreAsync(key, expireOthersAt, now, cancellationToken));
+
+    private async Task<bool> TryAddKeyCoreAsync(IntegrationKey key, DateTimeOffset? expireOthersAt, DateTimeOffset now, CancellationToken cancellationToken)
     {
         using var escopo = _db.UseAuthenticationTenant(key.TenantId);
-        await using var transacao = await _db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transacao = await BeginAsync(cancellationToken);
 
         // Trava a conexão: duas criações simultâneas de chave se enfileiram, e o limite de chaves ativas vale.
         await _db.Database.ExecuteSqlInterpolatedAsync(
@@ -98,23 +185,33 @@ internal sealed class EmbeddedStore : IEmbeddedStore
 
     public async Task<bool> RevokeKeyAsync(TenantId tenantId, Guid connectionId, Guid keyId, DateTimeOffset now, CancellationToken cancellationToken)
     {
-        await using var transacao = await _db.Database.BeginTransactionAsync(cancellationToken);
-        var alteradas = await _db.IntegrationKeys.IgnoreQueryFilters()
-            .Where(k => k.TenantId == tenantId && k.ConnectionId == connectionId && k.Id == keyId && k.Status == IntegrationKeyStatus.Active)
-            .ExecuteUpdateAsync(set => set.SetProperty(k => k.Status, IntegrationKeyStatus.Revoked).SetProperty(k => k.RevokedAt, now), cancellationToken);
-        if (alteradas != 1)
+        // A revogação em si é UMA linha: a da chave. É ela que vale. O UPDATE trava a linha, então a gravação de um ticket (que a trava em FOR SHARE) se enfileira com ela: depois do commit, nenhum ticket nasce desta chave.
+        var revogada = await GuardAsync(async () =>
+        {
+            await using var transacao = await BeginAsync(cancellationToken);
+            var alteradas = await _db.IntegrationKeys.IgnoreQueryFilters()
+                .Where(k => k.TenantId == tenantId && k.ConnectionId == connectionId && k.Id == keyId && k.Status == IntegrationKeyStatus.Active)
+                .ExecuteUpdateAsync(set => set.SetProperty(k => k.Status, IntegrationKeyStatus.Revoked).SetProperty(k => k.RevokedAt, now), cancellationToken);
+            await transacao.CommitAsync(cancellationToken);
+            return alteradas == 1;
+        });
+        if (!revogada)
         {
             return false;
         }
 
-        // Revogar a chave derruba o que nasceu dela: as sessões abertas com um ticket dela e os tickets pendentes. (A sessão também é conferida contra a chave a cada requisição, o que fecha a corrida com uma troca em andamento.)
-        await _db.Sessions.IgnoreQueryFilters()
-            .Where(s => s.TenantId == tenantId && s.IssuerKeyId == keyId && s.RevokedAt == null)
-            .ExecuteUpdateAsync(set => set.SetProperty(s => s.RevokedAt, now), cancellationToken);
-        await _db.LaunchTickets.IgnoreQueryFilters()
-            .Where(t => t.TenantId == tenantId && t.KeyId == keyId && t.UsedAt == null)
-            .ExecuteUpdateAsync(set => set.SetProperty(t => t.UsedAt, now), cancellationToken);
-        await transacao.CommitAsync(cancellationToken);
+        // O que nasceu da chave já não vale: a sessão é conferida contra a chave a cada requisição e os tickets, no uso (troca e resgate de contexto). A limpeza física abaixo só tira o que ficou pendente; cada passo é uma
+        // transação curta, fora da trava da chave e na ordem canônica (tickets, depois sessões). Se ela esbarrar em contenção, a revogação continua válida e a limpeza é repetida por qualquer revogação seguinte.
+        try
+        {
+            await ConsumePendingTicketsAsync(tenantId, t => t.KeyId == keyId, now, cancellationToken);
+            await RevokeSessionsMatchingAsync(tenantId, s => s.IssuerKeyId == keyId, now, cancellationToken);
+        }
+        catch (Exception ex) when (PostgresErrors.IsTransientContention(ex))
+        {
+            // Segurança preservada pela conferência no uso; ver o comentário acima.
+        }
+
         return true;
     }
 
@@ -191,12 +288,31 @@ internal sealed class EmbeddedStore : IEmbeddedStore
         }
     }
 
-    public async Task AddTicketAsync(LaunchTicket ticket, CancellationToken cancellationToken)
-    {
-        using var escopo = _db.UseAuthenticationTenant(ticket.TenantId);
-        _db.LaunchTickets.Add(ticket);
-        await _db.SaveChangesAsync(cancellationToken);
-    }
+    public Task<bool> AddTicketAsync(LaunchTicket ticket, DateTimeOffset now, CancellationToken cancellationToken) =>
+        GuardAsync(async () =>
+        {
+            using var escopo = _db.UseAuthenticationTenant(ticket.TenantId);
+            await using var transacao = await BeginAsync(cancellationToken);
+
+            if (ticket.KeyId is { } chaveId)
+            {
+                // Trava a chave em modo compartilhado: emissões simultâneas não se bloqueiam, mas a revogação (que atualiza a linha) espera as emissões em andamento e vice-versa. Depois de obter a trava, relê o estado COMMITADO.
+                await _db.Database.ExecuteSqlInterpolatedAsync(
+                    $"SELECT 1 FROM identity.integration_keys WHERE tenant_id = {ticket.TenantId.Value} AND id = {chaveId} FOR SHARE",
+                    cancellationToken);
+                var chave = await _db.IntegrationKeys.IgnoreQueryFilters().AsNoTracking()
+                    .FirstOrDefaultAsync(k => k.TenantId == ticket.TenantId && k.Id == chaveId, cancellationToken);
+                if (chave is null || chave.ConnectionId != ticket.ConnectionId || !chave.IsUsableAt(now))
+                {
+                    return false;
+                }
+            }
+
+            _db.LaunchTickets.Add(ticket);
+            await _db.SaveChangesAsync(cancellationToken);
+            await transacao.CommitAsync(cancellationToken);
+            return true;
+        });
 
     public async Task<LaunchTicket?> ConsumeTicketAsync(byte[] tokenHash, DateTimeOffset now, CancellationToken cancellationToken)
     {
@@ -212,10 +328,17 @@ internal sealed class EmbeddedStore : IEmbeddedStore
         return await _db.LaunchTickets.IgnoreQueryFilters().AsNoTracking().FirstOrDefaultAsync(t => t.TokenHash == tokenHash, cancellationToken);
     }
 
-    public async Task AddEmbeddedSessionAsync(Session session, string? customerRef, int maxActivePerUser, DateTimeOffset now, CancellationToken cancellationToken)
+    public Task AddEmbeddedSessionAsync(Session session, string? customerRef, int maxActivePerUser, DateTimeOffset now, CancellationToken cancellationToken) =>
+        GuardAsync(async () =>
+        {
+            await AddEmbeddedSessionCoreAsync(session, customerRef, maxActivePerUser, now, cancellationToken);
+            return true;
+        });
+
+    private async Task AddEmbeddedSessionCoreAsync(Session session, string? customerRef, int maxActivePerUser, DateTimeOffset now, CancellationToken cancellationToken)
     {
         using var escopo = _db.UseAuthenticationTenant(session.TenantId);
-        await using var transacao = await _db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transacao = await BeginAsync(cancellationToken);
 
         // Trava o vínculo do usuário externo: duas trocas simultâneas dele se enfileiram, e o teto de sessões ativas vale (sem a trava, cada uma contaria antes de a outra gravar).
         await _db.Database.ExecuteSqlInterpolatedAsync(
@@ -239,6 +362,8 @@ internal sealed class EmbeddedStore : IEmbeddedStore
             .ToListAsync(cancellationToken);
         if (excedentes.Count > 0)
         {
+            // Ordem canônica: o vínculo (travado acima) e DEPOIS as sessões por id.
+            await LockSessionsAsync(session.TenantId, excedentes, cancellationToken);
             await _db.Sessions.IgnoreQueryFilters()
                 .Where(s => s.TenantId == session.TenantId && excedentes.Contains(s.Id))
                 .ExecuteUpdateAsync(set => set.SetProperty(s => s.RevokedAt, now), cancellationToken);
@@ -250,39 +375,47 @@ internal sealed class EmbeddedStore : IEmbeddedStore
     public Task<Session?> FindSessionAsync(TenantId tenantId, Guid sessionId, CancellationToken cancellationToken) =>
         _db.Sessions.IgnoreQueryFilters().AsNoTracking().FirstOrDefaultAsync(s => s.TenantId == tenantId && s.Id == sessionId, cancellationToken);
 
-    public async Task<int> RevokeEmbeddedSessionsAsync(TenantId tenantId, Guid connectionId, string? externalUserId, DateTimeOffset now, CancellationToken cancellationToken)
-    {
-        await using var transacao = await _db.Database.BeginTransactionAsync(cancellationToken);
-
-        // A marca de revogação vem PRIMEIRO: sessão ou ticket criado até ela não vale mais, mesmo que uma troca que já estava em andamento grave a sessão depois (a sessão é conferida contra a marca a cada requisição).
-        if (externalUserId is null)
+    public Task<int> RevokeEmbeddedSessionsAsync(TenantId tenantId, Guid connectionId, string? externalUserId, DateTimeOffset now, CancellationToken cancellationToken) =>
+        GuardAsync(async () =>
         {
-            await _db.IntegrationConnections.IgnoreQueryFilters()
-                .Where(c => c.TenantId == tenantId && c.Id == connectionId)
-                .ExecuteUpdateAsync(set => set.SetProperty(c => c.SessionsRevokedAt, now), cancellationToken);
-        }
-        else
+            // A marca de revogação vem PRIMEIRO e sozinha (UMA linha, transação própria): sessão ou ticket criado até ela não vale mais, mesmo que uma troca em andamento grave a sessão depois (conferência no uso).
+            await using (var transacao = await BeginAsync(cancellationToken))
+            {
+                if (externalUserId is null)
+                {
+                    await _db.IntegrationConnections.IgnoreQueryFilters()
+                        .Where(c => c.TenantId == tenantId && c.Id == connectionId)
+                        .ExecuteUpdateAsync(set => set.SetProperty(c => c.SessionsRevokedAt, now), cancellationToken);
+                }
+                else
+                {
+                    await _db.ExternalIdentities.IgnoreQueryFilters()
+                        .Where(i => i.TenantId == tenantId && i.ConnectionId == connectionId && i.ExternalUserId == externalUserId)
+                        .ExecuteUpdateAsync(set => set.SetProperty(i => i.SessionsRevokedAt, now), cancellationToken);
+                }
+
+                await transacao.CommitAsync(cancellationToken);
+            }
+
+            // Limpeza física na ordem canônica, uma tabela por transação: tickets pendentes (de abertura e de contexto) e depois as sessões.
+            await ConsumePendingTicketsAsync(tenantId, t => t.ConnectionId == connectionId && (externalUserId == null || t.ExternalUserId == externalUserId), now, cancellationToken);
+            return await RevokeSessionsMatchingAsync(
+                tenantId,
+                s => s.Kind == SessionKind.Embedded && s.IntegrationId == connectionId && (externalUserId == null || s.ExternalUserId == externalUserId) && s.ExpiresAt > now,
+                now,
+                cancellationToken);
+        });
+
+    public Task AddCustomerGrantAsync(TenantId tenantId, Guid sessionId, string customerRef, DateTimeOffset now, CancellationToken cancellationToken) =>
+        GuardAsync(async () =>
         {
-            await _db.ExternalIdentities.IgnoreQueryFilters()
-                .Where(i => i.TenantId == tenantId && i.ConnectionId == connectionId && i.ExternalUserId == externalUserId)
-                .ExecuteUpdateAsync(set => set.SetProperty(i => i.SessionsRevokedAt, now), cancellationToken);
-        }
+            await AddCustomerGrantCoreAsync(tenantId, sessionId, customerRef, now, cancellationToken);
+            return true;
+        });
 
-        // Os tickets ainda pendentes (de abertura e de contexto) do alvo morrem junto.
-        await _db.LaunchTickets.IgnoreQueryFilters()
-            .Where(t => t.TenantId == tenantId && t.ConnectionId == connectionId && (externalUserId == null || t.ExternalUserId == externalUserId) && t.UsedAt == null)
-            .ExecuteUpdateAsync(set => set.SetProperty(t => t.UsedAt, now), cancellationToken);
-
-        var total = await _db.Sessions.IgnoreQueryFilters()
-            .Where(s => s.TenantId == tenantId && s.Kind == SessionKind.Embedded && s.IntegrationId == connectionId && (externalUserId == null || s.ExternalUserId == externalUserId) && s.RevokedAt == null && s.ExpiresAt > now)
-            .ExecuteUpdateAsync(set => set.SetProperty(s => s.RevokedAt, now), cancellationToken);
-        await transacao.CommitAsync(cancellationToken);
-        return total;
-    }
-
-    public async Task AddCustomerGrantAsync(TenantId tenantId, Guid sessionId, string customerRef, DateTimeOffset now, CancellationToken cancellationToken)
+    private async Task AddCustomerGrantCoreAsync(TenantId tenantId, Guid sessionId, string customerRef, DateTimeOffset now, CancellationToken cancellationToken)
     {
-        await using var transacao = await _db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transacao = await BeginAsync(cancellationToken);
 
         // Trava a sessão: resgates simultâneos de tickets de contexto da MESMA sessão se enfileiram, e o teto de clientes em foco vale (sem a trava, cada um aparava sem ver o outro).
         await _db.Database.ExecuteSqlInterpolatedAsync(

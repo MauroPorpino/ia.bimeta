@@ -159,6 +159,12 @@ public static class IdentityEndpoints
             contexto.HttpContext.Response.Headers.RetryAfter = Math.Max(1, (int)Math.Ceiling(ex.RetryAfter.TotalSeconds)).ToString(System.Globalization.CultureInfo.InvariantCulture);
             return Results.Problem(title: "Limite excedido", detail: "Requisições demais para esta chave.", statusCode: StatusCodes.Status429TooManyRequests, extensions: Code("embedded-rate-limited"));
         }
+        catch (EmbeddedBusyException)
+        {
+            // Contenção transitória do banco (deadlock, trava que passou do tempo, conexões esgotadas): nada foi gravado, o ERP pode repetir. Nunca 500.
+            contexto.HttpContext.Response.Headers.RetryAfter = "1";
+            return Results.Problem(title: "Ocupado", detail: "O serviço está ocupado. Tente novamente em instantes.", statusCode: StatusCodes.Status503ServiceUnavailable, extensions: Code("embedded-busy"));
+        }
         catch (EmbeddedUnavailableException ex)
         {
             // Sem chave mestra configurada (ou segredo ilegível): falha fechada, sem repetir segredo nem texto cifrado.

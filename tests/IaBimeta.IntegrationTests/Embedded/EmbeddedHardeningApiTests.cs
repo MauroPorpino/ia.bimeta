@@ -351,7 +351,7 @@ public sealed class EmbeddedHardeningApiTests(PostgresFixture banco)
 
         var estados = await Task.WhenAll(tickets.Select(t => c.Api.StatusAsync(troca.Token, HttpMethod.Post, "/embed/v1/context", new { ticket = t })));
 
-        Assert.True(estados.All(e => e == HttpStatusCode.OK), "Erros do servidor: " + string.Join(" ---- ", bag.Take(3)));
+        Assert.True(estados.All(e => e == HttpStatusCode.OK), "Erros do servidor: " + string.Join(" ---- ", bag.Where(x => !x.TrimEnd().EndsWith("::")).Take(3)));
         Assert.Equal(20, await EscalarAsync("SELECT count(*) FROM identity.session_customer_grants WHERE tenant_id = @t AND session_id = @s", ("t", c.Tenant.TenantId.Value), ("s", troca.SessionId)));
     }
 

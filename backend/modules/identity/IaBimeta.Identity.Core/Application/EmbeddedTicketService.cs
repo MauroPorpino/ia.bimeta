@@ -51,7 +51,7 @@ public sealed class EmbeddedTicketService
 
         var (token, hash) = TicketTokens.Generate();
         var ticket = LaunchTicket.CreateLaunch(integration.TenantId, integration.ConnectionId, hash, request.Challenge!, origem, externo, vinculo.UserId, cliente, agora, _options.EmbeddedTicketLifetime, integration.KeyId);
-        await _store.AddTicketAsync(ticket, cancellationToken);
+        await AddTicketOrDenyAsync(integration, ticket, "identity.embed.ticket.issue", agora, cancellationToken);
 
         await _audit.WriteForAuthenticationAsync(integration.TenantId, vinculo.UserId, new AuditEntry("identity.embed.ticket.issue", "launch_ticket", ticket.Id.ToString(), AuditOutcome.Success), cancellationToken);
         return new TicketResult(token, ticket.ExpiresAt);
@@ -91,7 +91,7 @@ public sealed class EmbeddedTicketService
 
         var (token, hash) = TicketTokens.Generate();
         var ticket = LaunchTicket.CreateContext(integration.TenantId, integration.ConnectionId, hash, externo, vinculo.UserId, cliente, agora, _options.EmbeddedTicketLifetime, integration.KeyId, sessaoAlvo.Id);
-        await _store.AddTicketAsync(ticket, cancellationToken);
+        await AddTicketOrDenyAsync(integration, ticket, "identity.embed.context-ticket.issue", agora, cancellationToken);
 
         await _audit.WriteForAuthenticationAsync(integration.TenantId, vinculo.UserId, new AuditEntry("identity.embed.context-ticket.issue", "launch_ticket", ticket.Id.ToString(), AuditOutcome.Success), cancellationToken);
         return new TicketResult(token, ticket.ExpiresAt);
@@ -106,6 +106,18 @@ public sealed class EmbeddedTicketService
         var total = await _store.RevokeEmbeddedSessionsAsync(integration.TenantId, integration.ConnectionId, externo, _clock.GetUtcNow(), cancellationToken);
         await _audit.WriteForAuthenticationAsync(integration.TenantId, null, new AuditEntry("identity.embed.session.revoke-by-integration", "integration_connection", integration.ConnectionId.ToString(), AuditOutcome.Success), cancellationToken);
         return total;
+    }
+
+    /// <summary>A chave autenticou a chamada, mas pode ter sido revogada antes da gravação: a gravação confere sob trava, e a chave morta não emite (mesma resposta de qualquer falha de autenticação).</summary>
+    private async Task AddTicketOrDenyAsync(AuthenticatedIntegration integration, LaunchTicket ticket, string action, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        if (await _store.AddTicketAsync(ticket, now, cancellationToken))
+        {
+            return;
+        }
+
+        await _audit.WriteForAuthenticationAsync(integration.TenantId, ticket.UserId, new AuditEntry(action, "integration_connection", integration.ConnectionId.ToString(), AuditOutcome.Denied), cancellationToken);
+        throw new EmbeddedAuthenticationException();
     }
 
     private async Task<ExternalIdentity> ResolveIdentityAsync(AuthenticatedIntegration integration, string externalUserId, string? displayName, DateTimeOffset now, CancellationToken cancellationToken)

@@ -134,10 +134,15 @@ internal sealed class EmbeddedEmMemoria : IEmbeddedStore
         return Task.FromResult(true);
     }
 
-    public Task AddTicketAsync(LaunchTicket ticket, CancellationToken cancellationToken)
+    public Task<bool> AddTicketAsync(LaunchTicket ticket, DateTimeOffset now, CancellationToken cancellationToken)
     {
+        if (ticket.KeyId is { } chaveId && Chaves.FirstOrDefault(k => k.Id == chaveId) is { } chave && !chave.IsUsableAt(now))
+        {
+            return Task.FromResult(false);
+        }
+
         Tickets.Add(ticket);
-        return Task.CompletedTask;
+        return Task.FromResult(true);
     }
 
     public Dictionary<Guid, DateTimeOffset> TicketsUsados { get; } = new();
