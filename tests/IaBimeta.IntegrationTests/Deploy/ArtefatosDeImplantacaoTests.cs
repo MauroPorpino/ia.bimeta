@@ -120,6 +120,20 @@ public sealed class ArtefatosDeImplantacaoTests
     }
 
     [Fact]
+    public void O_pool_de_conexoes_e_explicito_e_a_soma_dos_pools_cabe_no_max_connections_do_banco()
+    {
+        // E1-R: o padrao do Npgsql (100) iguala o max_connections do PostgreSQL e sob rajada esgota o servidor.
+        var texto = Ler("docker-compose.yml");
+        var anexo = Regex.Match(texto, @"x-app-environment: &app-environment\n(?<corpo>(?:  .*\n)+)").Groups["corpo"].Value;
+        var tamanho = Regex.Match(anexo, @"ConnectionStrings__Default:.*Maximum Pool Size=(?<n>\d+)").Groups["n"];
+
+        Assert.True(tamanho.Success, "a string de conexão da aplicação precisa fixar o Maximum Pool Size");
+        // Api e Worker usam o mesmo texto, cada um com o seu pool; o PostgreSQL padrão tem 100 conexões, 3 reservadas.
+        Assert.InRange(int.Parse(tamanho.Value, System.Globalization.CultureInfo.InvariantCulture) * 2, 2, 80);
+        Assert.Contains("Timeout=", anexo[anexo.IndexOf("ConnectionStrings__Default", StringComparison.Ordinal)..].Split('\n')[0], StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Os_segredos_da_aplicacao_so_chegam_ao_Api_e_ao_Worker_e_a_producao_exige_verificacao_e_cifra()
     {
         var servicos = Servicos();
