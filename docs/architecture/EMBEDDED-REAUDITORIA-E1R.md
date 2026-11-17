@@ -112,3 +112,26 @@ Decisão, raciocínio e evidências completas: ADR 0039, seção "E1-R, terceira
 **Gate:** integração 1940 aprovados, 14 ignorados, 0 falhas; pico de 82 conexões, 0 recusas, 0 deadlocks; Identity 257; arquitetura 80. **Ressalva:** 4 testes de `Capabilities.Tests.GuardedHttpTransportTests` expiraram (5 s) durante o gate e passam isolados (305/305); causa provável contenção de CPU, não provada; módulo não alterado.
 
 **Gate sequencial controlado (`dotnet test backend/IaBimeta.slnx -m:1`, uma execução, sem alterar código, testes nem timeouts):** 5.209 aprovados, 14 ignorados, 0 falhas em 22 min 56 s. Integração 1.940 aprovados; Capabilities 305 aprovados (3 s); Identity 257; arquitetura 80. PostgreSQL: pico de 86 de 97 conexões, 0 recusas, 0 deadlocks. CPU: pico de 100% (10 amostras de 2 s em 90% ou mais, na suíte de integração); no máximo 3 `dotnet` e 1 `testhost`. **Sobre as 4 falhas do gate paralelo em `GuardedHttpTransportTests` (timeout de 5 s):** a hipótese de contenção entre projetos simultâneos é consistente com o resultado, mas **não está comprovada** e a falha não foi reproduzida (cinco execuções isoladas e duas sob carga artificial de CPU passaram 305 de 305). O módulo Capabilities não foi alterado. **Validação pendente:** Docker, Caddy e ERP real (nunca exercitados); sem isso a E1 não pode ser homologada. A E1 segue **não aprovada** até a revisão independente final do Codex CLI.
+
+## Quarta rodada da E1-R (auditoria final do Codex, HEAD `1a373ae`)
+
+Decisão, alternativas e evidências completas: ADR 0039, seção "E1-R, quarta rodada".
+
+| Achado | Gravidade | Correção (onde) | Teste (falha sem a correção) |
+|---|---|---|---|
+| Auditoria do sucesso gravada DEPOIS do commit: falha transitória da trilha vira 503 com o ticket já consumido (repetição = 401) | alta | `identity.audit_outbox` (migration `AuditOutbox`); `EmbeddedStore.AddEmbeddedSessionAsync`/`AddCustomerGrantAsync` gravam a linha na mesma transação; `EmbeddedExchangeService` sem gravação síncrona de sucesso; Worker (`IdentityAuditReconciler`) entrega pelo `IAuditRecoveryWriter` | `Falha_transitoria_da_auditoria_depois_da_operacao_*` (troca) e `Falha_transitoria_da_auditoria_depois_do_resgate_*` (contexto); unidade `O_sucesso_da_troca_e_auditado_pelo_outbox_*` |
+| Entrega pelo menos uma vez, sem duplicar, sem remover antes da confirmação, com isolamento por tenant | requisito | `IdentityAuditOutbox.FlushAsync` (`FOR UPDATE SKIP LOCKED`, apaga só depois de a trilha aceitar) | `Workers_simultaneos_entregam_cada_linha_uma_vez_*`; reentrega da mesma linha no teste da troca |
+| Rollback da operação inteira se a linha não persistir | requisito | linha na mesma transação | `A_auditoria_so_existe_se_a_operacao_confirmou_*` |
+| Chave revogada entre a conferência e a gravação (hipotético) | baixa | `EmbeddedStore.TicketKeyStillValidAsync` (`FOR SHARE`, ordem canônica) | `Chave_revogada_entre_a_conferencia_e_a_gravacao_*` |
+| Verifier malformado e origem inválida não queimavam o ticket | baixa | `EmbeddedExchangeService.ExchangeAsync` queima e registra com ticket identificável, mesma resposta | `Verifier_malformado_ou_origem_invalida_*`; unidade `Toda_falha_da_troca_*` (casos novos) |
+| Migration e retenção | requisito | `RetentionInventory` (`LegalRecord`); migration aditiva | `A_migration_cria_e_remove_a_tabela_do_outbox_*` e o teste de inventário existente |
+
+**O que atacar na quarta rodada**
+
+1. Qualquer caminho de sucesso do Embedded que ainda chame o `IAuditWriter` DEPOIS de um commit com efeito (procure `_audit.Write` em `EmbeddedExchangeService`, `EmbeddedTicketService`, `IntegrationAdminService`).
+2. A atomicidade: a linha do outbox só pode existir se o ticket foi consumido E a sessão (ou o cliente em foco) foi gravada, e vice-versa.
+3. A entrega: nunca apagar antes da confirmação da trilha; o `id` da linha como `IdempotencyKey`; o tenant vindo do contexto do Worker; sem mistura entre tenants; com dois Workers.
+4. A ordem de travas da reconferência da chave (chave, vínculo, tickets, sessões) e a ausência de ciclo com a criação de chave.
+5. A uniformidade da resposta 401 no malformado (sem oráculo entre ticket desconhecido, queimado e malformado).
+
+**Gate sequencial da quarta rodada (`dotnet test backend/IaBimeta.slnx -m:1`, uma execução):** 5.219 aprovados, 14 ignorados, 0 falhas em 22 min 18 s. Integração 1.947; Capabilities 305; Identity 260; arquitetura 80. PostgreSQL: pico de 79 de 97 conexões, 0 recusas, 0 deadlocks. CPU: pico de 98%, média de 32,6%. **Riscos residuais:** a auditoria de sucesso chega à trilha com atraso de até um ciclo do Worker; o Worker precisa estar no ar (as linhas ficam como registro de referência, sem expurgo); perda da resposta HTTP depois do commit exige novo ticket (contrato do cliente); recusas continuam com auditoria síncrona; conexão e vínculo desativados seguem conferidos por requisição, não dentro da transação; Docker, Caddy e ERP real nunca foram exercitados e essa validação é obrigatória antes de qualquer homologação. A E1 segue **não aprovada** até a próxima revisão independente.
