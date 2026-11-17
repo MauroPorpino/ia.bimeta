@@ -90,3 +90,25 @@ Complementa os achados 3, 6 e 12 acima. Decisão e raciocínio: ADR 0039, seçã
 **Riscos residuais novos:** o `lock_timeout` de 5 s mantém até o teto de requisições esperando uma conexão (pool de 30, `Timeout=15`); sob rajada muito maior que o pool, o ERP recebe 503 e deve repetir. O pool de 30 por processo é um valor de partida para a VM do piloto, sem medição de produção. A hipótese de exaustão de conexões para a falha intermitente do primeiro gate **continua sem prova**.
 
 **Resultado do gate da segunda rodada.** Quatro execuções anteriores falharam (2 a 4 falhas; 21 a 565 recusas do PostgreSQL; pico de até 97) por saturação das conexões do banco de teste após o teste de rajada, não por defeito de revogação. A correção foi só de infraestrutura de testes: `Maximum Pool Size=40` em `TestDatabase` (sem mexer em `max_connections`, sem poda de ociosas, sem pool privado no teste). Gate único com amostrador: integração **1925 aprovados, 14 ignorados, 0 falhas**; Identity 256, arquitetura 80 e demais projetos sem falha; **pico de 85 conexões, 0 recusas, 0 deadlocks**; frontend 458 testes e build verdes (execução anterior, sem alteração de frontend desde então). **Riscos residuais:** a folga contra o limite do servidor é estreita (85 de 97) e o teto de 40 vale por pool (EF, conexões diretas dos testes, processo do Worker), então a soma não é limitada a 40; o compartilhamento do pool entre hosts de teste foi inferido do código; o gate depende do PostgreSQL de teste com `max_connections=100`; nada foi exercitado com Docker, Caddy nem ERP real.
+
+## Terceira rodada da E1-R (auditoria final do Codex, HEAD `a3fda12`)
+
+Decisão, raciocínio e evidências completas: ADR 0039, seção "E1-R, terceira rodada".
+
+| Achado | Gravidade | Correção (onde) | Teste (falha sem a correção) |
+|---|---|---|---|
+| Marca `SessionsRevokedAt` podia retroceder | alta | `EmbeddedStore.RevokeEmbeddedSessionsAsync`: atualização monotônica no banco (conexão e vínculo) | `A_marca_de_revogacao_nunca_retrocede_*` |
+| Ticket consumido antes da transação que conclui | alta | `EmbeddedExchangeService` (lê, confere, queima só se recusa) e `EmbeddedStore.AddEmbeddedSessionAsync`/`AddCustomerGrantAsync` (consumo na mesma transação; `PeekTicketAsync` novo) | `Contencao_ao_resgatar_o_contexto_*`, `Contencao_ao_trocar_o_ticket_de_abertura_*`, unidade `Contencao_ao_concluir_a_troca_*` |
+| Saturação fora dos endpoints do Identity virava 500 | alta | `TransientDatabaseMiddleware` (host, antes do `RequestContextMiddleware`); `PostgresErrors` percorre as exceções internas e reconhece o pool esgotado (`NpgsqlException`) | `Saturacao_do_pool_na_autenticacao_da_sessao_*`, `TransientDatabaseMiddlewareTests` |
+| Ordem de travas rotação de chave × emissão de ticket × FK da conexão | média | `EmbeddedStore.AddTicketAsync`: conexão (`FOR KEY SHARE`) antes da chave; ordem canônica atualizada | `Emissao_de_ticket_e_criacao_de_chave_*` |
+
+**O que atacar na terceira rodada**
+
+1. Qualquer INSERT ou UPDATE no Embedded que tome travas implícitas de FK fora da ordem conexão, chave, vínculo, tickets, sessões.
+2. `RedeemContextTicketAsync` e `ExchangeAsync`: confirmar que NENHUM caminho de sucesso consome o ticket fora da transação final e que toda recusa de conferência o queima.
+3. `TransientDatabaseMiddleware.IsDefinitelyNotExecuted`: confirmar que só entram falhas em que o comando não executou (nenhum erro ambíguo, nenhuma falha de programação).
+4. Monotonicidade: nenhuma outra escrita de `sessions_revoked_at` fora de `RevokeEmbeddedSessionsAsync`.
+
+**Gate:** integração 1940 aprovados, 14 ignorados, 0 falhas; pico de 82 conexões, 0 recusas, 0 deadlocks; Identity 257; arquitetura 80. **Ressalva:** 4 testes de `Capabilities.Tests.GuardedHttpTransportTests` expiraram (5 s) durante o gate e passam isolados (305/305); causa provável contenção de CPU, não provada; módulo não alterado.
+
+**Gate sequencial controlado (`dotnet test backend/IaBimeta.slnx -m:1`, uma execução, sem alterar código, testes nem timeouts):** 5.209 aprovados, 14 ignorados, 0 falhas em 22 min 56 s. Integração 1.940 aprovados; Capabilities 305 aprovados (3 s); Identity 257; arquitetura 80. PostgreSQL: pico de 86 de 97 conexões, 0 recusas, 0 deadlocks. CPU: pico de 100% (10 amostras de 2 s em 90% ou mais, na suíte de integração); no máximo 3 `dotnet` e 1 `testhost`. **Sobre as 4 falhas do gate paralelo em `GuardedHttpTransportTests` (timeout de 5 s):** a hipótese de contenção entre projetos simultâneos é consistente com o resultado, mas **não está comprovada** e a falha não foi reproduzida (cinco execuções isoladas e duas sob carga artificial de CPU passaram 305 de 305). O módulo Capabilities não foi alterado. **Validação pendente:** Docker, Caddy e ERP real (nunca exercitados); sem isso a E1 não pode ser homologada. A E1 segue **não aprovada** até a revisão independente final do Codex CLI.
