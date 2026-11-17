@@ -77,21 +77,30 @@ public interface IEmbeddedStore
     Task<bool> AddTicketAsync(LaunchTicket ticket, DateTimeOffset now, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Consome o ticket de forma ATÔMICA: só devolve o ticket para quem o marcou como usado (não usado, não expirado). Duas trocas simultâneas têm no máximo um vencedor; uma tentativa errada também queima o
-    /// ticket (quem chama confere o resto depois de consumir). Não filtra por tenant: o hash é único e não enumerável.
+    /// Queima o ticket de forma ATÔMICA: só devolve o ticket para quem o marcou como usado (não usado, não expirado). Usado quando a conferência RECUSA a tentativa (verifier, origem, usuário etc.): uma tentativa errada
+    /// também queima o ticket. O caminho de sucesso consome dentro da transação que conclui a operação (<see cref="AddEmbeddedSessionAsync"/>, <see cref="AddCustomerGrantAsync"/>). Não filtra por tenant: o hash é único e não enumerável.
     /// </summary>
     Task<LaunchTicket?> ConsumeTicketAsync(byte[] tokenHash, DateTimeOffset now, CancellationToken cancellationToken);
 
-    /// <summary>Grava a sessão embutida (e o cliente em foco, se houver) e revoga as mais antigas do mesmo usuário externo na conexão além do limite.</summary>
-    Task AddEmbeddedSessionAsync(Session session, string? customerRef, int maxActivePerUser, DateTimeOffset now, CancellationToken cancellationToken);
+    /// <summary>Lê o ticket pendente (não usado, não expirado) SEM consumi-lo. A conferência do que o ticket diz acontece antes; o consumo é parte da transação que conclui a operação.</summary>
+    Task<LaunchTicket?> PeekTicketAsync(byte[] tokenHash, DateTimeOffset now, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Consome o ticket (<paramref name="ticketId"/>) e grava a sessão embutida (e o cliente em foco, se houver) na MESMA transação, e revoga as mais antigas do mesmo usuário externo na conexão além do limite. Se a gravação falha
+    /// (contenção, <see cref="EmbeddedBusyException"/>), nada acontece e o ticket continua pendente: repetir funciona. Devolve <c>false</c> (sem gravar) quando o ticket já não está pendente (outra troca o consumiu antes).
+    /// </summary>
+    Task<bool> AddEmbeddedSessionAsync(Session session, string? customerRef, int maxActivePerUser, Guid ticketId, DateTimeOffset now, CancellationToken cancellationToken);
 
     Task<Session?> FindSessionAsync(TenantId tenantId, Guid sessionId, CancellationToken cancellationToken);
 
     /// <summary>Revoga as sessões embutidas ATIVAS da conexão (de um usuário externo, se informado). Devolve quantas revogou.</summary>
     Task<int> RevokeEmbeddedSessionsAsync(TenantId tenantId, Guid connectionId, string? externalUserId, DateTimeOffset now, CancellationToken cancellationToken);
 
-    /// <summary>Acrescenta o cliente em foco à sessão (ou renova a data dele) e mantém no máximo <see cref="SessionCustomerGrant.MaxPerSession"/>.</summary>
-    Task AddCustomerGrantAsync(TenantId tenantId, Guid sessionId, string customerRef, DateTimeOffset now, CancellationToken cancellationToken);
+    /// <summary>
+    /// Consome o ticket de contexto (<paramref name="ticketId"/>) e acrescenta o cliente em foco à sessão (ou renova a data dele), mantendo no máximo <see cref="SessionCustomerGrant.MaxPerSession"/>, na MESMA transação: se falha por
+    /// contenção, o ticket continua pendente. Devolve <c>false</c> (sem gravar) quando o ticket já não está pendente.
+    /// </summary>
+    Task<bool> AddCustomerGrantAsync(TenantId tenantId, Guid sessionId, string customerRef, Guid ticketId, DateTimeOffset now, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<string>> ListCustomerGrantsAsync(TenantId tenantId, Guid sessionId, CancellationToken cancellationToken);
 }

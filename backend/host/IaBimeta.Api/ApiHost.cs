@@ -266,6 +266,9 @@ public static class ApiHost
 
         // O ingresso PÚBLICO (túnel HTTPS) só alcança o webhook do provedor: nada de login, simulador nem cabeçalho de desenvolvimento pela internet. Primeiro da fila, antes de qualquer outra coisa.
         app.UseMiddleware<PublicIngressGuard>(ingressoPublico);
+
+        // Saturação do PostgreSQL em QUALQUER ponto da requisição (inclusive a autenticação da sessão, anterior aos endpoints) vira 503 com Retry-After, só quando o banco comprovadamente não executou o comando.
+        app.UseMiddleware<TransientDatabaseMiddleware>();
         app.UseRateLimiter();
         app.UseMiddleware<RequestContextMiddleware>();
 

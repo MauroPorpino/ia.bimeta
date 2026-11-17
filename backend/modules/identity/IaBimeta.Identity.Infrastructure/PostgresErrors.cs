@@ -11,17 +11,29 @@ internal static class PostgresErrors
         && postgres.ConstraintName == constraintName;
 
     /// <summary>
-    /// Contenção transitória do banco, em que nada foi gravado e repetir é seguro: deadlock (40P01), falha de serialização (40001), trava que passou do <c>lock_timeout</c> (55P03), conexões esgotadas no servidor (53300) e o
-    /// pool local esgotado (<see cref="TimeoutException"/> do Npgsql ao pedir conexão).
+    /// Contenção transitória do banco em que o comando comprovadamente NÃO executou e repetir é seguro: deadlock (40P01), falha de serialização (40001), trava que passou do <c>lock_timeout</c> (55P03), conexões esgotadas no
+    /// servidor (53300), banco ainda não aceitando conexões (57P03) e o pool local esgotado (nenhuma conexão foi obtida). Percorre as exceções internas: o EF embrulha a falha ao abrir a conexão em
+    /// <see cref="InvalidOperationException"/>. O tempo esgotado de um comando em andamento NÃO conta: o resultado é ambíguo.
     /// </summary>
-    public static bool IsTransientContention(Exception exception) =>
-        exception switch
+    public static bool IsTransientContention(Exception exception)
+    {
+        for (var atual = exception; atual is not null; atual = atual.InnerException)
         {
-            PostgresException p => IsTransientState(p.SqlState),
-            DbUpdateException { InnerException: PostgresException p } => IsTransientState(p.SqlState),
-            TimeoutException => true,
-            _ => false,
-        };
+            var transitoria = atual switch
+            {
+                PostgresException p => IsTransientState(p.SqlState),
+                // O Npgsql avisa o pool esgotado com esta mensagem (em inglês, fixa); o inner TimeoutException também aparece em tempo de comando, por isso a mensagem decide.
+                NpgsqlException n => n.Message.Contains("connection pool has been exhausted", StringComparison.Ordinal),
+                _ => false,
+            };
+            if (transitoria)
+            {
+                return true;
+            }
+        }
 
-    private static bool IsTransientState(string state) => state is "40P01" or "40001" or "55P03" or "53300";
+        return false;
+    }
+
+    private static bool IsTransientState(string state) => state is "40P01" or "40001" or "55P03" or "53300" or "57P03";
 }

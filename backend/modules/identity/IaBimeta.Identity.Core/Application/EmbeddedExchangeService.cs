@@ -9,8 +9,8 @@ using IaBimeta.Tenancy.Contracts.Queries;
 namespace IaBimeta.Identity.Application;
 
 /// <summary>
-/// A troca do ticket por sessão embutida (anônima, no iframe) e o resgate do ticket de contexto (com a sessão embutida). O ticket é consumido de forma atômica ANTES de qualquer outra conferência: uma tentativa errada
-/// (verifier, origem do pai, conexão ou usuário) também o queima. Toda recusa é a mesma <see cref="EmbeddedAuthenticationException"/>. O token da sessão só existe na resposta e só em memória do iframe.
+/// A troca do ticket por sessão embutida (anônima, no iframe) e o resgate do ticket de contexto (com a sessão embutida). O ticket é lido sem ser consumido; se a conferência recusa, a tentativa errada
+/// (verifier, origem do pai, conexão ou usuário) o queima; se aprova, o consumo e a gravação da sessão (ou do cliente em foco) são a MESMA transação, então uma contenção do banco (503) não gasta o ticket e a repetição funciona. Toda recusa é a mesma <see cref="EmbeddedAuthenticationException"/>. O token da sessão só existe na resposta e só em memória do iframe.
 /// </summary>
 public sealed class EmbeddedExchangeService
 {
@@ -43,7 +43,7 @@ public sealed class EmbeddedExchangeService
         }
 
         var agora = _clock.GetUtcNow();
-        var consumido = await _store.ConsumeTicketAsync(hash, agora, cancellationToken) ?? throw new EmbeddedAuthenticationException();
+        var consumido = await _store.PeekTicketAsync(hash, agora, cancellationToken) ?? throw new EmbeddedAuthenticationException();
         var tenantId = consumido.TenantId;
 
         try
@@ -86,13 +86,19 @@ public sealed class EmbeddedExchangeService
 
             var (token, tokenHash) = SessionTokens.GenerateEmbedded();
             var sessao = Session.CreateEmbedded(tenantId, usuario.Id, tokenHash, agora, _options.EmbeddedSessionLifetime, conexao.Id, consumido.ExternalUserId, origem, consumido.KeyId);
-            await _store.AddEmbeddedSessionAsync(sessao, consumido.CustomerRef, _options.MaxEmbeddedSessionsPerUser, agora, cancellationToken);
+            // O consumo do ticket e a gravação da sessão são UMA transação: contenção (503) deixa o ticket pendente e o ERP repete; perder a corrida para outra troca do mesmo ticket é recusa.
+            if (!await _store.AddEmbeddedSessionAsync(sessao, consumido.CustomerRef, _options.MaxEmbeddedSessionsPerUser, consumido.Id, agora, cancellationToken))
+            {
+                throw new EmbeddedAuthenticationException();
+            }
 
             await _audit.WriteForAuthenticationAsync(tenantId, usuario.Id, new AuditEntry("identity.embed.exchange", "session", sessao.Id.ToString(), AuditOutcome.Success), cancellationToken);
             return new ExchangeResult(token, sessao.ExpiresAt, conexao.Mode, conexao.OrganizationId, consumido.CustomerRef, new ExchangeUserView(usuario.Id, usuario.DisplayName), sessao.Id);
         }
         catch (EmbeddedAuthenticationException)
         {
+            // Tentativa recusada queima o ticket (uso único): quem errou o verifier ou a origem não tenta de novo com o mesmo ticket.
+            await _store.ConsumeTicketAsync(hash, agora, cancellationToken);
             await _audit.WriteForAuthenticationAsync(tenantId, consumido.UserId, new AuditEntry("identity.embed.exchange", "launch_ticket", consumido.Id.ToString(), AuditOutcome.Denied), cancellationToken);
             throw;
         }
@@ -113,7 +119,7 @@ public sealed class EmbeddedExchangeService
         }
 
         var agora = _clock.GetUtcNow();
-        var consumido = await _store.ConsumeTicketAsync(hash, agora, cancellationToken) ?? throw new EmbeddedAuthenticationException();
+        var consumido = await _store.PeekTicketAsync(hash, agora, cancellationToken) ?? throw new EmbeddedAuthenticationException();
         var sessao = await _store.FindSessionAsync(contexto.TenantId, principal.SessionId, cancellationToken);
 
         // O ticket de OUTRO tenant nunca vale aqui (o consumo é global por hash, a conferência é do tenant da sessão).
@@ -126,6 +132,7 @@ public sealed class EmbeddedExchangeService
             || !string.Equals(sessao.ExternalUserId, consumido.ExternalUserId, StringComparison.Ordinal)
             || consumido.CustomerRef is null)
         {
+            await _store.ConsumeTicketAsync(hash, agora, cancellationToken); // tentativa recusada queima o ticket (uso único)
             await _audit.WriteAsync(new AuditEntry("identity.embed.context", "session", principal.SessionId.ToString(), AuditOutcome.Denied), cancellationToken);
             throw new EmbeddedAuthenticationException();
         }
@@ -138,11 +145,18 @@ public sealed class EmbeddedExchangeService
             || consumido.CreatedAt <= conexao.SessionsRevokedAt || consumido.CreatedAt <= vinculo.SessionsRevokedAt
             || (consumido.KeyId is { } chaveId && (await _store.FindKeyAsync(chaveId, cancellationToken) is not { } chave || chave.Key.Status == IntegrationKeyStatus.Revoked || chave.Key.ConnectionId != conexao.Id)))
         {
+            await _store.ConsumeTicketAsync(hash, agora, cancellationToken); // tentativa recusada queima o ticket (uso único)
             await _audit.WriteAsync(new AuditEntry("identity.embed.context", "session", principal.SessionId.ToString(), AuditOutcome.Denied), cancellationToken);
             throw new EmbeddedAuthenticationException();
         }
 
-        await _store.AddCustomerGrantAsync(contexto.TenantId, sessao.Id, consumido.CustomerRef, agora, cancellationToken);
+        // Consumo do ticket e gravação do cliente em foco são UMA transação: contenção (503) deixa o ticket pendente e o ERP repete.
+        if (!await _store.AddCustomerGrantAsync(contexto.TenantId, sessao.Id, consumido.CustomerRef, consumido.Id, agora, cancellationToken))
+        {
+            await _audit.WriteAsync(new AuditEntry("identity.embed.context", "session", principal.SessionId.ToString(), AuditOutcome.Denied), cancellationToken);
+            throw new EmbeddedAuthenticationException();
+        }
+
         await _audit.WriteAsync(new AuditEntry("identity.embed.context", "session", sessao.Id.ToString(), AuditOutcome.Success), cancellationToken);
         return consumido.CustomerRef;
     }

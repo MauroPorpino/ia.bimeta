@@ -159,8 +159,39 @@ internal sealed class EmbeddedEmMemoria : IEmbeddedStore
         return Task.FromResult<LaunchTicket?>(ticket);
     }
 
-    public Task AddEmbeddedSessionAsync(Session session, string? customerRef, int maxActivePerUser, DateTimeOffset now, CancellationToken cancellationToken)
+    /// <summary>Quando definida, a gravação que conclui a troca/resgate falha com ela (como uma contenção do banco). Modela o rollback: nada é consumido nem gravado.</summary>
+    public Exception? FalhaAoConcluir { get; set; }
+
+    public Task<LaunchTicket?> PeekTicketAsync(byte[] tokenHash, DateTimeOffset now, CancellationToken cancellationToken)
     {
+        var ticket = Tickets.FirstOrDefault(t => t.TokenHash.AsSpan().SequenceEqual(tokenHash));
+        return Task.FromResult(ticket is null || TicketsUsados.ContainsKey(ticket.Id) || ticket.ExpiresAt <= now ? null : ticket);
+    }
+
+    private bool ConsumirNaTransacao(Guid ticketId, DateTimeOffset now)
+    {
+        var ticket = Tickets.FirstOrDefault(t => t.Id == ticketId);
+        if (ticket is null || TicketsUsados.ContainsKey(ticketId) || ticket.ExpiresAt <= now)
+        {
+            return false;
+        }
+
+        TicketsUsados[ticketId] = now;
+        return true;
+    }
+
+    public Task<bool> AddEmbeddedSessionAsync(Session session, string? customerRef, int maxActivePerUser, Guid ticketId, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        if (FalhaAoConcluir is { } falha)
+        {
+            throw falha;
+        }
+
+        if (!ConsumirNaTransacao(ticketId, now))
+        {
+            return Task.FromResult(false);
+        }
+
         Sessoes.Add(session);
         Identidade?.Sessoes.Add(session);
         if (customerRef is not null)
@@ -168,7 +199,7 @@ internal sealed class EmbeddedEmMemoria : IEmbeddedStore
             Clientes.Add((session.TenantId, session.Id, customerRef));
         }
 
-        return Task.CompletedTask;
+        return Task.FromResult(true);
     }
 
     public Task<Session?> FindSessionAsync(TenantId tenantId, Guid sessionId, CancellationToken cancellationToken) =>
@@ -191,14 +222,24 @@ internal sealed class EmbeddedEmMemoria : IEmbeddedStore
         return Task.FromResult(alvo.Count);
     }
 
-    public Task AddCustomerGrantAsync(TenantId tenantId, Guid sessionId, string customerRef, DateTimeOffset now, CancellationToken cancellationToken)
+    public Task<bool> AddCustomerGrantAsync(TenantId tenantId, Guid sessionId, string customerRef, Guid ticketId, DateTimeOffset now, CancellationToken cancellationToken)
     {
+        if (FalhaAoConcluir is { } falha)
+        {
+            throw falha;
+        }
+
+        if (!ConsumirNaTransacao(ticketId, now))
+        {
+            return Task.FromResult(false);
+        }
+
         if (!Clientes.Contains((tenantId, sessionId, customerRef)))
         {
             Clientes.Add((tenantId, sessionId, customerRef));
         }
 
-        return Task.CompletedTask;
+        return Task.FromResult(true);
     }
 
     public Task<IReadOnlyList<string>> ListCustomerGrantsAsync(TenantId tenantId, Guid sessionId, CancellationToken cancellationToken) =>

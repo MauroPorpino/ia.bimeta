@@ -196,4 +196,183 @@ public sealed class EmbeddedRevogacaoConcorrenteApiTests(PostgresFixture banco)
         Assert.Equal("embedded-busy", await EmbeddedTestSupport.CodigoDoProblemaAsync(resposta));
         await transacao.RollbackAsync();
     }
+
+    // ---- E1-R, terceira rodada (auditoria final do Codex) ----
+
+    private static async Task EsperarAlguemNaFilaDeTravaAsync()
+    {
+        for (var i = 0; i < 100; i++)
+        {
+            if (await EscalarAsync("SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()") > 0)
+            {
+                return;
+            }
+
+            await Task.Delay(100);
+        }
+
+        Assert.Fail("ninguém entrou na fila de trava em 10 s");
+    }
+
+    [Fact]
+    public async Task A_marca_de_revogacao_nunca_retrocede_mesmo_que_a_revogacao_de_instante_menor_termine_depois()
+    {
+        var c = await EmbeddedCenario.CriarAsync(banco, "marca-monotonica");
+        await using var servidor = c.Api;
+        var (sessao, _) = await c.EntrarAsync("u-mono");
+        var tenant = c.Tenant.TenantId;
+        var baseHora = new DateTimeOffset(DateTime.UtcNow.Date, TimeSpan.Zero).AddHours(12);
+        var maior = baseHora.AddMinutes(10);
+        var menor = baseHora.AddMinutes(5);
+
+        // Duas revogações em ordem INVERSA de instante (a que começou depois terminou antes, e a de instante menor grava por último). Antes: a atribuição direta fazia a marca retroceder para o instante menor,
+        // e uma sessão ou ticket criado entre os dois voltava a valer.
+        using (var escopo = c.Api.Services.CreateScope())
+        {
+            var store = escopo.ServiceProvider.GetRequiredService<IaBimeta.Identity.Application.IEmbeddedStore>();
+            await store.RevokeEmbeddedSessionsAsync(tenant, c.Conexao.Id, null, maior, CancellationToken.None);
+            await store.RevokeEmbeddedSessionsAsync(tenant, c.Conexao.Id, null, menor, CancellationToken.None);
+            await store.RevokeEmbeddedSessionsAsync(tenant, c.Conexao.Id, "u-mono", maior, CancellationToken.None);
+            await store.RevokeEmbeddedSessionsAsync(tenant, c.Conexao.Id, "u-mono", menor, CancellationToken.None);
+        }
+
+        Assert.Equal(maior.ToUnixTimeSeconds(), await EscalarAsync("SELECT extract(epoch FROM sessions_revoked_at)::bigint FROM identity.integration_connections WHERE tenant_id = @t AND id = @c", ("t", tenant.Value), ("c", c.Conexao.Id)));
+        Assert.Equal(maior.ToUnixTimeSeconds(), await EscalarAsync("SELECT extract(epoch FROM sessions_revoked_at)::bigint FROM identity.external_identities WHERE tenant_id = @t AND connection_id = @c AND external_user_id = 'u-mono'", ("t", tenant.Value), ("c", c.Conexao.Id)));
+    }
+
+    [Fact]
+    public async Task Contencao_ao_resgatar_o_contexto_nao_gasta_o_ticket_e_a_repeticao_vale_uma_unica_vez()
+    {
+        var c = await EmbeddedCenario.CriarAsync(banco, "ctx-503-repete", configurar: k => k["Identity:EmbeddedLockTimeout"] = "00:00:01");
+        await using var servidor = c.Api;
+        var (sessao, _) = await c.EntrarAsync("u-ctx-503");
+        var ticket = await c.Erp.EmitirContextoAsync("u-ctx-503", "CLI-1", sessao.SessionId);
+
+        await using (var presa = new NpgsqlConnection(TestDatabase.ConnectionString))
+        {
+            await presa.OpenAsync();
+            await using var transacao = await presa.BeginTransactionAsync();
+            await using (var trava = new NpgsqlCommand("SELECT 1 FROM identity.sessions WHERE tenant_id = @t AND id = @s FOR UPDATE", presa, transacao))
+            {
+                trava.Parameters.AddWithValue("t", c.Tenant.TenantId.Value);
+                trava.Parameters.AddWithValue("s", sessao.SessionId);
+                await trava.ExecuteNonQueryAsync();
+            }
+
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, await c.Api.StatusAsync(sessao.Token, HttpMethod.Post, "/embed/v1/context", new { ticket = ticket.Ticket }));
+            await transacao.RollbackAsync();
+        }
+
+        // Antes: o ticket já tinha sido consumido ANTES da transação que falhou, e a repetição respondia 401. Agora o ticket segue pendente...
+        Assert.Equal(HttpStatusCode.OK, await c.Api.StatusAsync(sessao.Token, HttpMethod.Post, "/embed/v1/context", new { ticket = ticket.Ticket }));
+        // ...e continua de uso único.
+        Assert.Equal(HttpStatusCode.Unauthorized, await c.Api.StatusAsync(sessao.Token, HttpMethod.Post, "/embed/v1/context", new { ticket = ticket.Ticket }));
+        Assert.Equal(new[] { "CLI-1" }, (await c.Api.LerAsync<SessaoEmbutidaDto>(sessao.Token, "/embed/v1/session")).CustomerRefs);
+    }
+
+    [Fact]
+    public async Task Contencao_ao_trocar_o_ticket_de_abertura_nao_o_gasta_e_a_repeticao_vale_uma_unica_vez()
+    {
+        var c = await EmbeddedCenario.CriarAsync(banco, "troca-503-repete", configurar: k => k["Identity:EmbeddedLockTimeout"] = "00:00:01");
+        await using var servidor = c.Api;
+        _ = await c.EntrarAsync("u-troca-503"); // cria o vínculo (a linha que a troca trava)
+        var verifier = EmbeddedTestSupport.NovoVerifier();
+        var ticket = await c.Erp.EmitirAsync("u-troca-503", EmbeddedTestSupport.Challenge(verifier));
+
+        await using (var presa = new NpgsqlConnection(TestDatabase.ConnectionString))
+        {
+            await presa.OpenAsync();
+            await using var transacao = await presa.BeginTransactionAsync();
+            await using (var trava = new NpgsqlCommand("SELECT 1 FROM identity.external_identities WHERE tenant_id = @t AND external_user_id = 'u-troca-503' FOR UPDATE", presa, transacao))
+            {
+                trava.Parameters.AddWithValue("t", c.Tenant.TenantId.Value);
+                await trava.ExecuteNonQueryAsync();
+            }
+
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, await EmbeddedTestSupport.TentarTrocarAsync(c.Api, ticket.Ticket, verifier));
+            await transacao.RollbackAsync();
+        }
+
+        var troca = await EmbeddedTestSupport.TrocarAsync(c.Api, ticket.Ticket, verifier);
+        Assert.StartsWith("ibe_", troca.Token);
+        Assert.Equal(HttpStatusCode.Unauthorized, await EmbeddedTestSupport.TentarTrocarAsync(c.Api, ticket.Ticket, verifier));
+    }
+
+    [Fact]
+    public async Task Emissao_de_ticket_e_criacao_de_chave_nao_se_travam_em_ciclo_pela_conexao_e_pela_chave()
+    {
+        var c = await EmbeddedCenario.CriarAsync(banco, "fk-ordem-travas");
+        await using var servidor = c.Api;
+        var (sessao, _) = await c.EntrarAsync("u-fk");
+
+        // A criação de chave trava a CONEXÃO (FOR UPDATE) e depois atualiza as chaves anteriores (rotação). A emissão de ticket trava a chave (FOR SHARE) e o INSERT do ticket exige a conexão por FK (FOR KEY SHARE).
+        // Em ordem oposta, cada uma esperava a trava da outra (deadlock). Aqui a "criação de chave" é uma transação externa que segura a conexão; a emissão entra na fila; só então a "rotação" atualiza a linha da chave.
+        await using var externa = new NpgsqlConnection(TestDatabase.ConnectionString);
+        await externa.OpenAsync();
+        await using var tx = await externa.BeginTransactionAsync();
+        await using (var cmd = new NpgsqlCommand("SELECT 1 FROM identity.integration_connections WHERE tenant_id = @t AND id = @c FOR UPDATE", externa, tx))
+        {
+            cmd.Parameters.AddWithValue("t", c.Tenant.TenantId.Value);
+            cmd.Parameters.AddWithValue("c", c.Conexao.Id);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        var emissao = Task.Run(async () =>
+        {
+            using var r = await c.Erp.EnviarAsync("/embed/v1/context-tickets", new { externalUserId = "u-fk", sessionId = sessao.SessionId, customer = new { @ref = "CLI-FK" } });
+            return r.StatusCode;
+        });
+        await EsperarAlguemNaFilaDeTravaAsync();
+
+        // A rotação atualiza a linha da chave. Antes, a emissão já segurava a chave em FOR SHARE (esperando a conexão): ciclo => 40P01 aqui ou 503 na emissão.
+        await using (var cmd = new NpgsqlCommand("UPDATE identity.integration_keys SET status = status WHERE tenant_id = @t AND connection_id = @c", externa, tx) { CommandTimeout = 15 })
+        {
+            cmd.Parameters.AddWithValue("t", c.Tenant.TenantId.Value);
+            cmd.Parameters.AddWithValue("c", c.Conexao.Id);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        await tx.CommitAsync();
+        Assert.Equal(HttpStatusCode.Created, await emissao.WaitAsync(TimeSpan.FromSeconds(30)));
+    }
+
+    [Fact]
+    public async Task Saturacao_do_pool_na_autenticacao_da_sessao_vira_503_controlado_e_nao_500()
+    {
+        // O pool da API tem UMA conexão e espera 2 s por ela. Um resgate de contexto a segura (esperando uma trava); a autenticação de outra requisição, que acontece ANTES do endpoint, não consegue conexão.
+        var pool = new NpgsqlConnectionStringBuilder(TestDatabase.ConnectionString) { MaxPoolSize = 1, Timeout = 2 }.ConnectionString;
+        var bag = new System.Collections.Concurrent.ConcurrentBag<string>();
+        var configuracao = EmbeddedTestSupport.Configuracao(k =>
+        {
+            k["ConnectionStrings:Tenancy"] = pool;
+            k["Identity:EmbeddedLockTimeout"] = "00:00:20";
+        });
+        var apiComLog = await ApiServer.StartAsync("Production", configuracao, null, s => s.AddLogging(b => b.AddProvider(new CapturaDeErros(bag))));
+        var c = await EmbeddedCenario.CriarAsync(banco, "pool-um-auth", api: apiComLog);
+        await using var servidor = c.Api;
+        var (sessao, _) = await c.EntrarAsync("u-pool-um");
+        var ticket = await c.Erp.EmitirContextoAsync("u-pool-um", "CLI-1", sessao.SessionId);
+
+        await using var presa = new NpgsqlConnection(TestDatabase.ConnectionString);
+        await presa.OpenAsync();
+        await using var transacao = await presa.BeginTransactionAsync();
+        await using (var trava = new NpgsqlCommand("SELECT 1 FROM identity.sessions WHERE tenant_id = @t AND id = @s FOR UPDATE", presa, transacao))
+        {
+            trava.Parameters.AddWithValue("t", c.Tenant.TenantId.Value);
+            trava.Parameters.AddWithValue("s", sessao.SessionId);
+            await trava.ExecuteNonQueryAsync();
+        }
+
+        var segurando = Task.Run(() => c.Api.StatusAsync(sessao.Token, HttpMethod.Post, "/embed/v1/context", new { ticket = ticket.Ticket }));
+        await EsperarAlguemNaFilaDeTravaAsync();
+
+        using var resposta = await c.Api.EnviarAsync(sessao.Token, HttpMethod.Get, "/embed/v1/session");
+
+        Assert.True(resposta.StatusCode == HttpStatusCode.ServiceUnavailable, $"status {(int)resposta.StatusCode}; " + string.Join(" ---- ", bag.Where(x => !x.TrimEnd().EndsWith("::")).Take(3)));
+        Assert.True(resposta.Headers.RetryAfter is not null, "falta o Retry-After");
+        Assert.Equal("service-busy", await EmbeddedTestSupport.CodigoDoProblemaAsync(resposta));
+
+        await transacao.RollbackAsync();
+        Assert.Equal(HttpStatusCode.OK, await segurando.WaitAsync(TimeSpan.FromSeconds(30)));
+    }
 }

@@ -429,6 +429,27 @@ public class EmbeddedServicesTests
         await Assert.ThrowsAsync<EmbeddedAuthenticationException>(() => c.Troca.ExchangeAsync(ticket.Ticket, Verifier, "https://erp.exemplo.com.br"));
     }
 
+    [Fact]
+    public async Task Contencao_ao_concluir_a_troca_nao_gasta_o_ticket_e_a_repeticao_funciona_uma_unica_vez()
+    {
+        var c = new Cenario();
+        var ticket = await c.Tickets.IssueLaunchTicketAsync(c.Integracao, c.Pedido("u-1", Verifier, cliente: "CLI-1"));
+
+        // Antes: o ticket era consumido ANTES da transação que grava a sessão; um 503 nela deixava o ticket gasto e a repetição respondia 401.
+        c.Embedded.FalhaAoConcluir = new EmbeddedBusyException(new TimeoutException());
+        await Assert.ThrowsAsync<EmbeddedBusyException>(() => c.Troca.ExchangeAsync(ticket.Ticket, Verifier, "https://erp.exemplo.com.br"));
+        Assert.Empty(c.Embedded.TicketsUsados);
+        Assert.Empty(c.Embedded.Sessoes);
+
+        c.Embedded.FalhaAoConcluir = null;
+        var troca = await c.Troca.ExchangeAsync(ticket.Ticket, Verifier, "https://erp.exemplo.com.br");
+        Assert.StartsWith("ibe_", troca.Token);
+
+        // O uso único continua: o terceiro uso é recusado e só existe uma sessão.
+        await Assert.ThrowsAsync<EmbeddedAuthenticationException>(() => c.Troca.ExchangeAsync(ticket.Ticket, Verifier, "https://erp.exemplo.com.br"));
+        Assert.Single(c.Embedded.Sessoes);
+    }
+
     [Theory]
     [InlineData("verifier")]
     [InlineData("origem")]
