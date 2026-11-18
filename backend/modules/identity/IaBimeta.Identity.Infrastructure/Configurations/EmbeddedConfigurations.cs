@@ -199,6 +199,9 @@ internal sealed class PendingAuditConfiguration : IEntityTypeConfiguration<Pendi
         builder.Property(a => a.ActorUserId).HasColumnName("actor_user_id");
         builder.Property(a => a.ActorOrigin).HasColumnName("actor_origin").HasMaxLength(PendingAudit.ActorOriginMaxLength).IsRequired();
         builder.Property(a => a.CreatedAt).HasColumnName("created_at");
+        builder.Property(a => a.Attempts).HasColumnName("attempts").HasDefaultValue(0);
+        builder.Property(a => a.NextAttemptAt).HasColumnName("next_attempt_at");
+        builder.Property(a => a.LastError).HasColumnName("last_error").HasMaxLength(PendingAudit.LastErrorMaxLength);
 
         // A entrega lê as mais antigas primeiro.
         builder.HasIndex(a => new { a.TenantId, a.CreatedAt, a.Id }).HasDatabaseName("ix_audit_outbox_tenant_id_created_at_id");

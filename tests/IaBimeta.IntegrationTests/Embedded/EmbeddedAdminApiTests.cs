@@ -329,6 +329,7 @@ public sealed class EmbeddedAdminApiTests(PostgresFixture banco)
         _ = await c.Api.EnviarAsync(c.TokenDoAdmin, HttpMethod.Put, $"/embedded/connections/{c.Conexao.Id}", NovaConexao(c.Organizacao.Id, "JitAttendant"));
         _ = await c.Api.EnviarAsync(c.TokenDoAdmin, HttpMethod.Post, $"/embedded/connections/{c.Conexao.Id}/disable");
 
+        _ = await EmbeddedTestSupport.EntregarAuditoriaAsync(c.Api, c.Tenant.TenantId); // a auditoria de sucesso chega à trilha pelo Worker (outbox, E1-R quinta rodada)
         var operacoes = await UnicoAsync("SELECT string_agg(DISTINCT operation, ',') FROM audit.audit_events WHERE tenant_id = @t AND operation LIKE 'identity.embed.%'", ("t", c.Tenant.TenantId.Value));
         var tudo = await UnicoAsync("SELECT string_agg(row_to_json(e)::text, ' ') FROM audit.audit_events e WHERE e.tenant_id = @t", ("t", c.Tenant.TenantId.Value));
 

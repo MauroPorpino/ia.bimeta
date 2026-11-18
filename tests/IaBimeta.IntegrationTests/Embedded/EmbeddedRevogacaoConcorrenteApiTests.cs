@@ -230,10 +230,10 @@ public sealed class EmbeddedRevogacaoConcorrenteApiTests(PostgresFixture banco)
         using (var escopo = c.Api.Services.CreateScope())
         {
             var store = escopo.ServiceProvider.GetRequiredService<IaBimeta.Identity.Application.IEmbeddedStore>();
-            await store.RevokeEmbeddedSessionsAsync(tenant, c.Conexao.Id, null, maior, CancellationToken.None);
-            await store.RevokeEmbeddedSessionsAsync(tenant, c.Conexao.Id, null, menor, CancellationToken.None);
-            await store.RevokeEmbeddedSessionsAsync(tenant, c.Conexao.Id, "u-mono", maior, CancellationToken.None);
-            await store.RevokeEmbeddedSessionsAsync(tenant, c.Conexao.Id, "u-mono", menor, CancellationToken.None);
+            await store.RevokeEmbeddedSessionsAsync(tenant, c.Conexao.Id, null, null, maior, CancellationToken.None);
+            await store.RevokeEmbeddedSessionsAsync(tenant, c.Conexao.Id, null, null, menor, CancellationToken.None);
+            await store.RevokeEmbeddedSessionsAsync(tenant, c.Conexao.Id, "u-mono", null, maior, CancellationToken.None);
+            await store.RevokeEmbeddedSessionsAsync(tenant, c.Conexao.Id, "u-mono", null, menor, CancellationToken.None);
         }
 
         Assert.Equal(maior.ToUnixTimeSeconds(), await EscalarAsync("SELECT extract(epoch FROM sessions_revoked_at)::bigint FROM identity.integration_connections WHERE tenant_id = @t AND id = @c", ("t", tenant.Value), ("c", c.Conexao.Id)));

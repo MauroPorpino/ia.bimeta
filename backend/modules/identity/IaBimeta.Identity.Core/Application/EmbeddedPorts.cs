@@ -30,14 +30,14 @@ public interface IIntegrationSecretProtector
 /// </summary>
 public interface IEmbeddedStore
 {
-    Task AddConnectionAsync(IntegrationConnection connection, CancellationToken cancellationToken);
+    Task AddConnectionAsync(IntegrationConnection connection, PendingAudit audit, CancellationToken cancellationToken);
 
     /// <summary>A conexão do tenant, ou <c>null</c>. Com <paramref name="forUpdate"/> vem rastreada para alteração (grave com <see cref="SaveChangesAsync"/>).</summary>
     Task<IntegrationConnection?> FindConnectionAsync(TenantId tenantId, Guid connectionId, bool forUpdate, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<IntegrationConnection>> ListConnectionsAsync(TenantId tenantId, CancellationToken cancellationToken);
 
-    Task SaveChangesAsync(TenantId tenantId, CancellationToken cancellationToken);
+    Task SaveChangesAsync(TenantId tenantId, PendingAudit audit, CancellationToken cancellationToken);
 
     /// <summary>A chave e a conexão pelo identificador público da chave (único). Não filtra por tenant: o tenant é o da linha.</summary>
     Task<IntegrationKeyLookup?> FindKeyAsync(Guid keyId, CancellationToken cancellationToken);
@@ -48,10 +48,10 @@ public interface IEmbeddedStore
     /// Cria a chave sob trava da conexão: recusa se já há <see cref="IntegrationKey.MaxActivePerConnection"/> utilizáveis e, se <paramref name="expireOthersAt"/> for informado, programa o fim das outras utilizáveis
     /// (rotação). Devolve <c>false</c> quando o limite foi atingido.
     /// </summary>
-    Task<bool> TryAddKeyAsync(IntegrationKey key, DateTimeOffset? expireOthersAt, DateTimeOffset now, CancellationToken cancellationToken);
+    Task<bool> TryAddKeyAsync(IntegrationKey key, DateTimeOffset? expireOthersAt, PendingAudit audit, DateTimeOffset now, CancellationToken cancellationToken);
 
     /// <summary>Revoga a chave. Devolve <c>false</c> se não existe na conexão do tenant ou já estava revogada.</summary>
-    Task<bool> RevokeKeyAsync(TenantId tenantId, Guid connectionId, Guid keyId, DateTimeOffset now, CancellationToken cancellationToken);
+    Task<bool> RevokeKeyAsync(TenantId tenantId, Guid connectionId, Guid keyId, PendingAudit audit, DateTimeOffset now, CancellationToken cancellationToken);
 
     /// <summary>Registra o nonce de forma atômica. Devolve <c>false</c> se já foi usado nesta chave (repetição).</summary>
     Task<bool> TryRecordNonceAsync(TenantId tenantId, Guid keyId, string nonce, DateTimeOffset expiresAt, CancellationToken cancellationToken);
@@ -63,18 +63,18 @@ public interface IEmbeddedStore
     Task<ExternalIdentity?> FindIdentityByIdAsync(TenantId tenantId, Guid connectionId, Guid identityId, CancellationToken cancellationToken);
 
     /// <summary>Grava o vínculo. Devolve <c>false</c> se o identificador externo ou o usuário já têm vínculo nesta conexão.</summary>
-    Task<bool> TryAddIdentityAsync(ExternalIdentity identity, CancellationToken cancellationToken);
+    Task<bool> TryAddIdentityAsync(ExternalIdentity identity, PendingAudit audit, CancellationToken cancellationToken);
 
-    Task<bool> SetIdentityStatusAsync(TenantId tenantId, Guid connectionId, Guid identityId, ExternalIdentityStatus status, CancellationToken cancellationToken);
+    Task<bool> SetIdentityStatusAsync(TenantId tenantId, Guid connectionId, Guid identityId, ExternalIdentityStatus status, PendingAudit audit, CancellationToken cancellationToken);
 
     /// <summary>Cria, juntos ou nenhum, o usuário federado, a concessão e o vínculo. Devolve <c>false</c> se o vínculo já existe (corrida entre duas primeiras entradas): quem chama relê o existente.</summary>
-    Task<bool> TryProvisionFederatedUserAsync(User user, UserOrganizationGrant grant, ExternalIdentity identity, CancellationToken cancellationToken);
+    Task<bool> TryProvisionFederatedUserAsync(User user, UserOrganizationGrant grant, ExternalIdentity identity, PendingAudit audit, CancellationToken cancellationToken);
 
     /// <summary>
     /// Grava o ticket SOB a trava da chave que o emite: a revogação da chave e a gravação do ticket se enfileiram, então um ticket nunca nasce de uma chave já revogada. Devolve <c>false</c> (e não grava) quando a chave
     /// deixou de ser utilizável (revogada, expirada ou de outra conexão) entre a autenticação da chamada e a gravação.
     /// </summary>
-    Task<bool> AddTicketAsync(LaunchTicket ticket, DateTimeOffset now, CancellationToken cancellationToken);
+    Task<bool> AddTicketAsync(LaunchTicket ticket, PendingAudit audit, DateTimeOffset now, CancellationToken cancellationToken);
 
     /// <summary>
     /// Queima o ticket de forma ATÔMICA: só devolve o ticket para quem o marcou como usado (não usado, não expirado). Usado quando a conferência RECUSA a tentativa (verifier, origem, usuário etc.): uma tentativa errada
@@ -94,7 +94,7 @@ public interface IEmbeddedStore
     Task<Session?> FindSessionAsync(TenantId tenantId, Guid sessionId, CancellationToken cancellationToken);
 
     /// <summary>Revoga as sessões embutidas ATIVAS da conexão (de um usuário externo, se informado). Devolve quantas revogou.</summary>
-    Task<int> RevokeEmbeddedSessionsAsync(TenantId tenantId, Guid connectionId, string? externalUserId, DateTimeOffset now, CancellationToken cancellationToken);
+    Task<int> RevokeEmbeddedSessionsAsync(TenantId tenantId, Guid connectionId, string? externalUserId, PendingAudit? audit, DateTimeOffset now, CancellationToken cancellationToken);
 
     /// <summary>
     /// Consome o ticket de contexto (<paramref name="ticket"/>) e acrescenta o cliente em foco à sessão (ou renova a data dele), mantendo no máximo <see cref="SessionCustomerGrant.MaxPerSession"/>, na MESMA transação: se falha por
@@ -111,10 +111,21 @@ public interface IEmbeddedStore
 /// </summary>
 public interface IIdentityAuditOutbox
 {
+    /// <summary>Tenants com ao menos uma entrada ELEGÍVEL agora (as que esperam o recuo de uma falha não contam), as de pendência mais antiga primeiro.</summary>
     Task<IReadOnlyList<Guid>> ListTenantsWithPendingAsync(int take, CancellationToken cancellationToken);
 
-    Task<int> PendingCountAsync(CancellationToken cancellationToken);
+    /// <summary>Quantidade, idade da mais antiga e falhas das entradas ainda não entregues (todos os tenants; sem conteúdo).</summary>
+    Task<AuditOutboxStatus> GetStatusAsync(CancellationToken cancellationToken);
 
-    /// <summary>Entrega até <paramref name="take"/> entradas do tenant do contexto. Devolve quantas entregou; uma falha da trilha deixa a linha para o próximo ciclo.</summary>
+    /// <summary>
+    /// Entrega até <paramref name="take"/> entradas elegíveis do tenant do contexto. Devolve quantas entregou. Uma entrada que a trilha recusa NÃO é descartada nem trava as demais: registra a falha (contagem, tipo do erro, próxima tentativa
+    /// com recuo crescente) e a entrega segue para a próxima.
+    /// </summary>
     Task<int> FlushAsync(int take, CancellationToken cancellationToken);
+}
+
+/// <summary>Indicadores da outbox de auditoria do Identity: <c>Pending</c> (todas as não entregues), <c>Failing</c> (com ao menos uma falha de entrega), <c>MaxAttempts</c> e <c>OldestCreatedAt</c> (nulo se vazia).</summary>
+public sealed record AuditOutboxStatus(int Pending, int Failing, int MaxAttempts, DateTimeOffset? OldestCreatedAt)
+{
+    public TimeSpan OldestAge(DateTimeOffset now) => OldestCreatedAt is { } mais ? now - mais : TimeSpan.Zero;
 }

@@ -53,7 +53,6 @@ public sealed class EmbeddedTicketService
         var ticket = LaunchTicket.CreateLaunch(integration.TenantId, integration.ConnectionId, hash, request.Challenge!, origem, externo, vinculo.UserId, cliente, agora, _options.EmbeddedTicketLifetime, integration.KeyId);
         await AddTicketOrDenyAsync(integration, ticket, "identity.embed.ticket.issue", agora, cancellationToken);
 
-        await _audit.WriteForAuthenticationAsync(integration.TenantId, vinculo.UserId, new AuditEntry("identity.embed.ticket.issue", "launch_ticket", ticket.Id.ToString(), AuditOutcome.Success), cancellationToken);
         return new TicketResult(token, ticket.ExpiresAt);
     }
 
@@ -93,7 +92,6 @@ public sealed class EmbeddedTicketService
         var ticket = LaunchTicket.CreateContext(integration.TenantId, integration.ConnectionId, hash, externo, vinculo.UserId, cliente, agora, _options.EmbeddedTicketLifetime, integration.KeyId, sessaoAlvo.Id);
         await AddTicketOrDenyAsync(integration, ticket, "identity.embed.context-ticket.issue", agora, cancellationToken);
 
-        await _audit.WriteForAuthenticationAsync(integration.TenantId, vinculo.UserId, new AuditEntry("identity.embed.context-ticket.issue", "launch_ticket", ticket.Id.ToString(), AuditOutcome.Success), cancellationToken);
         return new TicketResult(token, ticket.ExpiresAt);
     }
 
@@ -103,15 +101,15 @@ public sealed class EmbeddedTicketService
         ArgumentNullException.ThrowIfNull(integration);
 
         var externo = ExternalIdentity.NormalizeExternalUserId(externalUserId);
-        var total = await _store.RevokeEmbeddedSessionsAsync(integration.TenantId, integration.ConnectionId, externo, _clock.GetUtcNow(), cancellationToken);
-        await _audit.WriteForAuthenticationAsync(integration.TenantId, null, new AuditEntry("identity.embed.session.revoke-by-integration", "integration_connection", integration.ConnectionId.ToString(), AuditOutcome.Success), cancellationToken);
-        return total;
+        var agora = _clock.GetUtcNow();
+        var auditoria = Pending(integration.TenantId, null, "identity.embed.session.revoke-by-integration", "integration_connection", integration.ConnectionId.ToString(), agora);
+        return await _store.RevokeEmbeddedSessionsAsync(integration.TenantId, integration.ConnectionId, externo, auditoria, agora, cancellationToken);
     }
 
     /// <summary>A chave autenticou a chamada, mas pode ter sido revogada antes da gravação: a gravação confere sob trava, e a chave morta não emite (mesma resposta de qualquer falha de autenticação).</summary>
     private async Task AddTicketOrDenyAsync(AuthenticatedIntegration integration, LaunchTicket ticket, string action, DateTimeOffset now, CancellationToken cancellationToken)
     {
-        if (await _store.AddTicketAsync(ticket, now, cancellationToken))
+        if (await _store.AddTicketAsync(ticket, Pending(integration.TenantId, ticket.UserId, action, "launch_ticket", ticket.Id.ToString(), now), now, cancellationToken))
         {
             return;
         }
@@ -144,9 +142,9 @@ public sealed class EmbeddedTicketService
         var usuario = User.CreateFederated(integration.TenantId, displayName, now);
         var concessao = UserOrganizationGrant.Create(integration.TenantId, usuario.Id, integration.OrganizationId, Role.Attendant, now, null);
         var vinculo = ExternalIdentity.Create(integration.TenantId, integration.ConnectionId, externalUserId, usuario.Id, IdentitySource.Jit, now, null);
-        if (await _store.TryProvisionFederatedUserAsync(usuario, concessao, vinculo, cancellationToken))
+        var provisao = Pending(integration.TenantId, usuario.Id, "identity.embed.identity.provision", "external_identity", vinculo.Id.ToString(), now);
+        if (await _store.TryProvisionFederatedUserAsync(usuario, concessao, vinculo, provisao, cancellationToken))
         {
-            await _audit.WriteForAuthenticationAsync(integration.TenantId, usuario.Id, new AuditEntry("identity.embed.identity.provision", "external_identity", vinculo.Id.ToString(), AuditOutcome.Success), cancellationToken);
             return vinculo;
         }
 
@@ -172,6 +170,10 @@ public sealed class EmbeddedTicketService
         var concessoes = await _auth.ListGrantsAsync(integration.TenantId, userId, cancellationToken);
         return EmbeddedSessionPolicy.IsEligible(concessoes, integration.OrganizationId, out _);
     }
+
+    /// <summary>A entrada de auditoria do SUCESSO guardada na transação do efeito (outbox, E1-R quinta rodada): origem de autenticação (a emissão vem do servidor do ERP, antes de haver contexto de usuário) e instante da operação.</summary>
+    private static PendingAudit Pending(IaBimeta.SharedKernel.TenantId tenantId, Guid? actorUserId, string operation, string resourceType, string resourceId, DateTimeOffset now) =>
+        PendingAudit.Create(tenantId, new AuditEntry(operation, resourceType, resourceId, AuditOutcome.Success), actorUserId, PendingAudit.AuthenticationOrigin, now);
 
     private Task DenyAsync(AuthenticatedIntegration integration, Guid? userId, CancellationToken cancellationToken) =>
         _audit.WriteForAuthenticationAsync(integration.TenantId, userId, new AuditEntry("identity.embed.ticket.issue", "integration_connection", integration.ConnectionId.ToString(), AuditOutcome.Denied), cancellationToken);

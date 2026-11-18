@@ -17,6 +17,7 @@ public sealed class PendingAudit : ITenantOwned
     public const int ResourceTypeMaxLength = 60;
     public const int ResourceIdMaxLength = 100;
     public const int ActorOriginMaxLength = 40;
+    public const int LastErrorMaxLength = 100;
 
     /// <summary>A origem da entrada guardada na troca do ticket de abertura (anterior ao contexto): a mesma que a trilha usa para eventos de autenticação.</summary>
     public const string AuthenticationOrigin = "authentication";
@@ -29,6 +30,15 @@ public sealed class PendingAudit : ITenantOwned
         ResourceType = null!;
         ActorOrigin = null!;
     }
+
+    /// <summary>Quantas vezes a entrega à trilha falhou para esta linha (zero até a primeira falha).</summary>
+    public int Attempts { get; private set; }
+
+    /// <summary>Não tentar antes deste instante (recuo crescente depois de cada falha); nulo = elegível agora. A linha NUNCA é descartada: só espera, e as demais seguem.</summary>
+    public DateTimeOffset? NextAttemptAt { get; private set; }
+
+    /// <summary>Só o TIPO da última falha da entrega (nunca a mensagem, que pode carregar dado).</summary>
+    public string? LastError { get; private set; }
 
     public Guid Id { get; private set; }
 

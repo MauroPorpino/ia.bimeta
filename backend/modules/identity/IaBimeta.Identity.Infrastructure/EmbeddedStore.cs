@@ -103,10 +103,14 @@ internal sealed class EmbeddedStore : IEmbeddedStore
         return total;
     }
 
-    public async Task AddConnectionAsync(IntegrationConnection connection, CancellationToken cancellationToken)
+    // E1-R, quinta rodada: toda gravação com efeito leva a entrada de auditoria do sucesso (outbox) na MESMA transação do efeito. Se a gravação falha, a entrada some junto; se confirma, o Worker a entrega à trilha
+    // depois. Nenhuma chamada à trilha acontece depois do commit (uma falha dela nunca mais vira 503 com o efeito já confirmado).
+
+    public async Task AddConnectionAsync(IntegrationConnection connection, PendingAudit audit, CancellationToken cancellationToken)
     {
         using var escopo = _db.UseAuthenticationTenant(connection.TenantId);
         _db.IntegrationConnections.Add(connection);
+        _db.AuditOutbox.Add(audit);
         await _db.SaveChangesAsync(cancellationToken);
     }
 
@@ -122,9 +126,10 @@ internal sealed class EmbeddedStore : IEmbeddedStore
             .OrderBy(c => c.CreatedAt)
             .ToListAsync(cancellationToken);
 
-    public async Task SaveChangesAsync(TenantId tenantId, CancellationToken cancellationToken)
+    public async Task SaveChangesAsync(TenantId tenantId, PendingAudit audit, CancellationToken cancellationToken)
     {
         using var escopo = _db.UseAuthenticationTenant(tenantId);
+        _db.AuditOutbox.Add(audit);
         await _db.SaveChangesAsync(cancellationToken);
     }
 
@@ -147,10 +152,10 @@ internal sealed class EmbeddedStore : IEmbeddedStore
             .OrderBy(k => k.CreatedAt)
             .ToListAsync(cancellationToken);
 
-    public Task<bool> TryAddKeyAsync(IntegrationKey key, DateTimeOffset? expireOthersAt, DateTimeOffset now, CancellationToken cancellationToken) =>
-        GuardAsync(() => TryAddKeyCoreAsync(key, expireOthersAt, now, cancellationToken));
+    public Task<bool> TryAddKeyAsync(IntegrationKey key, DateTimeOffset? expireOthersAt, PendingAudit audit, DateTimeOffset now, CancellationToken cancellationToken) =>
+        GuardAsync(() => TryAddKeyCoreAsync(key, expireOthersAt, audit, now, cancellationToken));
 
-    private async Task<bool> TryAddKeyCoreAsync(IntegrationKey key, DateTimeOffset? expireOthersAt, DateTimeOffset now, CancellationToken cancellationToken)
+    private async Task<bool> TryAddKeyCoreAsync(IntegrationKey key, DateTimeOffset? expireOthersAt, PendingAudit audit, DateTimeOffset now, CancellationToken cancellationToken)
     {
         using var escopo = _db.UseAuthenticationTenant(key.TenantId);
         await using var transacao = await BeginAsync(cancellationToken);
@@ -177,21 +182,31 @@ internal sealed class EmbeddedStore : IEmbeddedStore
             }
         }
 
+        // A chave nova, o vencimento programado das antigas (rotação) e a entrada de auditoria confirmam JUNTOS: o segredo só é devolvido depois do commit, e a trilha nunca falha depois dele.
         _db.IntegrationKeys.Add(key);
+        _db.AuditOutbox.Add(audit);
         await _db.SaveChangesAsync(cancellationToken);
         await transacao.CommitAsync(cancellationToken);
         return true;
     }
 
-    public async Task<bool> RevokeKeyAsync(TenantId tenantId, Guid connectionId, Guid keyId, DateTimeOffset now, CancellationToken cancellationToken)
+    public async Task<bool> RevokeKeyAsync(TenantId tenantId, Guid connectionId, Guid keyId, PendingAudit audit, DateTimeOffset now, CancellationToken cancellationToken)
     {
         // A revogação em si é UMA linha: a da chave. É ela que vale. O UPDATE trava a linha, então a gravação de um ticket (que a trava em FOR SHARE) se enfileira com ela: depois do commit, nenhum ticket nasce desta chave.
         var revogada = await GuardAsync(async () =>
         {
+            using var escopo = _db.UseAuthenticationTenant(tenantId);
             await using var transacao = await BeginAsync(cancellationToken);
             var alteradas = await _db.IntegrationKeys.IgnoreQueryFilters()
                 .Where(k => k.TenantId == tenantId && k.ConnectionId == connectionId && k.Id == keyId && k.Status == IntegrationKeyStatus.Active)
                 .ExecuteUpdateAsync(set => set.SetProperty(k => k.Status, IntegrationKeyStatus.Revoked).SetProperty(k => k.RevokedAt, now), cancellationToken);
+            if (alteradas == 1)
+            {
+                // A entrada de auditoria confirma na MESMA transação da revogação (ver o comentário do início).
+                _db.AuditOutbox.Add(audit);
+                await _db.SaveChangesAsync(cancellationToken);
+            }
+
             await transacao.CommitAsync(cancellationToken);
             return alteradas == 1;
         });
@@ -240,10 +255,11 @@ internal sealed class EmbeddedStore : IEmbeddedStore
         _db.ExternalIdentities.IgnoreQueryFilters().AsNoTracking()
             .FirstOrDefaultAsync(i => i.TenantId == tenantId && i.ConnectionId == connectionId && i.Id == identityId, cancellationToken);
 
-    public async Task<bool> TryAddIdentityAsync(ExternalIdentity identity, CancellationToken cancellationToken)
+    public async Task<bool> TryAddIdentityAsync(ExternalIdentity identity, PendingAudit audit, CancellationToken cancellationToken)
     {
         using var escopo = _db.UseAuthenticationTenant(identity.TenantId);
         _db.ExternalIdentities.Add(identity);
+        _db.AuditOutbox.Add(audit);
         try
         {
             await _db.SaveChangesAsync(cancellationToken);
@@ -252,19 +268,29 @@ internal sealed class EmbeddedStore : IEmbeddedStore
         catch (DbUpdateException ex) when (IsIdentityConflict(ex))
         {
             _db.Entry(identity).State = EntityState.Detached;
+            _db.Entry(audit).State = EntityState.Detached;
             return false;
         }
     }
 
-    public async Task<bool> SetIdentityStatusAsync(TenantId tenantId, Guid connectionId, Guid identityId, ExternalIdentityStatus status, CancellationToken cancellationToken)
+    public async Task<bool> SetIdentityStatusAsync(TenantId tenantId, Guid connectionId, Guid identityId, ExternalIdentityStatus status, PendingAudit audit, CancellationToken cancellationToken)
     {
+        using var escopo = _db.UseAuthenticationTenant(tenantId);
+        await using var transacao = await BeginAsync(cancellationToken);
         var alteradas = await _db.ExternalIdentities.IgnoreQueryFilters()
             .Where(i => i.TenantId == tenantId && i.ConnectionId == connectionId && i.Id == identityId)
             .ExecuteUpdateAsync(set => set.SetProperty(i => i.Status, status), cancellationToken);
+        if (alteradas == 1)
+        {
+            _db.AuditOutbox.Add(audit);
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+
+        await transacao.CommitAsync(cancellationToken);
         return alteradas == 1;
     }
 
-    public async Task<bool> TryProvisionFederatedUserAsync(User user, UserOrganizationGrant grant, ExternalIdentity identity, CancellationToken cancellationToken)
+    public async Task<bool> TryProvisionFederatedUserAsync(User user, UserOrganizationGrant grant, ExternalIdentity identity, PendingAudit audit, CancellationToken cancellationToken)
     {
         using var escopo = _db.UseAuthenticationTenant(identity.TenantId);
         await using var transacao = await _db.Database.BeginTransactionAsync(cancellationToken);
@@ -272,6 +298,7 @@ internal sealed class EmbeddedStore : IEmbeddedStore
         _db.Users.Add(user);
         _db.Grants.Add(grant);
         _db.ExternalIdentities.Add(identity);
+        _db.AuditOutbox.Add(audit);
         try
         {
             await _db.SaveChangesAsync(cancellationToken);
@@ -288,7 +315,7 @@ internal sealed class EmbeddedStore : IEmbeddedStore
         }
     }
 
-    public Task<bool> AddTicketAsync(LaunchTicket ticket, DateTimeOffset now, CancellationToken cancellationToken) =>
+    public Task<bool> AddTicketAsync(LaunchTicket ticket, PendingAudit audit, DateTimeOffset now, CancellationToken cancellationToken) =>
         GuardAsync(async () =>
         {
             using var escopo = _db.UseAuthenticationTenant(ticket.TenantId);
@@ -314,6 +341,7 @@ internal sealed class EmbeddedStore : IEmbeddedStore
             }
 
             _db.LaunchTickets.Add(ticket);
+            _db.AuditOutbox.Add(audit);
             await _db.SaveChangesAsync(cancellationToken);
             await transacao.CommitAsync(cancellationToken);
             return true;
@@ -419,10 +447,12 @@ internal sealed class EmbeddedStore : IEmbeddedStore
     public Task<Session?> FindSessionAsync(TenantId tenantId, Guid sessionId, CancellationToken cancellationToken) =>
         _db.Sessions.IgnoreQueryFilters().AsNoTracking().FirstOrDefaultAsync(s => s.TenantId == tenantId && s.Id == sessionId, cancellationToken);
 
-    public Task<int> RevokeEmbeddedSessionsAsync(TenantId tenantId, Guid connectionId, string? externalUserId, DateTimeOffset now, CancellationToken cancellationToken) =>
+    public Task<int> RevokeEmbeddedSessionsAsync(TenantId tenantId, Guid connectionId, string? externalUserId, PendingAudit? audit, DateTimeOffset now, CancellationToken cancellationToken) =>
         GuardAsync(async () =>
         {
             // A marca de revogação vem PRIMEIRO e sozinha (UMA linha, transação própria) e é MONOTÔNICA no banco (nunca retrocede, mesmo que requisições concorrentes terminem fora da ordem em que começaram: vale o maior instante): sessão ou ticket criado até ela não vale mais, mesmo que uma troca em andamento grave a sessão depois (conferência no uso).
+            // A entrada de auditoria (quando há) confirma JUNTO com a marca, que é o efeito que vale; a limpeza física abaixo é idempotente e repetível.
+            using var escopo = _db.UseAuthenticationTenant(tenantId);
             await using (var transacao = await BeginAsync(cancellationToken))
             {
                 if (externalUserId is null)
@@ -436,6 +466,12 @@ internal sealed class EmbeddedStore : IEmbeddedStore
                     await _db.ExternalIdentities.IgnoreQueryFilters()
                         .Where(i => i.TenantId == tenantId && i.ConnectionId == connectionId && i.ExternalUserId == externalUserId)
                         .ExecuteUpdateAsync(set => set.SetProperty(i => i.SessionsRevokedAt, i => i.SessionsRevokedAt == null || i.SessionsRevokedAt < now ? now : i.SessionsRevokedAt), cancellationToken);
+                }
+
+                if (audit is not null)
+                {
+                    _db.AuditOutbox.Add(audit);
+                    await _db.SaveChangesAsync(cancellationToken);
                 }
 
                 await transacao.CommitAsync(cancellationToken);

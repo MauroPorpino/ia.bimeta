@@ -109,6 +109,7 @@ public sealed class EmbeddedAuditoriaDuravelApiTests(PostgresFixture banco)
         var tenant = c.Tenant.TenantId.Value;
         var verifier = EmbeddedTestSupport.NovoVerifier();
         var ticket = await c.Erp.EmitirAsync("u-aud", EmbeddedTestSupport.Challenge(verifier));
+        await EmbeddedTestSupport.EntregarAuditoriaAsync(c.Api, c.Tenant.TenantId); // as da preparação (conexão, chave, emissão): fica só a da troca
 
         // A trilha cai DEPOIS da emissão. Antes: o sucesso da troca era auditado depois do commit, a exceção virava 503 e o ticket (já consumido) respondia 401 na repetição.
         falha.Ativa = true;
@@ -125,6 +126,7 @@ public sealed class EmbeddedAuditoriaDuravelApiTests(PostgresFixture banco)
 
         // A trilha volta: a entrega grava UM evento, com o ator, a origem e o instante ORIGINAIS, e só então apaga a linha.
         falha.Ativa = false;
+        await ExecutarAsync("UPDATE identity.audit_outbox SET next_attempt_at = now() - interval '1 second' WHERE tenant_id = @t", ("t", tenant)); // vence o recuo da tentativa que falhou
         var instanteOriginal = await EscalarAsync("SELECT (extract(epoch FROM created_at) * 1000000)::bigint FROM identity.audit_outbox WHERE tenant_id = @t", ("t", tenant));
         var linha = await LerLinhaAsync(tenant);
         Assert.Equal(1, await EmbeddedTestSupport.EntregarAuditoriaAsync(c.Api, c.Tenant.TenantId));
@@ -175,8 +177,8 @@ public sealed class EmbeddedAuditoriaDuravelApiTests(PostgresFixture banco)
         await using var servidor = c.Api;
         var tenant = c.Tenant.TenantId.Value;
         var (sessao, _) = await c.EntrarAsync("u-atom");
-        await EmbeddedTestSupport.EntregarAuditoriaAsync(c.Api, c.Tenant.TenantId);
         var ticketA = await c.Erp.EmitirContextoAsync("u-atom", "CLI-A", sessao.SessionId);
+        await EmbeddedTestSupport.EntregarAuditoriaAsync(c.Api, c.Tenant.TenantId); // as da preparação: fica só a do resgate
 
         // (1) Contenção: a transação é desfeita, o ticket segue pendente e NENHUMA linha de auditoria nasce.
         await using (var presa = new NpgsqlConnection(TestDatabase.ConnectionString))
@@ -233,20 +235,22 @@ public sealed class EmbeddedAuditoriaDuravelApiTests(PostgresFixture banco)
         _ = await b.EntrarAsync("u-b-0");
         var tenantA = a.Tenant.TenantId.Value;
         var tenantB = b.Tenant.TenantId.Value;
-        Assert.Equal(6, await NoOutboxAsync(tenantA));
-        Assert.Equal(1, await NoOutboxAsync(tenantB));
+        var totalA = await NoOutboxAsync(tenantA);
+        Assert.True(totalA >= 6 + 6, "preparação + 6 emissões + 6 trocas");
+        var totalB = await NoOutboxAsync(tenantB);
+        Assert.True(totalB >= 1 + 1, "preparação + emissão + troca");
 
         // Três "Workers" entregam o MESMO tenant ao mesmo tempo (FOR UPDATE SKIP LOCKED): 6 linhas, 6 eventos, nenhuma entregue duas vezes.
         var entregues = await Task.WhenAll(Enumerable.Range(0, 3).Select(_ => Task.Run(() => EmbeddedTestSupport.EntregarAuditoriaAsync(a.Api, a.Tenant.TenantId))));
 
-        Assert.Equal(6, entregues.Sum());
+        Assert.Equal(totalA, entregues.Sum());
         Assert.Equal(0, await NoOutboxAsync(tenantA));
         Assert.Equal(6, await NaTrilhaAsync(tenantA, "identity.embed.exchange"));
 
         // O tenant B não foi tocado pela entrega do A.
-        Assert.Equal(1, await NoOutboxAsync(tenantB));
+        Assert.Equal(totalB, await NoOutboxAsync(tenantB));
         Assert.Equal(0, await NaTrilhaAsync(tenantB, "identity.embed.exchange"));
-        Assert.Equal(1, await EmbeddedTestSupport.EntregarAuditoriaAsync(b.Api, b.Tenant.TenantId));
+        Assert.Equal(totalB, await EmbeddedTestSupport.EntregarAuditoriaAsync(b.Api, b.Tenant.TenantId));
         Assert.Equal(1, await NaTrilhaAsync(tenantB, "identity.embed.exchange"));
     }
 

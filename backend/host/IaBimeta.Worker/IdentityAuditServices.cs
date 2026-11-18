@@ -15,12 +15,14 @@ internal sealed class IdentityAuditReconciler
     private readonly IMessagingScopeInitializer _initializer;
     private readonly WorkerOptions _options;
     private readonly ILogger<IdentityAuditReconciler> _logger;
+    private readonly TimeProvider _clock;
 
-    public IdentityAuditReconciler(IServiceScopeFactory scopes, IMessagingScopeInitializer initializer, WorkerOptions options, ILogger<IdentityAuditReconciler> logger)
+    public IdentityAuditReconciler(IServiceScopeFactory scopes, IMessagingScopeInitializer initializer, WorkerOptions options, TimeProvider clock, ILogger<IdentityAuditReconciler> logger)
     {
         _scopes = scopes;
         _initializer = initializer;
         _options = options;
+        _clock = clock;
         _logger = logger;
     }
 
@@ -53,7 +55,43 @@ internal sealed class IdentityAuditReconciler
             }
         }
 
+
+        await ReportStatusAsync(cancellationToken);
         return total;
+    }
+
+    /// <summary>Indicadores da outbox a cada ciclo (sem conteúdo): pendentes, com falha de entrega, maior número de tentativas e idade da mais antiga. Falha na própria leitura nunca derruba o ciclo.</summary>
+    private async Task ReportStatusAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var escopo = _scopes.CreateAsyncScope();
+            var status = await escopo.ServiceProvider.GetRequiredService<IIdentityAuditOutbox>().GetStatusAsync(cancellationToken);
+            if (status.Pending == 0)
+            {
+                return;
+            }
+
+            var idade = status.OldestAge(_clock.GetUtcNow());
+            if (status.Failing > 0)
+            {
+                _logger.LogWarning(
+                    "Auditoria do Identity: {Pending} pendentes, {Failing} com falha de entrega (máx. {MaxAttempts} tentativas), a mais antiga há {OldestAgeSeconds:F0} s.",
+                    status.Pending, status.Failing, status.MaxAttempts, idade.TotalSeconds);
+            }
+            else
+            {
+                _logger.LogInformation("Auditoria do Identity: {Pending} pendentes, a mais antiga há {OldestAgeSeconds:F0} s.", status.Pending, idade.TotalSeconds);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("A leitura dos indicadores da auditoria do Identity falhou: {ErrorType}.", ex.GetType().Name);
+        }
     }
 }
 

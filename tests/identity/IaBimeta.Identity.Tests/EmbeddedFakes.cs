@@ -28,9 +28,10 @@ internal sealed class EmbeddedEmMemoria : IEmbeddedStore
 
     public IdentidadeEmMemoria? Identidade { get; set; }
 
-    public Task AddConnectionAsync(IntegrationConnection connection, CancellationToken cancellationToken)
+    public Task AddConnectionAsync(IntegrationConnection connection, PendingAudit audit, CancellationToken cancellationToken)
     {
         Conexoes.Add(connection);
+        AuditoriaPendente.Add(audit);
         return Task.CompletedTask;
     }
 
@@ -40,7 +41,11 @@ internal sealed class EmbeddedEmMemoria : IEmbeddedStore
     public Task<IReadOnlyList<IntegrationConnection>> ListConnectionsAsync(TenantId tenantId, CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<IntegrationConnection>>(Conexoes.Where(c => c.TenantId == tenantId).ToList());
 
-    public Task SaveChangesAsync(TenantId tenantId, CancellationToken cancellationToken) => Task.CompletedTask;
+    public Task SaveChangesAsync(TenantId tenantId, PendingAudit audit, CancellationToken cancellationToken)
+    {
+        AuditoriaPendente.Add(audit);
+        return Task.CompletedTask;
+    }
 
     public Task<IntegrationKeyLookup?> FindKeyAsync(Guid keyId, CancellationToken cancellationToken)
     {
@@ -52,7 +57,7 @@ internal sealed class EmbeddedEmMemoria : IEmbeddedStore
     public Task<IReadOnlyList<IntegrationKey>> ListKeysAsync(TenantId tenantId, Guid connectionId, CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<IntegrationKey>>(Chaves.Where(k => k.TenantId == tenantId && k.ConnectionId == connectionId).ToList());
 
-    public Task<bool> TryAddKeyAsync(IntegrationKey key, DateTimeOffset? expireOthersAt, DateTimeOffset now, CancellationToken cancellationToken)
+    public Task<bool> TryAddKeyAsync(IntegrationKey key, DateTimeOffset? expireOthersAt, PendingAudit audit, DateTimeOffset now, CancellationToken cancellationToken)
     {
         var utilizaveis = Chaves.Where(k => k.TenantId == key.TenantId && k.ConnectionId == key.ConnectionId && k.IsUsableAt(now)).ToList();
         if (utilizaveis.Count >= IntegrationKey.MaxActivePerConnection)
@@ -66,10 +71,11 @@ internal sealed class EmbeddedEmMemoria : IEmbeddedStore
         }
 
         Chaves.Add(key);
+        AuditoriaPendente.Add(audit);
         return Task.FromResult(true);
     }
 
-    public Task<bool> RevokeKeyAsync(TenantId tenantId, Guid connectionId, Guid keyId, DateTimeOffset now, CancellationToken cancellationToken)
+    public Task<bool> RevokeKeyAsync(TenantId tenantId, Guid connectionId, Guid keyId, PendingAudit audit, DateTimeOffset now, CancellationToken cancellationToken)
     {
         var chave = Chaves.FirstOrDefault(k => k.TenantId == tenantId && k.ConnectionId == connectionId && k.Id == keyId);
         var revogada = chave is not null && chave.Revoke(now);
@@ -77,6 +83,11 @@ internal sealed class EmbeddedEmMemoria : IEmbeddedStore
         {
             Sessoes.Where(s => s.TenantId == tenantId && s.IssuerKeyId == keyId).ToList().ForEach(s => s.Revoke(now));
             Tickets.Where(t => t.TenantId == tenantId && t.KeyId == keyId).ToList().ForEach(t => TicketsUsados.TryAdd(t.Id, now));
+        }
+
+        if (revogada)
+        {
+            AuditoriaPendente.Add(audit);
         }
 
         return Task.FromResult(revogada);
@@ -102,7 +113,7 @@ internal sealed class EmbeddedEmMemoria : IEmbeddedStore
     public Task<ExternalIdentity?> FindIdentityByIdAsync(TenantId tenantId, Guid connectionId, Guid identityId, CancellationToken cancellationToken) =>
         Task.FromResult(Vinculos.FirstOrDefault(i => i.TenantId == tenantId && i.ConnectionId == connectionId && i.Id == identityId));
 
-    public Task<bool> TryAddIdentityAsync(ExternalIdentity identity, CancellationToken cancellationToken)
+    public Task<bool> TryAddIdentityAsync(ExternalIdentity identity, PendingAudit audit, CancellationToken cancellationToken)
     {
         if (Vinculos.Any(i => i.TenantId == identity.TenantId && i.ConnectionId == identity.ConnectionId && (i.ExternalUserId == identity.ExternalUserId || i.UserId == identity.UserId)))
         {
@@ -110,17 +121,23 @@ internal sealed class EmbeddedEmMemoria : IEmbeddedStore
         }
 
         Vinculos.Add(identity);
+        AuditoriaPendente.Add(audit);
         return Task.FromResult(true);
     }
 
-    public Task<bool> SetIdentityStatusAsync(TenantId tenantId, Guid connectionId, Guid identityId, ExternalIdentityStatus status, CancellationToken cancellationToken)
+    public Task<bool> SetIdentityStatusAsync(TenantId tenantId, Guid connectionId, Guid identityId, ExternalIdentityStatus status, PendingAudit audit, CancellationToken cancellationToken)
     {
         var vinculo = Vinculos.FirstOrDefault(i => i.TenantId == tenantId && i.ConnectionId == connectionId && i.Id == identityId);
         vinculo?.SetStatus(status);
+        if (vinculo is not null)
+        {
+            AuditoriaPendente.Add(audit);
+        }
+
         return Task.FromResult(vinculo is not null);
     }
 
-    public Task<bool> TryProvisionFederatedUserAsync(User user, UserOrganizationGrant grant, ExternalIdentity identity, CancellationToken cancellationToken)
+    public Task<bool> TryProvisionFederatedUserAsync(User user, UserOrganizationGrant grant, ExternalIdentity identity, PendingAudit audit, CancellationToken cancellationToken)
     {
         if (Vinculos.Any(i => i.TenantId == identity.TenantId && i.ConnectionId == identity.ConnectionId && i.ExternalUserId == identity.ExternalUserId))
         {
@@ -131,10 +148,11 @@ internal sealed class EmbeddedEmMemoria : IEmbeddedStore
         Identidade?.Concessoes.Add(grant);
         Provisionados.Add((user, grant));
         Vinculos.Add(identity);
+        AuditoriaPendente.Add(audit);
         return Task.FromResult(true);
     }
 
-    public Task<bool> AddTicketAsync(LaunchTicket ticket, DateTimeOffset now, CancellationToken cancellationToken)
+    public Task<bool> AddTicketAsync(LaunchTicket ticket, PendingAudit audit, DateTimeOffset now, CancellationToken cancellationToken)
     {
         if (ticket.KeyId is { } chaveId && Chaves.FirstOrDefault(k => k.Id == chaveId) is { } chave && !chave.IsUsableAt(now))
         {
@@ -142,6 +160,7 @@ internal sealed class EmbeddedEmMemoria : IEmbeddedStore
         }
 
         Tickets.Add(ticket);
+        AuditoriaPendente.Add(audit);
         return Task.FromResult(true);
     }
 
@@ -210,7 +229,7 @@ internal sealed class EmbeddedEmMemoria : IEmbeddedStore
     public Task<Session?> FindSessionAsync(TenantId tenantId, Guid sessionId, CancellationToken cancellationToken) =>
         Task.FromResult(Sessoes.FirstOrDefault(s => s.TenantId == tenantId && s.Id == sessionId));
 
-    public Task<int> RevokeEmbeddedSessionsAsync(TenantId tenantId, Guid connectionId, string? externalUserId, DateTimeOffset now, CancellationToken cancellationToken)
+    public Task<int> RevokeEmbeddedSessionsAsync(TenantId tenantId, Guid connectionId, string? externalUserId, PendingAudit? audit, DateTimeOffset now, CancellationToken cancellationToken)
     {
         var alvo = Sessoes.Where(s => s.TenantId == tenantId && s.IntegrationId == connectionId && (externalUserId is null || s.ExternalUserId == externalUserId) && s.IsActiveAt(now)).ToList();
         if (externalUserId is null)
@@ -224,6 +243,11 @@ internal sealed class EmbeddedEmMemoria : IEmbeddedStore
 
         Tickets.Where(t => t.TenantId == tenantId && t.ConnectionId == connectionId && (externalUserId is null || t.ExternalUserId == externalUserId)).ToList().ForEach(t => TicketsUsados.TryAdd(t.Id, now));
         alvo.ForEach(s => s.Revoke(now));
+        if (audit is not null)
+        {
+            AuditoriaPendente.Add(audit);
+        }
+
         return Task.FromResult(alvo.Count);
     }
 

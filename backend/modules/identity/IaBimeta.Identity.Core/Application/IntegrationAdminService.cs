@@ -52,8 +52,7 @@ public sealed class IntegrationAdminService
         }
 
         var conexao = IntegrationConnection.Create(contexto.TenantId, organizationId, name, mode, provisioning, allowedOrigins, allowStartConversation, _clock.GetUtcNow(), contexto.Principal?.UserId);
-        await _store.AddConnectionAsync(conexao, cancellationToken);
-        await _audit.WriteAsync(new AuditEntry("identity.embed.connection.create", "integration_connection", conexao.Id.ToString(), AuditOutcome.Success), cancellationToken);
+        await _store.AddConnectionAsync(conexao, Pending(contexto, "identity.embed.connection.create", "integration_connection", conexao.Id.ToString()), cancellationToken);
         return ConnectionView.From(conexao);
     }
 
@@ -75,8 +74,7 @@ public sealed class IntegrationAdminService
         var contexto = await RequireAdminAsync("identity.embed.connection.update", "integration_connection", connectionId.ToString(), cancellationToken);
         var conexao = await LoadAsync(contexto.TenantId, connectionId, forUpdate: true, cancellationToken);
         conexao.UpdateSettings(name, mode, provisioning, allowedOrigins, allowStartConversation, _clock.GetUtcNow());
-        await _store.SaveChangesAsync(contexto.TenantId, cancellationToken);
-        await _audit.WriteAsync(new AuditEntry("identity.embed.connection.update", "integration_connection", conexao.Id.ToString(), AuditOutcome.Success), cancellationToken);
+        await _store.SaveChangesAsync(contexto.TenantId, Pending(contexto, "identity.embed.connection.update", "integration_connection", conexao.Id.ToString()), cancellationToken);
         return ConnectionView.From(conexao);
     }
 
@@ -87,17 +85,16 @@ public sealed class IntegrationAdminService
         var contexto = await RequireAdminAsync(operacao, "integration_connection", connectionId.ToString(), cancellationToken);
         var conexao = await LoadAsync(contexto.TenantId, connectionId, forUpdate: true, cancellationToken);
         var agora = _clock.GetUtcNow();
-        if (conexao.SetStatus(status, agora))
-        {
-            await _store.SaveChangesAsync(contexto.TenantId, cancellationToken);
-        }
+        conexao.SetStatus(status, agora);
+
+        // A mudança de estado e a entrada de auditoria confirmam juntas (a entrada é gravada mesmo sem mudança: a ação foi pedida e atendida). A revogação das sessões que segue é idempotente e repetível.
+        await _store.SaveChangesAsync(contexto.TenantId, Pending(contexto, operacao, "integration_connection", conexao.Id.ToString()), cancellationToken);
 
         if (status == ConnectionStatus.Disabled)
         {
-            await _store.RevokeEmbeddedSessionsAsync(contexto.TenantId, connectionId, null, agora, cancellationToken);
+            await _store.RevokeEmbeddedSessionsAsync(contexto.TenantId, connectionId, null, null, agora, cancellationToken);
         }
 
-        await _audit.WriteAsync(new AuditEntry(operacao, "integration_connection", conexao.Id.ToString(), AuditOutcome.Success), cancellationToken);
         return ConnectionView.From(conexao);
     }
 
@@ -123,12 +120,11 @@ public sealed class IntegrationAdminService
     {
         var contexto = await RequireAdminAsync("identity.embed.key.revoke", "integration_connection", connectionId.ToString(), cancellationToken);
         _ = await LoadAsync(contexto.TenantId, connectionId, forUpdate: false, cancellationToken);
-        if (!IntegrationKey.TryParsePublicId(keyId, out var id) || !await _store.RevokeKeyAsync(contexto.TenantId, connectionId, id, _clock.GetUtcNow(), cancellationToken))
+        if (!IntegrationKey.TryParsePublicId(keyId, out var id)
+            || !await _store.RevokeKeyAsync(contexto.TenantId, connectionId, id, Pending(contexto, "identity.embed.key.revoke", "integration_key", id.ToString("N")), _clock.GetUtcNow(), cancellationToken))
         {
             throw new IdentityResourceNotFoundException("Chave");
         }
-
-        await _audit.WriteAsync(new AuditEntry("identity.embed.key.revoke", "integration_key", id.ToString("N"), AuditOutcome.Success), cancellationToken);
     }
 
     /// <summary>
@@ -158,12 +154,11 @@ public sealed class IntegrationAdminService
         }
 
         var vinculo = ExternalIdentity.Create(contexto.TenantId, connectionId, externo, userId, IdentitySource.Mapped, _clock.GetUtcNow(), contexto.Principal?.UserId);
-        if (!await _store.TryAddIdentityAsync(vinculo, cancellationToken))
+        if (!await _store.TryAddIdentityAsync(vinculo, Pending(contexto, "identity.embed.identity.map", "external_identity", vinculo.Id.ToString()), cancellationToken))
         {
             throw new EmbeddedConflictException("Este usuário externo ou este usuário interno já tem vínculo nesta conexão.");
         }
 
-        await _audit.WriteAsync(new AuditEntry("identity.embed.identity.map", "external_identity", vinculo.Id.ToString(), AuditOutcome.Success), cancellationToken);
         return ExternalIdentityView.From(vinculo);
     }
 
@@ -181,13 +176,11 @@ public sealed class IntegrationAdminService
         _ = await LoadAsync(contexto.TenantId, connectionId, forUpdate: false, cancellationToken);
         var vinculo = await _store.FindIdentityByIdAsync(contexto.TenantId, connectionId, identityId, cancellationToken) ?? throw new IdentityResourceNotFoundException("Vínculo");
 
-        await _store.SetIdentityStatusAsync(contexto.TenantId, connectionId, identityId, status, cancellationToken);
+        await _store.SetIdentityStatusAsync(contexto.TenantId, connectionId, identityId, status, Pending(contexto, "identity.embed.identity.status", "external_identity", identityId.ToString()), cancellationToken);
         if (status == ExternalIdentityStatus.Disabled)
         {
-            await _store.RevokeEmbeddedSessionsAsync(contexto.TenantId, connectionId, vinculo.ExternalUserId, _clock.GetUtcNow(), cancellationToken);
+            await _store.RevokeEmbeddedSessionsAsync(contexto.TenantId, connectionId, vinculo.ExternalUserId, null, _clock.GetUtcNow(), cancellationToken);
         }
-
-        await _audit.WriteAsync(new AuditEntry("identity.embed.identity.status", "external_identity", identityId.ToString(), AuditOutcome.Success), cancellationToken);
     }
 
     /// <summary>Revoga as sessões embutidas ativas da conexão (de um usuário externo, se informado). Devolve quantas revogou.</summary>
@@ -196,9 +189,7 @@ public sealed class IntegrationAdminService
         var contexto = await RequireAdminAsync("identity.embed.session.revoke", "integration_connection", connectionId.ToString(), cancellationToken);
         _ = await LoadAsync(contexto.TenantId, connectionId, forUpdate: false, cancellationToken);
         var externo = string.IsNullOrWhiteSpace(externalUserId) ? null : ExternalIdentity.NormalizeExternalUserId(externalUserId);
-        var total = await _store.RevokeEmbeddedSessionsAsync(contexto.TenantId, connectionId, externo, _clock.GetUtcNow(), cancellationToken);
-        await _audit.WriteAsync(new AuditEntry("identity.embed.session.revoke", "integration_connection", connectionId.ToString(), AuditOutcome.Success), cancellationToken);
-        return total;
+        return await _store.RevokeEmbeddedSessionsAsync(contexto.TenantId, connectionId, externo, Pending(contexto, "identity.embed.session.revoke", "integration_connection", connectionId.ToString()), _clock.GetUtcNow(), cancellationToken);
     }
 
     private async Task<CreatedKeyView> AddKeyAsync(Guid connectionId, bool rotate, TimeSpan? grace, CancellationToken cancellationToken)
@@ -228,12 +219,12 @@ public sealed class IntegrationAdminService
         var (id, segredo) = IntegrationKey.GenerateIdentifiers();
         var protegido = _protector.Protect(segredo, new IntegrationSecretBinding(contexto.TenantId, connectionId, id));
         var chave = IntegrationKey.Create(contexto.TenantId, connectionId, id, protegido.MasterKeyId, protegido.Ciphertext, agora, contexto.Principal?.UserId);
-        if (!await _store.TryAddKeyAsync(chave, fimDasAntigas, agora, cancellationToken))
+        // A chave, o vencimento programado das antigas e a entrada de auditoria confirmam na MESMA transação; o segredo só sai daqui depois do commit e a trilha nunca falha depois dele.
+        if (!await _store.TryAddKeyAsync(chave, fimDasAntigas, Pending(contexto, operacao, "integration_key", id.ToString("N")), agora, cancellationToken))
         {
             throw new EmbeddedConflictException($"A conexão já tem {IntegrationKey.MaxActivePerConnection} chaves ativas: revogue uma antes.");
         }
 
-        await _audit.WriteAsync(new AuditEntry(operacao, "integration_key", id.ToString("N"), AuditOutcome.Success), cancellationToken);
         return new CreatedKeyView(chave.PublicId, segredo, agora, fimDasAntigas);
     }
 
@@ -246,6 +237,10 @@ public sealed class IntegrationAdminService
         await AuditedAccess.RequireAsync(_audit, contexto, Permission.EmbedManage, null, operation, resourceType, resourceId, cancellationToken);
         return contexto;
     }
+
+    /// <summary>A entrada de auditoria do SUCESSO guardada na transação do efeito (outbox): ator e origem do contexto do administrador, instante da operação.</summary>
+    private PendingAudit Pending(RequestContext contexto, string operation, string resourceType, string resourceId) =>
+        PendingAudit.Create(contexto.TenantId, new AuditEntry(operation, resourceType, resourceId, AuditOutcome.Success), contexto.Principal?.UserId, contexto.Origin, _clock.GetUtcNow());
 
     private Task DenyAsync(string operation, Guid userId, CancellationToken cancellationToken) =>
         _audit.WriteAsync(new AuditEntry(operation, "user", userId.ToString(), AuditOutcome.Denied), cancellationToken);

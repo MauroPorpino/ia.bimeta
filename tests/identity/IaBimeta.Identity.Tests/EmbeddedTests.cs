@@ -459,7 +459,7 @@ public class EmbeddedServicesTests
         var troca = await c.Troca.ExchangeAsync(ticket.Ticket, Verifier, "https://erp.exemplo.com.br");
 
         // Antes: o sucesso era gravado na trilha DEPOIS do commit (uma falha ali deixava o ticket consumido com a resposta perdida). Agora a entrada vai com o efeito, com o ator e a origem da hora da operação.
-        var pendente = Assert.Single(c.Embedded.AuditoriaPendente);
+        var pendente = Assert.Single(c.Embedded.AuditoriaPendente, a => a.Operation == "identity.embed.exchange");
         Assert.Equal("identity.embed.exchange", pendente.Operation);
         Assert.Equal(troca.SessionId.ToString(), pendente.ResourceId);
         Assert.Equal(IaBimeta.Audit.Contracts.AuditOutcome.Success, pendente.Outcome);
@@ -467,6 +467,18 @@ public class EmbeddedServicesTests
         Assert.Equal(PendingAudit.AuthenticationOrigin, pendente.ActorOrigin);
         Assert.Equal(c.Relogio.GetUtcNow(), pendente.CreatedAt);
         Assert.DoesNotContain(c.Auditoria.Eventos, e => e.Entrada.Operation == "identity.embed.exchange" && e.Entrada.Outcome == IaBimeta.Audit.Contracts.AuditOutcome.Success);
+    }
+
+    [Fact]
+    public async Task A_emissao_do_ticket_e_o_provisionamento_sao_auditados_pelo_outbox_e_nao_pela_gravacao_sincrona()
+    {
+        var c = new Cenario();
+
+        var ticket = await c.Tickets.IssueLaunchTicketAsync(c.Integracao, c.Pedido("u-1", Verifier));
+
+        Assert.Contains(c.Embedded.AuditoriaPendente, a => a.Operation == "identity.embed.ticket.issue" && a.ResourceType == "launch_ticket" && a.Outcome == IaBimeta.Audit.Contracts.AuditOutcome.Success);
+        Assert.DoesNotContain(c.Auditoria.Eventos, e => e.Entrada.Operation == "identity.embed.ticket.issue" && e.Entrada.Outcome == IaBimeta.Audit.Contracts.AuditOutcome.Success);
+        Assert.False(string.IsNullOrEmpty(ticket.Ticket));
     }
 
     [Theory]
