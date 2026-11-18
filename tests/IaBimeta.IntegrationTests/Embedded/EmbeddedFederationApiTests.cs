@@ -201,7 +201,10 @@ public sealed class EmbeddedFederationApiTests(PostgresFixture banco)
 
         Assert.Equal(HttpStatusCode.BadRequest, resposta.StatusCode);
         Assert.Equal(0, await ContarAsync("SELECT count(*) FROM identity.launch_tickets WHERE tenant_id = @t", ("t", c.Tenant.TenantId.Value)));
-        Assert.True(await ContarAsync("SELECT count(*) FROM audit.audit_events WHERE tenant_id = @t AND operation = 'identity.embed.ticket.issue' AND outcome = 2", ("t", c.Tenant.TenantId.Value)) >= 1);
+        // Exatamente UMA negação da emissão e NENHUM sucesso de emissão (a recusa não pode deixar auditoria de sucesso).
+        Assert.Equal(1, await ContarAsync("SELECT count(*) FROM audit.audit_events WHERE tenant_id = @t AND operation = 'identity.embed.ticket.issue' AND outcome = 2", ("t", c.Tenant.TenantId.Value)));
+        Assert.Equal(0, await ContarAsync("SELECT count(*) FROM audit.audit_events WHERE tenant_id = @t AND operation = 'identity.embed.ticket.issue' AND outcome = 1", ("t", c.Tenant.TenantId.Value)));
+        Assert.Equal("identity.embed.connection.create=1;identity.embed.key.create=1", await EmbeddedTestSupport.ResumoDaOutboxAsync(c.Tenant.TenantId.Value));
     }
 
     [Fact]
@@ -696,7 +699,8 @@ public sealed class EmbeddedFederationApiTests(PostgresFixture banco)
         var ticket = await c.Erp.EmitirAsync("u-seg", EmbeddedTestSupport.Challenge(EmbeddedTestSupport.NovoVerifier()));
 
         // A auditoria do sucesso da troca é guardada na transação e entregue pelo Worker: aqui o teste faz a entrega.
-        Assert.True(await EmbeddedTestSupport.EntregarAuditoriaAsync(c.Api, c.Tenant.TenantId) >= 1);
+        Assert.Equal("identity.embed.connection.create=1;identity.embed.exchange=1;identity.embed.identity.provision=1;identity.embed.key.create=1;identity.embed.ticket.issue=2", await EmbeddedTestSupport.ResumoDaOutboxAsync(c.Tenant.TenantId.Value));
+        Assert.Equal(6, await EmbeddedTestSupport.EntregarAuditoriaAsync(c.Api, c.Tenant.TenantId));
 
         await using var conexao = new NpgsqlConnection(TestDatabase.ConnectionString);
         await conexao.OpenAsync();

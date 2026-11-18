@@ -87,8 +87,10 @@ public sealed class IntegrationAdminService
         var agora = _clock.GetUtcNow();
         conexao.SetStatus(status, agora);
 
-        // A mudança de estado e a entrada de auditoria confirmam juntas (a entrada é gravada mesmo sem mudança: a ação foi pedida e atendida). A revogação das sessões que segue é idempotente e repetível.
-        await _store.SaveChangesAsync(contexto.TenantId, Pending(contexto, operacao, "integration_connection", conexao.Id.ToString()), cancellationToken);
+        // O estado novo, a marca de revogação (só ao desativar) e a entrada de auditoria confirmam JUNTOS (a entrada é gravada mesmo sem mudança: a ação foi pedida e atendida). O que segue é só a limpeza física das
+        // sessões e tickets, idempotente e repetível: a segurança já está na marca, que a reativação não desfaz.
+        var marca = status == ConnectionStatus.Disabled ? agora : (DateTimeOffset?)null;
+        await _store.SaveConnectionStatusAsync(contexto.TenantId, connectionId, Pending(contexto, operacao, "integration_connection", conexao.Id.ToString()), marca, cancellationToken);
 
         if (status == ConnectionStatus.Disabled)
         {
@@ -176,10 +178,12 @@ public sealed class IntegrationAdminService
         _ = await LoadAsync(contexto.TenantId, connectionId, forUpdate: false, cancellationToken);
         var vinculo = await _store.FindIdentityByIdAsync(contexto.TenantId, connectionId, identityId, cancellationToken) ?? throw new IdentityResourceNotFoundException("Vínculo");
 
-        await _store.SetIdentityStatusAsync(contexto.TenantId, connectionId, identityId, status, Pending(contexto, "identity.embed.identity.status", "external_identity", identityId.ToString()), cancellationToken);
+        // Ao desativar: estado, marca de revogação e auditoria confirmam juntos; depois só a limpeza física (repetível).
+        var agora = _clock.GetUtcNow();
+        await _store.SetIdentityStatusAsync(contexto.TenantId, connectionId, identityId, status, Pending(contexto, "identity.embed.identity.status", "external_identity", identityId.ToString()), agora, cancellationToken);
         if (status == ExternalIdentityStatus.Disabled)
         {
-            await _store.RevokeEmbeddedSessionsAsync(contexto.TenantId, connectionId, vinculo.ExternalUserId, null, _clock.GetUtcNow(), cancellationToken);
+            await _store.RevokeEmbeddedSessionsAsync(contexto.TenantId, connectionId, vinculo.ExternalUserId, null, agora, cancellationToken);
         }
     }
 

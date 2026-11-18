@@ -133,6 +133,27 @@ internal sealed class EmbeddedStore : IEmbeddedStore
         await _db.SaveChangesAsync(cancellationToken);
     }
 
+    public Task SaveConnectionStatusAsync(TenantId tenantId, Guid connectionId, PendingAudit audit, DateTimeOffset? revokeSessionsAt, CancellationToken cancellationToken) =>
+        GuardAsync(async () =>
+        {
+            // E1-R, sexta rodada: o estado novo da conexão, a marca de revogação (monotônica no banco: vale o maior instante) e a auditoria confirmam JUNTOS. Antes, o estado confirmava primeiro e a marca ia numa transação
+            // seguinte: uma falha entre as duas deixava a conexão desativada SEM marca, e uma reativação devolvia a validade às sessões anteriores. Ordem de travas: a conexão primeiro (o UPDATE da marca a trava), e só
+            // depois a auditoria, que só tem FK para o tenant; nenhuma outra linha é travada aqui, então não há ciclo com a criação de chave, a emissão de ticket nem a troca (todas começam pela conexão).
+            using var escopo = _db.UseAuthenticationTenant(tenantId);
+            await using var transacao = await BeginAsync(cancellationToken);
+            if (revokeSessionsAt is { } agora)
+            {
+                await _db.IntegrationConnections.IgnoreQueryFilters()
+                    .Where(c => c.TenantId == tenantId && c.Id == connectionId)
+                    .ExecuteUpdateAsync(set => set.SetProperty(c => c.SessionsRevokedAt, c => c.SessionsRevokedAt == null || c.SessionsRevokedAt < agora ? agora : c.SessionsRevokedAt), cancellationToken);
+            }
+
+            _db.AuditOutbox.Add(audit);
+            await _db.SaveChangesAsync(cancellationToken);
+            await transacao.CommitAsync(cancellationToken);
+            return true;
+        });
+
     public async Task<IntegrationKeyLookup?> FindKeyAsync(Guid keyId, CancellationToken cancellationToken)
     {
         var chave = await _db.IntegrationKeys.IgnoreQueryFilters().AsNoTracking().FirstOrDefaultAsync(k => k.Id == keyId, cancellationToken);
@@ -273,13 +294,18 @@ internal sealed class EmbeddedStore : IEmbeddedStore
         }
     }
 
-    public async Task<bool> SetIdentityStatusAsync(TenantId tenantId, Guid connectionId, Guid identityId, ExternalIdentityStatus status, PendingAudit audit, CancellationToken cancellationToken)
+    public async Task<bool> SetIdentityStatusAsync(TenantId tenantId, Guid connectionId, Guid identityId, ExternalIdentityStatus status, PendingAudit audit, DateTimeOffset now, CancellationToken cancellationToken)
     {
         using var escopo = _db.UseAuthenticationTenant(tenantId);
         await using var transacao = await BeginAsync(cancellationToken);
-        var alteradas = await _db.ExternalIdentities.IgnoreQueryFilters()
-            .Where(i => i.TenantId == tenantId && i.ConnectionId == connectionId && i.Id == identityId)
-            .ExecuteUpdateAsync(set => set.SetProperty(i => i.Status, status), cancellationToken);
+        var vinculos = _db.ExternalIdentities.IgnoreQueryFilters()
+            .Where(i => i.TenantId == tenantId && i.ConnectionId == connectionId && i.Id == identityId);
+
+        // E1-R, sexta rodada: DESATIVAR muda o estado e avança a marca de revogação (monotônica: vale o maior instante) no MESMO UPDATE, e a auditoria entra na mesma transação. Reativar nunca recua a marca, então as
+        // sessões e tickets de antes da desativação continuam sem validade. A limpeza física das sessões é um passo posterior e repetível. Só a linha do vínculo é travada aqui (ordem canônica, item 3).
+        var alteradas = status == ExternalIdentityStatus.Disabled
+            ? await vinculos.ExecuteUpdateAsync(set => set.SetProperty(i => i.Status, status).SetProperty(i => i.SessionsRevokedAt, i => i.SessionsRevokedAt == null || i.SessionsRevokedAt < now ? now : i.SessionsRevokedAt), cancellationToken)
+            : await vinculos.ExecuteUpdateAsync(set => set.SetProperty(i => i.Status, status), cancellationToken);
         if (alteradas == 1)
         {
             _db.AuditOutbox.Add(audit);
@@ -305,13 +331,21 @@ internal sealed class EmbeddedStore : IEmbeddedStore
             await transacao.CommitAsync(cancellationToken);
             return true;
         }
-        catch (DbUpdateException ex) when (IsIdentityConflict(ex))
+        catch (Exception ex)
         {
-            await transacao.RollbackAsync(cancellationToken);
+            // E1-R, sexta rodada: depois de uma gravação desfeita NADA do que ela adicionou pode continuar rastreado, e a auditoria incluída. Se a entrada de auditoria ficasse como Added, o próximo SaveChanges do mesmo
+            // DbContext (ex.: a recusa que a corrida gera logo a seguir) a persistiria: um sucesso de provisionamento de uma criação que NÃO aconteceu. Todo caminho de falha desanexa as quatro entidades.
             _db.Entry(identity).State = EntityState.Detached;
             _db.Entry(grant).State = EntityState.Detached;
             _db.Entry(user).State = EntityState.Detached;
-            return false;
+            _db.Entry(audit).State = EntityState.Detached;
+            if (ex is DbUpdateException du && IsIdentityConflict(du))
+            {
+                await transacao.RollbackAsync(cancellationToken);
+                return false;
+            }
+
+            throw;
         }
     }
 

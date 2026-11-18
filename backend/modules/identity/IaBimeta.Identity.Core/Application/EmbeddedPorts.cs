@@ -39,6 +39,12 @@ public interface IEmbeddedStore
 
     Task SaveChangesAsync(TenantId tenantId, PendingAudit audit, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Grava a mudança de estado da conexão (rastreada) e, se <paramref name="revokeSessionsAt"/> vier, avança a marca de revogação (monotônica) e a auditoria na MESMA transação: ou os três confirmam, ou nenhum.
+    /// A limpeza física das sessões é outro passo, repetível.
+    /// </summary>
+    Task SaveConnectionStatusAsync(TenantId tenantId, Guid connectionId, PendingAudit audit, DateTimeOffset? revokeSessionsAt, CancellationToken cancellationToken);
+
     /// <summary>A chave e a conexão pelo identificador público da chave (único). Não filtra por tenant: o tenant é o da linha.</summary>
     Task<IntegrationKeyLookup?> FindKeyAsync(Guid keyId, CancellationToken cancellationToken);
 
@@ -65,7 +71,8 @@ public interface IEmbeddedStore
     /// <summary>Grava o vínculo. Devolve <c>false</c> se o identificador externo ou o usuário já têm vínculo nesta conexão.</summary>
     Task<bool> TryAddIdentityAsync(ExternalIdentity identity, PendingAudit audit, CancellationToken cancellationToken);
 
-    Task<bool> SetIdentityStatusAsync(TenantId tenantId, Guid connectionId, Guid identityId, ExternalIdentityStatus status, PendingAudit audit, CancellationToken cancellationToken);
+    /// <summary>Muda o estado do vínculo. Ao DESATIVAR, o estado, a marca de revogação (monotônica, em <paramref name="now"/>) e a auditoria confirmam na MESMA transação; a limpeza física das sessões é outro passo.</summary>
+    Task<bool> SetIdentityStatusAsync(TenantId tenantId, Guid connectionId, Guid identityId, ExternalIdentityStatus status, PendingAudit audit, DateTimeOffset now, CancellationToken cancellationToken);
 
     /// <summary>Cria, juntos ou nenhum, o usuário federado, a concessão e o vínculo. Devolve <c>false</c> se o vínculo já existe (corrida entre duas primeiras entradas): quem chama relê o existente.</summary>
     Task<bool> TryProvisionFederatedUserAsync(User user, UserOrganizationGrant grant, ExternalIdentity identity, PendingAudit audit, CancellationToken cancellationToken);

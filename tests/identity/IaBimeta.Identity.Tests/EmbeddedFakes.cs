@@ -41,6 +41,17 @@ internal sealed class EmbeddedEmMemoria : IEmbeddedStore
     public Task<IReadOnlyList<IntegrationConnection>> ListConnectionsAsync(TenantId tenantId, CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<IntegrationConnection>>(Conexoes.Where(c => c.TenantId == tenantId).ToList());
 
+    public Task SaveConnectionStatusAsync(TenantId tenantId, Guid connectionId, PendingAudit audit, DateTimeOffset? revokeSessionsAt, CancellationToken cancellationToken)
+    {
+        if (revokeSessionsAt is { } marca)
+        {
+            Conexoes.FirstOrDefault(c => c.TenantId == tenantId && c.Id == connectionId)?.MarkSessionsRevoked(marca);
+        }
+
+        AuditoriaPendente.Add(audit);
+        return Task.CompletedTask;
+    }
+
     public Task SaveChangesAsync(TenantId tenantId, PendingAudit audit, CancellationToken cancellationToken)
     {
         AuditoriaPendente.Add(audit);
@@ -125,10 +136,15 @@ internal sealed class EmbeddedEmMemoria : IEmbeddedStore
         return Task.FromResult(true);
     }
 
-    public Task<bool> SetIdentityStatusAsync(TenantId tenantId, Guid connectionId, Guid identityId, ExternalIdentityStatus status, PendingAudit audit, CancellationToken cancellationToken)
+    public Task<bool> SetIdentityStatusAsync(TenantId tenantId, Guid connectionId, Guid identityId, ExternalIdentityStatus status, PendingAudit audit, DateTimeOffset now, CancellationToken cancellationToken)
     {
         var vinculo = Vinculos.FirstOrDefault(i => i.TenantId == tenantId && i.ConnectionId == connectionId && i.Id == identityId);
         vinculo?.SetStatus(status);
+        if (status == ExternalIdentityStatus.Disabled)
+        {
+            vinculo?.MarkSessionsRevoked(now);
+        }
+
         if (vinculo is not null)
         {
             AuditoriaPendente.Add(audit);

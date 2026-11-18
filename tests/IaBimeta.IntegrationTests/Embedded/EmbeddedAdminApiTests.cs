@@ -78,7 +78,10 @@ public sealed class EmbeddedAdminApiTests(PostgresFixture banco)
         }
 
         // As negações entram na trilha.
-        Assert.True(int.Parse(await UnicoAsync("SELECT count(*) FROM audit.audit_events WHERE tenant_id = @t AND operation LIKE 'identity.embed.%' AND outcome = 2", ("t", c.Tenant.TenantId.Value))) >= 3);
+        // Exatamente as negações feitas (três usuários x três tentativas), por operação; nenhuma negação a mais ou a menos.
+        Assert.Equal(
+            "identity.embed.connection.create=3;identity.embed.connection.list=3;identity.embed.key.create=3",
+            await UnicoAsync("SELECT string_agg(operation || '=' || n, ';' ORDER BY operation) FROM (SELECT operation, count(*) n FROM audit.audit_events WHERE tenant_id = @t AND operation LIKE 'identity.embed.%' AND outcome = 2 GROUP BY operation) x", ("t", c.Tenant.TenantId.Value)));
     }
 
     [Theory]

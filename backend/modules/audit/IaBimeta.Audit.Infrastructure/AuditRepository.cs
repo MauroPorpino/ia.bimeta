@@ -43,6 +43,13 @@ internal sealed class AuditRepository : IAuditRepository
         {
             _db.Entry(auditEvent).State = EntityState.Detached;
         }
+        catch
+        {
+            // E1-R, sexta rodada: uma falha real de persistência não pode deixar o evento rastreado como Added no contexto reutilizado pelo lote de entrega: o SaveChanges da entrada SEGUINTE tentaria gravá-lo de novo
+            // (com o ator e o recurso da entrada errada). A falha continua subindo ao chamador, que a registra e adia a linha.
+            _db.Entry(auditEvent).State = EntityState.Detached;
+            throw;
+        }
     }
 
     public async Task<IReadOnlyList<AuditEvent>> ListAsync(AuditQuery query, CancellationToken cancellationToken)

@@ -108,6 +108,51 @@ internal static class EmbeddedTestSupport
         return await escopo.ServiceProvider.GetRequiredService<IaBimeta.Identity.Application.IIdentityAuditOutbox>().FlushAsync(100, CancellationToken.None);
     }
 
+    /// <summary>
+    /// Resumo EXATO do que a outbox do tenant guarda agora, "operação=quantidade" em ordem alfabética. Existe para as asserções detectarem auditoria ESPÚRIA (uma operação a mais, ou a mais de uma vez): comparar com
+    /// "pelo menos N" deixaria passar um evento de sucesso de uma criação que foi desfeita.
+    /// </summary>
+    public static Task<string> ResumoDaOutboxAsync(Guid tenant) =>
+        ResumoAsync("SELECT operation, count(*) FROM identity.audit_outbox WHERE tenant_id = @t GROUP BY operation ORDER BY operation", tenant);
+
+    /// <summary>O mesmo resumo para a trilha do tenant, só das operações do Embedded.</summary>
+    public static Task<string> ResumoDaTrilhaAsync(Guid tenant) =>
+        ResumoAsync("SELECT operation, count(*) FROM audit.audit_events WHERE tenant_id = @t AND operation LIKE 'identity.embed.%' GROUP BY operation ORDER BY operation", tenant);
+
+    /// <summary>A linha de auditoria como ficou (ator, tipo e recurso), para conferir QUEM e SOBRE O QUÊ, não só quantas.</summary>
+    public static async Task<IReadOnlyList<(Guid? Ator, string Tipo, string Recurso)>> LinhasDaOutboxAsync(Guid tenant, string operacao)
+    {
+        await using var conexao = new Npgsql.NpgsqlConnection(TestDatabase.ConnectionString);
+        await conexao.OpenAsync();
+        await using var comando = new Npgsql.NpgsqlCommand("SELECT actor_user_id, resource_type, COALESCE(resource_id, '') FROM identity.audit_outbox WHERE tenant_id = @t AND operation = @o ORDER BY created_at, id", conexao);
+        comando.Parameters.AddWithValue("t", tenant);
+        comando.Parameters.AddWithValue("o", operacao);
+        var linhas = new List<(Guid?, string, string)>();
+        await using var leitor = await comando.ExecuteReaderAsync();
+        while (await leitor.ReadAsync())
+        {
+            linhas.Add((leitor.IsDBNull(0) ? null : leitor.GetGuid(0), leitor.GetString(1), leitor.GetString(2)));
+        }
+
+        return linhas;
+    }
+
+    private static async Task<string> ResumoAsync(string sql, Guid tenant)
+    {
+        await using var conexao = new Npgsql.NpgsqlConnection(TestDatabase.ConnectionString);
+        await conexao.OpenAsync();
+        await using var comando = new Npgsql.NpgsqlCommand(sql, conexao);
+        comando.Parameters.AddWithValue("t", tenant);
+        var partes = new List<string>();
+        await using var leitor = await comando.ExecuteReaderAsync();
+        while (await leitor.ReadAsync())
+        {
+            partes.Add($"{leitor.GetString(0)}={leitor.GetInt64(1)}");
+        }
+
+        return string.Join(";", partes);
+    }
+
     public static string NovoVerifier() => Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(32));
 
     public static string Challenge(string verifier) => Base64Url.EncodeToString(SHA256.HashData(Encoding.ASCII.GetBytes(verifier)));

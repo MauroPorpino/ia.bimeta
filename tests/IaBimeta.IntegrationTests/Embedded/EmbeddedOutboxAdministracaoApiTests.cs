@@ -123,7 +123,12 @@ public sealed class EmbeddedOutboxAdministracaoApiTests(PostgresFixture banco)
         Assert.StartsWith("ibt_", emitido.Ticket);
 
         // A entrega grava UM evento, sem o segredo, e só então apaga a linha.
-        Assert.True(await EmbeddedTestSupport.EntregarAuditoriaAsync(c.Api, c.Tenant.TenantId) >= 1);
+        // O que a outbox tem AGORA é exatamente isto (a criação da chave, o ticket e o provisionamento do usuário novo): nenhuma auditoria a mais, nenhuma a menos.
+        Assert.Equal("identity.embed.identity.provision=1;identity.embed.key.create=1;identity.embed.ticket.issue=1", await EmbeddedTestSupport.ResumoDaOutboxAsync(tenant));
+        var linhaDaChave = Assert.Single(await EmbeddedTestSupport.LinhasDaOutboxAsync(tenant, "identity.embed.key.create"));
+        Assert.Equal((c.Admin.Id, "integration_key"), (linhaDaChave.Ator, linhaDaChave.Tipo));
+        Assert.Equal(criada.KeyId, "ibk_" + linhaDaChave.Recurso);
+        Assert.Equal(3, await EmbeddedTestSupport.EntregarAuditoriaAsync(c.Api, c.Tenant.TenantId));
         Assert.Equal(0, await NoOutboxAsync(tenant, "identity.embed.key.create"));
         Assert.Equal(2, await NaTrilhaAsync(tenant, "identity.embed.key.create")); // a da preparação e esta
         var tudo = await EscalarAsync("SELECT count(*) FROM audit.audit_events e WHERE e.tenant_id = @t AND row_to_json(e)::text LIKE '%' || @s || '%'", ("t", tenant), ("s", criada.Secret));
@@ -151,7 +156,11 @@ public sealed class EmbeddedOutboxAdministracaoApiTests(PostgresFixture banco)
 
         // Repetir NÃO é necessário (e não criaria uma terceira chave utilizável): a chave anterior continua valendo até o vencimento.
         falha.Ativa = false;
-        Assert.True(await EmbeddedTestSupport.EntregarAuditoriaAsync(c.Api, c.Tenant.TenantId) >= 1);
+        Assert.Equal("identity.embed.key.rotate=1", await EmbeddedTestSupport.ResumoDaOutboxAsync(tenant));
+        var linhaDaRotacao = Assert.Single(await EmbeddedTestSupport.LinhasDaOutboxAsync(tenant, "identity.embed.key.rotate"));
+        Assert.Equal((c.Admin.Id, "integration_key"), (linhaDaRotacao.Ator, linhaDaRotacao.Tipo));
+        Assert.Equal(nova.KeyId, "ibk_" + linhaDaRotacao.Recurso);
+        Assert.Equal(1, await EmbeddedTestSupport.EntregarAuditoriaAsync(c.Api, c.Tenant.TenantId));
         Assert.Equal(1, await NaTrilhaAsync(tenant, "identity.embed.key.rotate"));
     }
 
@@ -213,8 +222,13 @@ public sealed class EmbeddedOutboxAdministracaoApiTests(PostgresFixture banco)
             Assert.Equal(operacao == "identity.embed.connection.create" ? 1 : 0, await NaTrilhaAsync(tenant, operacao)); // a única na trilha é a da conexão criada na preparação
         }
 
+        // Exatamente estas cinco, uma vez cada: nenhuma auditoria a mais (ex.: de uma criação desfeita), nenhuma a menos.
+        Assert.Equal("identity.embed.connection.create=1;identity.embed.connection.update=1;identity.embed.identity.provision=1;identity.embed.session.revoke=1;identity.embed.ticket.issue=1", await EmbeddedTestSupport.ResumoDaOutboxAsync(tenant));
+        var provisao = Assert.Single(await EmbeddedTestSupport.LinhasDaOutboxAsync(tenant, "identity.embed.identity.provision"));
+        Assert.Equal("external_identity", provisao.Tipo);
+        Assert.Equal(1, await EscalarAsync("SELECT count(*) FROM identity.external_identities WHERE tenant_id = @t AND id::text = @r AND user_id = @u", ("t", tenant), ("r", provisao.Recurso), ("u", provisao.Ator)));
         falha.Ativa = false;
-        Assert.True(await EmbeddedTestSupport.EntregarAuditoriaAsync(c.Api, c.Tenant.TenantId) >= 5);
+        Assert.Equal(5, await EmbeddedTestSupport.EntregarAuditoriaAsync(c.Api, c.Tenant.TenantId));
         foreach (var operacao in new[] { "identity.embed.connection.create", "identity.embed.connection.update", "identity.embed.ticket.issue", "identity.embed.identity.provision", "identity.embed.session.revoke" })
         {
             Assert.Equal(0, await NoOutboxAsync(tenant, operacao));

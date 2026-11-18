@@ -236,9 +236,12 @@ public sealed class EmbeddedAuditoriaDuravelApiTests(PostgresFixture banco)
         var tenantA = a.Tenant.TenantId.Value;
         var tenantB = b.Tenant.TenantId.Value;
         var totalA = await NoOutboxAsync(tenantA);
-        Assert.True(totalA >= 6 + 6, "preparação + 6 emissões + 6 trocas");
+        // Contagem EXATA, por operação: a preparação (conexão e chave) e, por entrada, a emissão do ticket, o provisionamento JIT e a troca.
+        Assert.Equal("identity.embed.connection.create=1;identity.embed.exchange=6;identity.embed.identity.provision=6;identity.embed.key.create=1;identity.embed.ticket.issue=6", await EmbeddedTestSupport.ResumoDaOutboxAsync(tenantA));
+        Assert.Equal(1 + 1 + 6 * 3, totalA);
         var totalB = await NoOutboxAsync(tenantB);
-        Assert.True(totalB >= 1 + 1, "preparação + emissão + troca");
+        Assert.Equal("identity.embed.connection.create=1;identity.embed.exchange=1;identity.embed.identity.provision=1;identity.embed.key.create=1;identity.embed.ticket.issue=1", await EmbeddedTestSupport.ResumoDaOutboxAsync(tenantB));
+        Assert.Equal(1 + 1 + 3, totalB);
 
         // Três "Workers" entregam o MESMO tenant ao mesmo tempo (FOR UPDATE SKIP LOCKED): 6 linhas, 6 eventos, nenhuma entregue duas vezes.
         var entregues = await Task.WhenAll(Enumerable.Range(0, 3).Select(_ => Task.Run(() => EmbeddedTestSupport.EntregarAuditoriaAsync(a.Api, a.Tenant.TenantId))));
