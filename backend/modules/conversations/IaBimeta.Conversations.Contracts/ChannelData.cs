@@ -24,4 +24,7 @@ public sealed record ChannelData(int Version, IReadOnlyDictionary<string, string
 public static class ChannelDataKeys
 {
     public const string TemplateName = "tpl.name";
+
+    /// <summary>Marcador de uma mensagem de FLUXO que termina numa pergunta de texto livre (valor <c>1</c>). Só o Conversations o lê (a decisão de saída); o Sender o ignora.</summary>
+    public const string FlowExpectsFreeText = "flow.expects-free-text";
 }

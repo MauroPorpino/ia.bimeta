@@ -161,6 +161,11 @@ internal sealed class QueueItemRepository : IQueueItemRepository
 
     public void RemoveOperation(QueueOperation operation) => _db.Operations.Remove(operation);
 
+    public async Task<IReadOnlyList<QueueItem>> ListBySessionsAsync(IReadOnlyCollection<Guid> sessionIds, CancellationToken cancellationToken) =>
+        sessionIds.Count == 0
+            ? Array.Empty<QueueItem>()
+            : await _db.Items.AsNoTracking().Where(i => sessionIds.Contains(i.SessionId)).OrderBy(i => i.EnteredAt).ThenBy(i => i.Id).ToListAsync(cancellationToken);
+
     public async Task<IReadOnlyList<QueueItem>> ListWaitingAsync(Guid queueId, int take, CancellationToken cancellationToken) =>
         await _db.Items.AsNoTracking()
             .Where(i => i.QueueId == queueId && i.Status == QueueItemStatus.Waiting && i.PendingKindValue == null)

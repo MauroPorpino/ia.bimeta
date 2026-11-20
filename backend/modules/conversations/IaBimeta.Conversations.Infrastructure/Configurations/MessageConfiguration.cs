@@ -67,6 +67,7 @@ internal sealed class MessageConfiguration : IEntityTypeConfiguration<Message>
 
         // Metadados opacos do canal (A3): a versão e os pares chave/valor (objeto jsonb de texto para texto), ou nenhum dos dois. O bloco reconstruído (ChannelData) não é coluna.
         builder.Property(m => m.ChannelDataVersion).HasColumnName("channel_data_version");
+        builder.Property(m => m.IsOptOutCommand).HasColumnName("opt_out_command").HasDefaultValue(false);
         builder.Property(m => m.ChannelDataValues).HasColumnName("channel_data").HasColumnType("jsonb").HasConversion(new ChannelDataValuesConverter(), new ChannelDataValuesComparer());
         builder.Ignore(m => m.ChannelData);
 

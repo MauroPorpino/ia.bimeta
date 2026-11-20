@@ -216,6 +216,7 @@ public sealed class WorkerHostTests(PostgresFixture banco)
                 "channels.media-fetch-requested/1",
                 "channels.provider-message-received/1",
                 "channels.provider-status-received/1",
+                "conversations.audit-requested/1", // E2.2: a entrega da auditoria do vínculo (outbox do módulo), interna ao Conversations
                 "conversations.conversation-locale-changed/1",
                 "conversations.flow-released-to-agent/1",
                 "conversations.handling-mode-changed/1",

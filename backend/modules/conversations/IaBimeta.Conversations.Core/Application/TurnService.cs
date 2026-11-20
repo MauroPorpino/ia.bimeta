@@ -57,6 +57,11 @@ public sealed class TurnService : ITurnCommands, IFlowCommands
         var recentes = await trabalho.RecentMessagesAsync(sessao.Id, limite, cancellationToken);
         var ultimaSaida = await trabalho.LastOutboundAsync(sessao.Id, cancellationToken);
 
+        // ADR 0041 (P1 da 1.ª auditoria): se a ÚLTIMA entrada é um comando de saída confirmado, o que estava pendente antes dele deixa de ser trabalho para a IA: o snapshot o mostra como já coberto, o executor encerra o turno
+        // por "nada pendente" e NENHUMA chamada ao modelo acontece (inclusive no turno sucessor de uma resposta defasada). Uma mensagem comum depois do comando volta a ser a última entrada e reabre o processamento.
+        var comandoDeSaida = await trabalho.LastInboundIsOptOutCommandAsync(sessao.Id, sessao.LastInboundSeq, cancellationToken);
+        var cobertaAte = comandoDeSaida ? sessao.LastInboundSeq : sessao.AnsweredThroughSeq;
+
         // O idioma da resposta é o efetivo desta conversa (não o do tenant), lido na mesma leitura travada do grant: uma
         // mudança de idioma avança a StateVersion, então a resposta escrita no idioma anterior é recusada.
         var conversa = await trabalho.FindSessionConversationAsync(sessao, cancellationToken)
@@ -66,10 +71,10 @@ public sealed class TurnService : ITurnCommands, IFlowCommands
             sessao.HandlingMode,
             sessao.StateVersion,
             sessao.LastInboundSeq,
-            sessao.AnsweredThroughSeq,
+            cobertaAte,
             sessao.ReplyDeliveryFailed,
             ultimaSaida?.DeliveryState,
-            recentes.Select(m => m.ToSnapshot(sessao.AnsweredThroughSeq)).ToList(),
+            recentes.Where(m => !m.IsOptOutCommand).Select(m => m.ToSnapshot(cobertaAte)).ToList(),
             conversa.Id,
             conversa.EffectiveLocale,
             conversa.LocaleSource,
@@ -229,6 +234,12 @@ public sealed class TurnService : ITurnCommands, IFlowCommands
             return new RegisterFlowMessageResult(motivo, null, sessao.AnsweredThroughSeq, sessao.LastInboundSeq);
         }
 
+        // ADR 0041 (P1 da 1.ª auditoria): com um comando de saída confirmado como última entrada, nenhuma mensagem de fluxo (nem a já preparada) é registrada. Lido sob a trava da sessão, no momento efetivo da persistência.
+        if (await trabalho.LastInboundIsOptOutCommandAsync(sessao.Id, sessao.LastInboundSeq, cancellationToken))
+        {
+            return new RegisterFlowMessageResult(RegisterReplyOutcome.OptOutCommand, null, sessao.AnsweredThroughSeq, sessao.LastInboundSeq);
+        }
+
         if (string.IsNullOrWhiteSpace(command.Text) || command.Text.Length > ConversationLimits.TextMaxLength)
         {
             return new RegisterFlowMessageResult(RegisterReplyOutcome.ShapeNotAllowed, null, sessao.AnsweredThroughSeq, sessao.LastInboundSeq);
@@ -243,7 +254,7 @@ public sealed class TurnService : ITurnCommands, IFlowCommands
         var agora = _clock.GetUtcNow();
         var sequencia = sessao.NextOutboundSeq(agora);
         var mensagem = Message.CreateFlowMessage(
-            contexto.TenantId, sessao.Id, conversa.Id, conversa.ChannelInstanceId, sequencia, command.TurnId, command.BasedOnInboundSeq, command.Text, agora, conversa.EffectiveLocale);
+            contexto.TenantId, sessao.Id, conversa.Id, conversa.ChannelInstanceId, sequencia, command.TurnId, command.BasedOnInboundSeq, command.Text, agora, conversa.EffectiveLocale, command.ExpectsFreeText);
         sessao.AcceptFlowMessage(command.BasedOnInboundSeq, command.CoversInbound, agora);
         trabalho.Add(mensagem);
         await trabalho.CommitAsync(

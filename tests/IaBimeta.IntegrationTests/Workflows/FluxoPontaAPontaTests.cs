@@ -236,6 +236,87 @@ public sealed class FluxoPontaAPontaTests(PostgresFixture banco)
         Assert.Equal(FlowStatus.Delegated, Assert.Single(await InstanciasAsync(a)).Status);
     }
 
+    // ------------------------------------------------------------ saída do cliente (ADR 0041, E2.5)
+
+    private static Task<int> ConsentimentosDoTenantAsync(CenarioDeAgentes a) =>
+        a.C.ComoAsync(a.C.ContextoDeSistema, sp => sp.GetRequiredService<IaBimeta.Conversations.Infrastructure.ConversationsDbContext>().Consents.AsNoTracking().CountAsync());
+
+    private static Task<List<IaBimeta.Conversations.Domain.OptOutReview>> OcorrenciasDoTenantAsync(CenarioDeAgentes a) =>
+        a.C.ComoAsync(a.C.ContextoDeSistema, sp => sp.GetRequiredService<IaBimeta.Conversations.Infrastructure.ConversationsDbContext>().OptOutReviews.AsNoTracking().ToListAsync());
+
+    [Fact]
+    public async Task Comando_de_saida_confirmado_nao_acorda_o_fluxo_nem_vira_resposta_da_pergunta_de_escolha_mas_fica_registrado()
+    {
+        var a = await CenarioAsync("fluxo-parar", Menu());
+        var r = await a.EntrarAsync("5511999990707", "oi");
+        await ProcessarAsync(a);
+        Assert.Single(await BotAsync(a, r.SessionId)); // o menu (pergunta de ESCOLHA: não espera texto livre, então PARAR é confirmado)
+
+        var parar = await a.EntrarAsync("5511999990707", "PARAR");
+        await ProcessarAsync(a);
+
+        // O consentimento foi revogado na ingestão; o fluxo NÃO consumiu a mensagem (senão seria resposta inválida e o menu seria repetido).
+        Assert.Equal(2, await ConsentimentosDoTenantAsync(a));
+        Assert.Empty(await OcorrenciasDoTenantAsync(a));
+        Assert.Single(await BotAsync(a, r.SessionId));
+        Assert.Equal(FlowStatus.WaitingInput, Assert.Single(await InstanciasAsync(a)).Status);
+        Assert.Empty(await a.TurnosAsync(r.SessionId));
+
+        // A mensagem continua registrada e visível, e o fluxo ainda responde a uma entrada comum depois.
+        Assert.Contains((await a.C.HistoricoAsync(r.SessionId))!.Items, m => m.Id == parar.MessageId && m.Text == "PARAR");
+        await a.EntrarAsync("5511999990707", "2");
+        await ProcessarAsync(a);
+        Assert.Equal(2, (await BotAsync(a, r.SessionId)).Count);
+    }
+
+    // P1 da 1.ª auditoria da E2 (Codex), caminho equivalente: efeito de fluxo já PENDENTE quando o PARAR chega não pode enviar a mensagem preparada.
+    [Fact]
+    public async Task Efeito_de_fluxo_pendente_antes_do_PARAR_nao_envia_a_mensagem_e_o_cliente_volta_a_ser_atendido()
+    {
+        var a = await CenarioAsync("fluxo-pend-parar", Menu());
+        var r = await a.EntrarAsync("5511999990909", "oi");
+        await a.RelayAsync(); // o roteador escolhe o fluxo; o executor AINDA não rodou (a mensagem do menu está por enviar)
+
+        var parar = await a.EntrarAsync("5511999990909", "PARAR");
+        await ProcessarAsync(a);
+
+        Assert.Empty(await BotAsync(a, r.SessionId)); // nenhuma mensagem de fluxo depois do comando
+        Assert.Equal(2, await ConsentimentosDoTenantAsync(a));
+        Assert.Contains((await a.C.HistoricoAsync(r.SessionId))!.Items, m => m.Id == parar.MessageId && m.Text == "PARAR");
+        Assert.All(await InstanciasAsync(a), i => Assert.NotEqual(FlowStatus.Failed, i.Status)); // cancelado, não falha
+
+        // Sem bloqueio permanente: uma mensagem comum depois é atendida pelo agente (a sessão voltou a ele).
+        await a.EntrarAsync("5511999990909", "Qual o horário de atendimento?");
+        await ProcessarAsync(a);
+        a.Avancar(TimeSpan.FromSeconds(5));
+        await a.RelayAsync();
+        await a.ExecutarAsync();
+        Assert.NotEmpty(await a.RespostasDaIAAsync(r.SessionId));
+    }
+
+    [Fact]
+    public async Task Pergunta_de_texto_livre_do_fluxo_grava_o_marcador_e_a_palavra_de_saida_e_ambigua_o_fluxo_recebe_e_nada_e_revogado()
+    {
+        var a = await CenarioAsync("fluxo-livre", Duvida());
+        var r = await a.EntrarAsync("5511999990808", "oi");
+        await ProcessarAsync(a);
+
+        // O marcador EXPLÍCITO do nó vai com a mensagem do fluxo (só o Conversations o lê).
+        var bot = await a.C.ComoAsync(a.C.ContextoDeSistema, sp => sp.GetRequiredService<IaBimeta.Conversations.Infrastructure.ConversationsDbContext>().Messages.AsNoTracking().Where(m => m.SessionId == r.SessionId && m.Author == MessageAuthor.Bot).ToListAsync());
+        var pergunta = Assert.Single(bot);
+        Assert.Equal("Qual é a sua dúvida?", pergunta.Text);
+        Assert.Equal("1", pergunta.ChannelDataValues![ChannelDataKeys.FlowExpectsFreeText]);
+
+        // PARAR é a primeira entrada depois da pergunta de texto livre: pode ser a resposta. Ambíguo: não revoga; o fluxo recebe a mensagem (processamento normal) e a ocorrência fica para a pessoa decidir.
+        var parar = await a.EntrarAsync("5511999990808", "PARAR");
+        await ProcessarAsync(a);
+
+        Assert.Equal(0, await ConsentimentosDoTenantAsync(a));
+        var ocorrencia = Assert.Single(await OcorrenciasDoTenantAsync(a));
+        Assert.Equal((parar.MessageId, IaBimeta.Conversations.Contracts.Commands.OptOutReviewReason.FlowFreeText), (ocorrencia.MessageId, ocorrencia.Reason));
+        Assert.NotEqual(FlowStatus.WaitingInput, Assert.Single(await InstanciasAsync(a)).Status); // o fluxo consumiu a mensagem como resposta
+    }
+
     // ------------------------------------------------------------ um dono por sessão
 
     [Fact]

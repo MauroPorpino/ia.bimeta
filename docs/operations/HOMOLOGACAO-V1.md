@@ -104,3 +104,7 @@ A V1 só é considerada concluída quando as fases 0 a 8 estiverem registradas c
 ## O que continua sem prova (declarado, não escondido)
 
 Docker Compose, Caddy, systemd, ClamAV real, pgvector, Ollama, Meta, OpenAI/Anthropic, ERP, desempenho e memória sob carga, restauração com dados reais, e o arraste/conexão de nós por mouse. Cada um tem sua fase acima; o resultado só vale depois de executado na VM.
+
+## Pendências obrigatórias do Embedded herdadas da E1-R (18/11/2026)
+
+A E1-R foi encerrada tecnicamente como APROVADA COM RESSALVAS (HEAD `2be8f77`), mas **nada do Embedded foi exercitado fora do Windows de desenvolvimento**. Antes da produção, cada item abaixo precisa constar como PASSOU: Docker Compose e PostgreSQL na VM, todas as migrations (aplicar e reverter), Worker (entrega e recuperação da outbox de auditoria), observabilidade (indicadores e alerta da outbox), Caddy (cabeçalhos, HTTPS, rotas públicas), integração com ERP e navegador (Edge, Safari, Chrome) e validações da Meta (número de teste, modelos, limites). Lista completa e ressalvas de backlog: `docs/architecture/EMBEDDED-BACKLOG.md`.

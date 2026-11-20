@@ -38,6 +38,7 @@ public sealed class QueueItemService
     private readonly IDeferredAudit _audit;
     private readonly IChannelReplyPolicy _channelReply;
     private readonly IAttachmentGateway _attachments;
+    private readonly IContactLinkQueries _customers;
 
     public QueueItemService(
         IQueueItemRepository items,
@@ -49,8 +50,10 @@ public sealed class QueueItemService
         TimeProvider clock,
         IDeferredAudit audit,
         IChannelReplyPolicy channelReply,
-        IAttachmentGateway attachments)
+        IAttachmentGateway attachments,
+        IContactLinkQueries customers)
     {
+        _customers = customers;
         _items = items;
         _queues = queues;
         _conversations = conversations;
@@ -1073,8 +1076,119 @@ public sealed class QueueItemService
             return null;
         }
 
-        var acesso = await ResolveAccessAsync(contexto, item, cancellationToken);
+        var acesso = await ResolveReadAccessAsync(contexto, item, cancellationToken);
         return acesso.CanSee(item) ? QueueItemView.From(item) : null;
+    }
+
+    private async Task<IReadOnlyList<QueueItemView>> ListGrantedCustomerItemsAsync(
+        RequestContext contexto, EmbeddedScope limite, Guid? queueId, QueueItemStatus? status, bool assignedToMe, int take, CancellationToken cancellationToken)
+    {
+        var sessoes = await _customers.ListSessionIdsOfGrantedCustomersAsync(MaxPageSize, cancellationToken);
+        var itens = (await _items.ListBySessionsAsync(sessoes, cancellationToken)).Where(i => i.OrganizationId == limite.OrganizationId);
+        itens = status is { } situacao ? itens.Where(i => i.Status == situacao) : itens.Where(i => i.Status != QueueItemStatus.Closed);
+        if (queueId is { } fila)
+        {
+            itens = itens.Where(i => i.QueueId == fila);
+        }
+
+        if (assignedToMe)
+        {
+            itens = itens.Where(i => i.AssignedUserId == contexto.Principal!.UserId);
+        }
+
+        // A mesma ordem da fila (mais urgente, depois mais antigo); cada fila é lida UMA vez.
+        var acessos = new Dictionary<Guid, QueueAccess>();
+        var visiveis = new List<QueueItem>();
+        foreach (var item in itens.OrderByDescending(i => i.Priority).ThenBy(i => i.EnteredAt).ThenBy(i => i.Id))
+        {
+            if (!acessos.TryGetValue(item.QueueId, out var acesso))
+            {
+                acesso = (await ResolveAccessAsync(contexto, item, cancellationToken)) with { GrantedCustomerSession = true };
+                acessos[item.QueueId] = acesso;
+            }
+
+            if (acesso.CanSee(item))
+            {
+                visiveis.Add(item);
+            }
+
+            if (visiveis.Count == take)
+            {
+                break;
+            }
+        }
+
+        return visiveis.Select(QueueItemView.From).ToList();
+    }
+
+    /// <summary>
+    /// O acesso de LEITURA a um item. É o de <see cref="ResolveAccessAsync(RequestContext, QueueItem, CancellationToken)"/> e, SÓ para a sessão embutida <c>CustomerOnly</c>, acrescenta a autorização por cliente (ADR 0041, D5):
+    /// o Conversations confirma AGORA (nada em cache) que a sessão do item é de um contato com vínculo ativo para um cliente autorizado na sessão embutida, na organização da conexão. Sem isso, o acesso é o de sempre, que para
+    /// <c>CustomerOnly</c> é nenhum (fora do limite). As operações que escrevem NÃO usam este método.
+    /// </summary>
+    private async Task<QueueAccess> ResolveReadAccessAsync(RequestContext contexto, QueueItem item, CancellationToken cancellationToken)
+    {
+        var acesso = await ResolveAccessAsync(contexto, item, cancellationToken);
+        return contexto.Principal?.Embedded is { CustomerOnly: true } && await _customers.IsSessionOfGrantedCustomerAsync(item.SessionId, cancellationToken)
+            ? acesso with { GrantedCustomerSession = true }
+            : acesso;
+    }
+
+    /// <summary>
+    /// O histórico por cliente (ADR 0041, seção 3): os itens das sessões dos contatos com vínculo ativo para o cliente, que o usuário JÁ enxerga, da conversa mais recente para a mais antiga. Exige sessão embutida com o cliente
+    /// autorizado nela, nos dois modos; <c>null</c> = cliente não autorizado (ou sessão que não é embutida): a mesma resposta de um cliente inexistente. A paginação é por sessão (chave estável) e uma página pode trazer menos
+    /// itens que o limite, porque o que o usuário não enxerga é omitido DEPOIS de paginar, nunca antes (nada vaza pelo tamanho da página).
+    /// </summary>
+    /// <exception cref="ContactCenterValidationException">Limite ou cursor inválidos.</exception>
+    public async Task<CustomerHistoryView?> GetCustomerHistoryAsync(string customerRef, int take, string? cursor, CancellationToken cancellationToken = default)
+    {
+        var contexto = _context.GetRequired();
+        if (take < 1 || take > MaxPageSize)
+        {
+            throw new ContactCenterValidationException($"O tamanho da página deve ser de 1 a {MaxPageSize}.");
+        }
+
+        CustomerSessionPage? pagina;
+        try
+        {
+            pagina = await _customers.ListCustomerSessionsAsync(customerRef, take, cursor, cancellationToken);
+        }
+        catch (InvalidPageCursorException)
+        {
+            throw new ContactCenterValidationException("O cursor da página é inválido.");
+        }
+
+        if (pagina is null)
+        {
+            return null;
+        }
+
+        // Uma consulta para todos os itens da página e um acesso por FILA distinta (nunca um por item).
+        var itens = await _items.ListBySessionsAsync(pagina.Items.Select(s => s.SessionId).ToList(), cancellationToken);
+        var porSessao = pagina.Items.ToDictionary(s => s.SessionId);
+        var acessos = new Dictionary<Guid, QueueAccess>();
+        var customerOnly = contexto.Principal?.Embedded is { CustomerOnly: true };
+        var visiveis = new List<(QueueItem Item, CustomerSessionRef Sessao)>();
+        foreach (var item in itens)
+        {
+            if (!acessos.TryGetValue(item.QueueId, out var acesso))
+            {
+                // No CustomerOnly as sessões já vieram da lista de clientes autorizados (a mesma consulta que as paginou): vale a autorização por cliente. No FullAttendant vale o que o usuário já enxerga pela fila.
+                acesso = (await ResolveAccessAsync(contexto, item, cancellationToken)) with { GrantedCustomerSession = customerOnly };
+                acessos[item.QueueId] = acesso;
+            }
+
+            if (acesso.CanSee(item))
+            {
+                visiveis.Add((item, porSessao[item.SessionId]));
+            }
+        }
+
+        var ordenados = visiveis
+            .OrderByDescending(v => v.Sessao.LastMessageAt).ThenByDescending(v => v.Sessao.SessionId).ThenByDescending(v => v.Item.EnteredAt).ThenByDescending(v => v.Item.Id)
+            .Select(v => new CustomerHistoryItem(v.Item.Id, v.Sessao.SessionId, v.Sessao.ContactId, v.Sessao.OpenedAt, v.Item.ClosedAt, v.Item.QueueId, v.Item.Status))
+            .ToList();
+        return new CustomerHistoryView(customerRef.Trim(), pagina.Resolved, pagina.Shared, ordenados, pagina.NextCursor);
     }
 
     /// <summary>Os itens que o usuário enxerga, os mais antigos primeiro. Fora do alcance dele, nada aparece.</summary>
@@ -1090,6 +1204,12 @@ public sealed class QueueItemService
         if (status is { } s && !Enum.IsDefined(s))
         {
             throw new ContactCenterValidationException("A situação do item é inválida.");
+        }
+
+        // Sessão embutida CustomerOnly (ADR 0041, D5): nada de fila nem de concessão; só os itens das sessões dos contatos com vínculo ativo para os clientes autorizados na sessão, na organização da conexão.
+        if (contexto.Principal?.Embedded is { CustomerOnly: true } limite)
+        {
+            return await ListGrantedCustomerItemsAsync(contexto, limite, queueId, status, assignedToMe, take, cancellationToken);
         }
 
         var organizacoes = contexto.OrganizationsWithPermission(Permission.QueueRead);
@@ -1268,7 +1388,7 @@ public sealed class QueueItemService
             ? (item.Status, item.AssignedUserId)
             : (sessao.ResponderRef is null ? QueueItemStatus.Waiting : QueueItemStatus.Assigned, sessao.ResponderRef);
 
-        var acessos = new List<QueueAccess> { await ResolveAccessAsync(contexto, item, cancellationToken) };
+        var acessos = new List<QueueAccess> { await ResolveReadAccessAsync(contexto, item, cancellationToken) };
 
         // A fila do item atende o lugar onde o item diz que a conversa está (organização, unidade e setor)? Uma fila de outra unidade não autoriza
         // a leitura de uma conversa que está em outra: o que o item guardou fora da cobertura da fila (um estado intermediário de uma transferência,
@@ -1286,7 +1406,7 @@ public sealed class QueueItemService
                 return ReadVerdict.NotVisible;
             }
 
-            acessos.Add(await ResolveAccessAsync(contexto, destino, cancellationToken));
+            acessos.Add((await ResolveAccessAsync(contexto, destino, cancellationToken)) with { GrantedCustomerSession = acessos[0].GrantedCustomerSession });
         }
 
         if (acessos.Any(a => !a.CanSee(item)))
@@ -1294,7 +1414,7 @@ public sealed class QueueItemService
             return ReadVerdict.NotVisible;
         }
 
-        return acessos.All(a => a.CanReadConversation(situacao, responsavel)) ? ReadVerdict.Allowed : ReadVerdict.Denied;
+        return acessos.All(a => a.CanReadConversation(item, situacao, responsavel)) ? ReadVerdict.Allowed : ReadVerdict.Denied;
     }
 
     /// <summary>
@@ -1306,7 +1426,7 @@ public sealed class QueueItemService
     {
         var contexto = _context.GetRequired();
         var item = await _items.FindItemReadOnlyAsync(itemId, cancellationToken);
-        if (item is null || !(await ResolveAccessAsync(contexto, item, cancellationToken)).CanSee(item))
+        if (item is null || !(await ResolveReadAccessAsync(contexto, item, cancellationToken)).CanSee(item))
         {
             return null;
         }

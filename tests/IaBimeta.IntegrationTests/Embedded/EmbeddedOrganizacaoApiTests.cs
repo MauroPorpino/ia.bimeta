@@ -195,13 +195,9 @@ public sealed class EmbeddedOrganizacaoApiTests(PostgresFixture banco)
 
         var proibidas = new (HttpMethod Metodo, string Caminho)[]
         {
-            (HttpMethod.Get, "/contact-center/items"),
             (HttpMethod.Get, "/contact-center/me/queues"),
             (HttpMethod.Get, "/contact-center/me/presence"),
             (HttpMethod.Put, "/contact-center/me/presence"),
-            (HttpMethod.Get, $"/contact-center/items/{id}"),
-            (HttpMethod.Get, $"/contact-center/items/{id}/conversation"),
-            (HttpMethod.Get, $"/contact-center/items/{id}/messages"),
             (HttpMethod.Post, $"/contact-center/items/{id}/claim"),
             (HttpMethod.Post, $"/contact-center/items/{id}/reply"),
             (HttpMethod.Post, $"/contact-center/queues/{s.FilaA}/claim-next"),
@@ -211,6 +207,13 @@ public sealed class EmbeddedOrganizacaoApiTests(PostgresFixture banco)
             using var resposta = await s.Api.EnviarAsync(token, metodo, caminho, metodo == HttpMethod.Get ? null : new { requestId = Guid.NewGuid(), text = "x", status = "Available" });
             Assert.Equal(HttpStatusCode.Forbidden, resposta.StatusCode);
             Assert.Equal("embedded-route-forbidden", await EmbeddedTestSupport.CodigoDoProblemaAsync(resposta));
+        }
+
+        // E2.3: a LEITURA é roteável, mas sem vínculo ativo para um cliente autorizado nada aparece (lista vazia; item, conversa e mensagens inexistentes).
+        Assert.Empty(await IdsAsync(s.Api, token, "/contact-center/items"));
+        foreach (var caminho in new[] { $"/contact-center/items/{id}", $"/contact-center/items/{id}/conversation", $"/contact-center/items/{id}/messages" })
+        {
+            Assert.Equal(HttpStatusCode.NotFound, await s.Api.StatusAsync(token, HttpMethod.Get, caminho));
         }
 
         // A própria sessão e o resgate do contexto seguem disponíveis (o painel precisa deles para mostrar o cliente em foco).
@@ -230,7 +233,7 @@ public sealed class EmbeddedOrganizacaoApiTests(PostgresFixture banco)
 
         // Defesa em profundidade: mesmo que uma rota fosse aberta por engano, o serviço nega (a participação na fila da PRÓPRIA organização não vale para CustomerOnly).
         Assert.Empty(await s.C.ComoAsync(soCliente, sp => sp.GetRequiredService<ServiceQueueService>().ListMineAsync()));
-        await Assert.ThrowsAsync<AccessDeniedException>(() => s.C.ItensAsync(soCliente));
+        Assert.Empty(await s.C.ItensAsync(soCliente)); // E2.3: a lista do CustomerOnly é só a dos clientes autorizados (aqui, nenhum), nunca a das filas
         Assert.Null(await s.C.ItemAsync(s.ItemA, soCliente));
         await Assert.ThrowsAsync<ContactCenterResourceNotFoundException>(() => s.C.AssumirAsync(s.ItemA, soCliente));
         await Assert.ThrowsAsync<ContactCenterResourceNotFoundException>(() => s.C.AssumirProximaAsync(s.FilaA, soCliente));
@@ -251,8 +254,10 @@ public sealed class EmbeddedOrganizacaoApiTests(PostgresFixture banco)
             name = "ERP", mode = "CustomerOnly", provisioning = "JitAttendant", allowedOrigins = new[] { EmbeddedTestSupport.Origem }, allowStartConversation = false,
         }));
 
-        // O modo é lido a cada requisição: a sessão aberta perde o acesso à fila geral na hora.
-        Assert.Equal(HttpStatusCode.Forbidden, await s.Api.StatusAsync(s.Troca.Token, HttpMethod.Get, "/contact-center/items"));
+        // O modo é lido a cada requisição: a sessão aberta perde a fila geral e o atendimento na hora (a leitura passa a ser só dos clientes autorizados, aqui nenhum vinculado).
+        Assert.Empty(await IdsAsync(s.Api, s.Troca.Token, "/contact-center/items"));
+        Assert.Equal(HttpStatusCode.Forbidden, await s.Api.StatusAsync(s.Troca.Token, HttpMethod.Get, "/contact-center/me/queues"));
+        Assert.Equal(HttpStatusCode.Forbidden, await s.Api.StatusAsync(s.Troca.Token, HttpMethod.Post, $"/contact-center/items/{s.ItemA}/claim", new { requestId = Guid.NewGuid() }));
         Assert.Equal(HttpStatusCode.OK, await s.Api.StatusAsync(s.Troca.Token, HttpMethod.Get, "/embed/v1/session"));
     }
 }

@@ -84,4 +84,10 @@ public enum Permission
 
     /// <summary>Administrar as conexões de integração do Embedded (origens, chaves, identidades externas e sessões embutidas; ADR 0039). Só existe com concessão de escopo do tenant: quem administra a federação não é um atendente.</summary>
     EmbedManage = 25,
+
+    /// <summary>
+    /// Registrar e consultar o consentimento de contato (ADR 0041) e decidir os casos de possível revogação de uma organização. Por papel (gestor e administrador da organização), aplicada no backend. NUNCA entra em
+    /// <c>EmbeddedSessionPolicy.AllowedPermissions</c>: a sessão embutida não a recebe, mesmo de um usuário gestor, e o sistema externo nunca a concede.
+    /// </summary>
+    ConsentManage = 26,
 }

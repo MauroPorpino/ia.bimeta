@@ -94,3 +94,10 @@ Resumo (detalhes em `docs/operations/NOVA-EMPRESA.md`):
 3. `.\tools\ops\Novo-Tenant.ps1 -Arquivo .\minha-empresa.json -SoValidar` e depois `... -PedirSegredos`.
 4. `.\tools\dev\Start-DemoAtendimento.ps1`, abrir `http://localhost:5173` e entrar com o `slug` e o atendente.
 5. `.\tools\dev\Send-MensagemWhatsApp.ps1 -Tenant <slug> -Texto '...' -Nome ... -Numero ...` faz o papel do cliente.
+
+## 7. Saída do cliente e consentimento (E2.5, 19/11/2026)
+
+- **O que o produto faz sozinho:** a palavra inteira PARAR, SAIR ou CANCELAR (sem acento, caixa ou pontuação) é decidida por regra fixa na entrada da mensagem (ADR 0041, seção 5). PARAR revoga **todas as finalidades** do telefone na organização da conversa; SAIR e CANCELAR só revogam sozinhos em resposta a um modelo de mensagem ou quando o cliente abriu a conversa. Dentro de uma conversa em curso, ou logo depois de uma pergunta de texto livre de um fluxo, a palavra é **ambígua**: **não revoga**, a conversa segue normal e uma pessoa decide. Frases como "pare de me ligar" também **não revogam**: viram pendência. Nenhum modelo de IA decide isso.
+- **O que fica para uma pessoa:** supervisor ou administrador (permissão `ConsentManage`) decide cada pendência pela conversa (`GET /contact-center/items/{id}/optout-reviews` e `POST .../optout-reviews/{messageId}` com `Revoked` ou `Kept`). Não há tela nova nesta etapa.
+- **No comando `status`:** a linha `consentimento` mostra quantas possíveis saídas aguardam decisão e a idade da mais antiga, por empresa; passa a **aviso** acima de `Health:OptOutReviewTarget` (padrão 24 h corridas). **Nenhum prazo revoga nem mantém o consentimento sozinho.**
+- **Antes da produção:** interpretação legal do consentimento e da retenção (sem prazo e sem expurgo hoje); o calendário de dias úteis da empresa não existe (a meta é em horas corridas); a mensagem dos modelos de campanha deve instruir "responda PARAR" (E3).

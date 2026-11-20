@@ -7,6 +7,15 @@ public sealed class ConversationsValidationException : Exception
         : base(message)
     {
     }
+
+    /// <summary>Com o código estável do campo recusado (o sistema externo corrige o dado pelo código, não pelo texto).</summary>
+    public ConversationsValidationException(string code, string message)
+        : base(message)
+    {
+        Code = code;
+    }
+
+    public string? Code { get; }
 }
 
 /// <summary>

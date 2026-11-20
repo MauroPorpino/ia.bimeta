@@ -377,6 +377,25 @@ internal sealed class ConversationUnitOfWork : IConversationUnitOfWork
 
     public void Add(MessageAttachment attachment) => _db.Attachments.Add(attachment);
 
+    public Task<bool> HasInboundAfterAsync(Guid sessionId, long messageSeq, CancellationToken cancellationToken) =>
+        _db.Messages.AsNoTracking().AnyAsync(m => m.SessionId == sessionId && m.Direction == MessageDirection.Inbound && m.MessageSeq > messageSeq, cancellationToken);
+
+    public Task<bool> LastInboundIsOptOutCommandAsync(Guid sessionId, long lastInboundSeq, CancellationToken cancellationToken) =>
+        _db.Messages.AsNoTracking().AnyAsync(m => m.SessionId == sessionId && m.Direction == MessageDirection.Inbound && m.InboundSeq == lastInboundSeq && m.IsOptOutCommand, cancellationToken);
+
+    public async Task LockConsentPhoneAsync(Guid organizationId, string phone, CancellationToken cancellationToken)
+    {
+        var chave = ConsentAuditEvents.PhoneLockKey(_db.CurrentTenantValue, organizationId, phone);
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({chave}, 0))", cancellationToken);
+    }
+
+    public Task<ContactConsent?> GetLatestConsentAsync(Guid organizationId, string phone, IaBimeta.Conversations.Contracts.ConsentPurpose purpose, CancellationToken cancellationToken) =>
+        _db.Consents.AsNoTracking().Where(c => c.OrganizationId == organizationId && c.Phone == phone && c.Purpose == purpose).OrderByDescending(c => c.Seq).FirstOrDefaultAsync(cancellationToken);
+
+    public void Add(ContactConsent consent) => _db.Consents.Add(consent);
+
+    public void Add(OptOutReview review) => _db.OptOutReviews.Add(review);
+
     public Task<MessageAttachment?> FindAttachmentForUpdateAsync(Guid messageId, CancellationToken cancellationToken) =>
         _db.Attachments.FirstOrDefaultAsync(a => a.MessageId == messageId, cancellationToken);
 
@@ -411,6 +430,12 @@ internal sealed class ConversationUnitOfWork : IConversationUnitOfWork
         catch (DbUpdateException ex) when (PostgresErrors.IsUniqueViolation(ex, MessageConfiguration.ProviderEventIndex))
         {
             throw new DuplicateProviderEventException();
+        }
+        catch
+        {
+            // Todo caminho de falha desanexa o que foi adicionado (a mensagem, o consentimento e a ocorrência não podem ficar rastreados sem terem sido gravados).
+            _db.ChangeTracker.Clear();
+            throw;
         }
 
         // Só depois da confirmação: o publicador em memória nunca vê evento de uma mudança que não aconteceu.

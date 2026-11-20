@@ -65,7 +65,8 @@ public sealed record KnowledgeResultInput(string EffectKey, bool Found, string? 
 /// <summary>Um efeito pedido pelo interpretador. <see cref="Key"/> é <c>passo:índice</c>; o runtime a prefixa com a instância para a chave de idempotência (ADR 0037 §4).</summary>
 public abstract record FlowEffect(string Key, string NodeId);
 
-public sealed record SendMessageEffect(string Key, string NodeId, string Text, IReadOnlyList<FlowChoice> Choices) : FlowEffect(Key, NodeId);
+/// <param name="ExpectsFreeText">O passo termina numa pergunta cuja resposta é TEXTO LIVRE (qualquer tipo de resposta que não seja escolha): marcador explícito do nó, lido pelo Conversations na decisão de saída (ADR 0041, regra 3).</param>
+public sealed record SendMessageEffect(string Key, string NodeId, string Text, IReadOnlyList<FlowChoice> Choices, bool ExpectsFreeText = false) : FlowEffect(Key, NodeId);
 
 public sealed record CallCapabilityEffect(string Key, string NodeId, string OperationKey, IReadOnlyDictionary<string, string> Parameters) : FlowEffect(Key, NodeId);
 

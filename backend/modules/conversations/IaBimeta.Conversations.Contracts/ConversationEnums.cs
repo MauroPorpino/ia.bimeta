@@ -136,6 +136,12 @@ public enum TurnEndReason
 public enum SessionAttentionReason
 {
     ChattyBurst = 1,
+
+    /// <summary>Uma possível saída do cliente (palavra ambígua ou intenção em linguagem natural) espera a decisão de quem tem <c>ConsentManage</c>. Não revogou nada (ADR 0041, seção 5).</summary>
+    PossibleOptOut = 2,
+
+    /// <summary>O cliente pediu a saída por um comando confirmado e o consentimento foi revogado (ou não havia telefone para revogar). Informativo ao atendente; sem resposta automática.</summary>
+    OptOutRevoked = 3,
 }
 
 public enum HistoryOrder

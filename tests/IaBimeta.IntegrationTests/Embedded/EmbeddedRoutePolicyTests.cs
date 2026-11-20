@@ -40,6 +40,9 @@ public sealed class EmbeddedRoutePolicyTests(PostgresFixture banco)
         "POST /contact-center/items/{guid}/reply-template",
         "POST /contact-center/items/{guid}/reply-media",
         "POST /contact-center/items/{guid}/close",
+        "POST /contact-center/items/{guid}/customer-link",
+        "DELETE /contact-center/items/{guid}/customer-link/{ref}",
+        "GET /contact-center/customers/{ref}/history",
         "GET /embed/v1/session",
         "POST /embed/v1/context",
     };
@@ -55,13 +58,14 @@ public sealed class EmbeddedRoutePolicyTests(PostgresFixture banco)
     // Rotas que o host trata SEM contexto de usuário: a sessão embutida não passa por elas (o guarda só age com contexto).
     private static readonly string[] RotasSemContexto =
     {
-        "/health", "/auth/login", "/auth/password-reset", "/webhooks", "/embed/v1/launch-tickets", "/embed/v1/context-tickets", "/embed/v1/sessions/revoke", "/embed/v1/exchange",
+        "/health", "/auth/login", "/auth/password-reset", "/webhooks", "/embed/v1/launch-tickets", "/embed/v1/context-tickets", "/embed/v1/sessions/revoke", "/embed/v1/exchange", "/embed/v1/customer-links",
+        "/embed/v1/customers/{customerRef}/consents", // E2.4: HMAC, sem contexto de usuário
     };
 
-    // O padrão do grupo termina em "/" quando a rota é a raiz do grupo (/contact-center/items/): a lista usa a forma sem a barra final.
+    // O padrão do grupo termina em "/" quando a rota é a raiz do grupo (/contact-center/items/): a lista usa a forma sem a barra final. {customerRef} é o identificador opaco do cliente: na lista é {ref}.
     private static string Normalizar(string padrao)
     {
-        var sem = Regex.Replace(padrao, @"\{\w+:guid\}", "{guid}");
+        var sem = Regex.Replace(Regex.Replace(padrao, @"\{\w+:guid\}", "{guid}"), @"\{customerRef\}", "{ref}");
         return sem.Length > 1 ? sem.TrimEnd('/') : sem;
     }
 
@@ -83,7 +87,7 @@ public sealed class EmbeddedRoutePolicyTests(PostgresFixture banco)
         {
             Assert.All(PrefixosProibidos, proibido => Assert.False(
                 rota.Pattern.StartsWith(proibido, StringComparison.OrdinalIgnoreCase), $"A rota '{rota}' começa por um prefixo proibido: {proibido}"));
-            Assert.Contains(rota.Method, new[] { "GET", "POST", "PUT" });
+            Assert.Contains(rota.Method, new[] { "GET", "POST", "PUT", "DELETE" });
             Assert.DoesNotContain("*", rota.Pattern);
         }
     }
@@ -114,18 +118,38 @@ public sealed class EmbeddedRoutePolicyTests(PostgresFixture banco)
         Assert.Equal(esperado, EmbeddedRoutePolicy.IsAllowed(metodo, caminho));
     }
 
-    /// <summary>E1-R: o subconjunto que o modo CustomerOnly alcança é EXATAMENTE a própria sessão e o resgate do contexto; ampliá-lo exige editar este teste (e a E2 trará a autorização por cliente).</summary>
+    /// <summary>E2.3 (ADR 0041, D5): o subconjunto que o modo CustomerOnly alcança é EXATAMENTE a própria sessão, o resgate do contexto e a LEITURA de itens, conversa, mensagens, anexo e histórico por cliente; nenhuma escrita. Ampliá-lo exige editar este teste.</summary>
     [Fact]
-    public void O_subconjunto_da_lista_para_CustomerOnly_e_exatamente_a_propria_sessao_e_o_resgate_do_contexto()
+    public void O_subconjunto_da_lista_para_CustomerOnly_e_exatamente_a_sessao_o_contexto_e_a_leitura_dos_clientes_autorizados()
     {
         var alcancadas = EmbeddedRoutePolicy.Allowed
             .Where(r => EmbeddedRoutePolicy.IsAllowed(r.Method, r.Pattern.Replace("{guid}", Guid.NewGuid().ToString()), customerOnly: true))
             .Select(r => r.ToString())
             .ToArray();
 
-        Assert.Equal(new[] { "GET /auth/me", "POST /auth/logout", "GET /embed/v1/session", "POST /embed/v1/context" }, alcancadas);
+        Assert.Equal(
+            new[]
+            {
+                "GET /auth/me", "POST /auth/logout",
+                "GET /contact-center/items", "GET /contact-center/items/{guid}", "GET /contact-center/items/{guid}/conversation", "GET /contact-center/items/{guid}/messages",
+                "GET /contact-center/items/{guid}/messages/{guid}/attachment", "GET /contact-center/customers/{ref}/history",
+                "GET /embed/v1/session", "POST /embed/v1/context",
+            },
+            alcancadas);
+        Assert.All(alcancadas, r => Assert.StartsWith(r.StartsWith("POST") ? "POST" : "GET", r)); // só leitura (e os dois POST da própria sessão)
         Assert.All(EmbeddedRoutePolicy.Allowed, r => Assert.True(EmbeddedRoutePolicy.IsAllowed(r.Method, r.Pattern.Replace("{guid}", Guid.NewGuid().ToString()), customerOnly: false)));
-        Assert.False(EmbeddedRoutePolicy.IsAllowed("GET", "/contact-center/items", customerOnly: true));
+        Assert.True(EmbeddedRoutePolicy.IsAllowed("GET", "/contact-center/items", customerOnly: true));
+        Assert.False(EmbeddedRoutePolicy.IsAllowed("POST", "/contact-center/items", customerOnly: true));
+        foreach (var fechada in new[]
+        {
+            ("GET", "/contact-center/items/{id}/history"), ("GET", "/contact-center/items/{id}/reply-options"), ("POST", "/contact-center/items/{id}/reply"), ("POST", "/contact-center/items/{id}/claim"),
+            ("POST", "/contact-center/items/{id}/close"), ("POST", "/contact-center/items/{id}/transfer"), ("POST", "/contact-center/items/{id}/return-to-ai"), ("POST", "/contact-center/items/{id}/reply-template"),
+            ("POST", "/contact-center/items/{id}/reply-media"), ("POST", "/contact-center/items/{id}/customer-link"), ("DELETE", "/contact-center/items/{id}/customer-link/CLI-1"),
+            ("GET", "/contact-center/me/queues"), ("GET", "/contact-center/me/presence"), ("PUT", "/contact-center/me/presence"), ("POST", "/contact-center/queues/{id}/claim-next"),
+        })
+        {
+            Assert.False(EmbeddedRoutePolicy.IsAllowed(fechada.Item1, fechada.Item2.Replace("{id}", Guid.NewGuid().ToString()), customerOnly: true), $"{fechada.Item1} {fechada.Item2} deveria estar fechada ao CustomerOnly");
+        }
         Assert.False(EmbeddedRoutePolicy.IsAllowed(null, "/auth/me", customerOnly: true));
     }
 

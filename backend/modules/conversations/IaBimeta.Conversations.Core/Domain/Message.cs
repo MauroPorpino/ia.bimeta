@@ -87,6 +87,23 @@ public sealed class Message : ITenantOwned
     /// A versão do bloco opaco de metadados do canal (<see cref="IaBimeta.Conversations.Contracts.ChannelData"/>), ou <c>null</c> se a mensagem não trouxe nenhum. Anda sempre
     /// junto de <see cref="ChannelDataValues"/>: os dois são nulos ou os dois são preenchidos (o banco recusa o contrário).
     /// </summary>
+    /// <summary>
+    /// Verdadeiro SÓ para a mensagem do cliente que foi um comando de saída CONFIRMADO (PARAR, SAIR ou CANCELAR; ADR 0041, seção 5). Gravado com a mensagem, na mesma transação da revogação, e nunca muda. Quem responde
+    /// automaticamente (Agents e Workflows) não a trata como entrada: nem agora, nem depois, quando outra mensagem do cliente reabrir o processamento.
+    /// </summary>
+    public bool IsOptOutCommand { get; private set; }
+
+    /// <summary>Marca a mensagem de entrada ainda NÃO gravada como comando de saída confirmado. Só vale antes de a mensagem ser gravada (a decisão é da ingestão, sob a trava da sessão).</summary>
+    public void MarkAsOptOutCommand()
+    {
+        if (Direction != MessageDirection.Inbound || Kind != MessageKind.Text)
+        {
+            throw new ConversationsValidationException("Só uma mensagem de texto do cliente pode ser um comando de saída.");
+        }
+
+        IsOptOutCommand = true;
+    }
+
     public int? ChannelDataVersion { get; private set; }
 
     /// <summary>
@@ -245,12 +262,16 @@ public sealed class Message : ITenantOwned
         long coveredThroughSeq,
         string text,
         DateTimeOffset now,
-        Locale conversationLocale)
+        Locale conversationLocale,
+        bool expectsFreeText = false)
     {
         ArgumentNullException.ThrowIfNull(tenantId);
         ArgumentNullException.ThrowIfNull(conversationLocale);
 
         ValidateText(text, MessageKind.Text, required: true);
+
+        // O marcador EXPLÍCITO do nó de pergunta de texto livre (ADR 0041, regra 3): só o Conversations o lê; o Sender o ignora (reconhece só as chaves do modelo).
+        var dados = expectsFreeText ? new IaBimeta.Conversations.Contracts.ChannelData(1, new Dictionary<string, string> { [ChannelDataKeys.FlowExpectsFreeText] = "1" }) : null;
 
         return new Message
         {
@@ -275,6 +296,8 @@ public sealed class Message : ITenantOwned
             CreatedAt = now,
             Locale = conversationLocale,
             LocaleOrigin = MessageLocaleOrigin.ConversationLocale,
+            ChannelDataVersion = dados?.Version,
+            ChannelDataValues = dados is null ? null : SnapshotOf(dados.Values),
         };
     }
 

@@ -111,6 +111,7 @@ public class RolePermissionsTests
                 Permission.IntegrationRead,
                 Permission.WorkflowRead, // ADR 0037: o gerente lê e simula fluxos, mas não edita nem publica
                 Permission.WorkflowTest,
+                Permission.ConsentManage, // ADR 0041: o gestor registra consentimento e decide a possível revogação; a sessão embutida nunca a recebe
             },
             Permissoes(Role.Manager, Organizacao));
     }

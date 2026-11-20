@@ -28,6 +28,9 @@ internal sealed class EmbeddedEmMemoria : IEmbeddedStore
 
     public IdentidadeEmMemoria? Identidade { get; set; }
 
+    /// <summary>Quando definida, a busca da chave lança esta exceção (prova que a porta de autenticação falha fechada).</summary>
+    public Exception? FalharBuscaDeChaveCom { get; set; }
+
     public Task AddConnectionAsync(IntegrationConnection connection, PendingAudit audit, CancellationToken cancellationToken)
     {
         Conexoes.Add(connection);
@@ -60,6 +63,11 @@ internal sealed class EmbeddedEmMemoria : IEmbeddedStore
 
     public Task<IntegrationKeyLookup?> FindKeyAsync(Guid keyId, CancellationToken cancellationToken)
     {
+        if (FalharBuscaDeChaveCom is { } falha)
+        {
+            throw falha;
+        }
+
         var chave = Chaves.FirstOrDefault(k => k.Id == keyId);
         var conexao = chave is null ? null : Conexoes.FirstOrDefault(c => c.TenantId == chave.TenantId && c.Id == chave.ConnectionId);
         return Task.FromResult(chave is null || conexao is null ? null : new IntegrationKeyLookup(chave, conexao));

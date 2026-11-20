@@ -24,6 +24,10 @@ public static class ConversationEventTypes
 /// Mensagem do cliente registrada com <c>InboundSeq</c>. Consumido pelo Agents (abre ou estende o turno). A instância de
 /// canal permite carregar a configuração do número (agente, idioma, horário) sem consultar o Conversations.
 /// </summary>
+/// <param name="IsOptOutCommand">
+/// Verdadeiro SÓ quando a mensagem é um comando de saída CONFIRMADO (PARAR, SAIR ou CANCELAR pela regra determinística do ADR 0041, seção 5): o consentimento já foi revogado na mesma transação e quem responde
+/// automaticamente (Agents e Workflows) NÃO inicia turno nem fluxo para esta mensagem. Falso em toda mensagem ambígua (o processamento é o normal) e em eventos anteriores a este campo.
+/// </param>
 public sealed record InboundMessageRegisteredV1(
     Guid SessionId,
     Guid ConversationId,
@@ -32,7 +36,8 @@ public sealed record InboundMessageRegisteredV1(
     MessageKind Kind,
     ContentState ContentState,
     bool LateArrival,
-    IaBimeta.SharedKernel.ChannelInstanceId ChannelInstanceId);
+    IaBimeta.SharedKernel.ChannelInstanceId ChannelInstanceId,
+    bool IsOptOutCommand = false);
 
 public sealed record MessageContentReadyV1(Guid SessionId, Guid MessageId, long InboundSeq);
 

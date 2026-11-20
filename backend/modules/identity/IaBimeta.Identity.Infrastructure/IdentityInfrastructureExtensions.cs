@@ -56,6 +56,7 @@ public static class IdentityInfrastructureExtensions
         services.AddScoped<IntegrationAdminService>();
         services.AddSingleton<IntegrationRateLimiter>();
         services.AddScoped<IntegrationRequestAuthenticator>();
+        services.AddScoped<IaBimeta.Identity.Contracts.Integration.IIntegrationRequestAuthenticator, IntegrationRequestAuthenticatorPort>();
         services.AddScoped<EmbeddedTicketService>();
         services.AddScoped<EmbeddedExchangeService>();
         services.AddScoped<EmbeddedContextQuery>();

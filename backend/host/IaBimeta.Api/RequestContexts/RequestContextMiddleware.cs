@@ -16,6 +16,8 @@ internal sealed class RequestContextMiddleware
     {
         "/health", "/auth/login",
         "/embed/v1/launch-tickets", "/embed/v1/context-tickets", "/embed/v1/sessions/revoke", "/embed/v1/exchange",
+        // O vínculo servidor-a-servidor (ADR 0041, Conversations.Presentation): também HMAC, o contexto do tenant é criado pelo host DEPOIS de autenticar (IntegrationRequestContext).
+        "/embed/v1/customer-links",
     };
 
     // O webhook do provedor tem o identificador do canal no caminho: único prefixo da lista. Os demais são EXATOS (E1-R): "/health/x", "/auth/login/x" ou "/embed/v1/exchange/x" não ganham a dispensa de contexto.
@@ -31,7 +33,23 @@ internal sealed class RequestContextMiddleware
         }
 
         var normalizado = texto.Length > 1 ? texto.TrimEnd('/') : texto;
-        return CaminhosSemContexto.Contains(normalizado, StringComparer.OrdinalIgnoreCase);
+        return CaminhosSemContexto.Contains(normalizado, StringComparer.OrdinalIgnoreCase) || ConsentimentoAssinado(normalizado);
+    }
+
+    // O consentimento servidor-a-servidor (ADR 0041, E2.4) tem o cliente no caminho: /embed/v1/customers/{cliente}/consents, com UM segmento no meio (sem barra, não vazio). Nenhum outro formato ganha a dispensa.
+    private const string PrefixoDoConsentimento = "/embed/v1/customers/";
+    private const string SufixoDoConsentimento = "/consents";
+
+    private static bool ConsentimentoAssinado(string caminho)
+    {
+        if (!caminho.StartsWith(PrefixoDoConsentimento, StringComparison.OrdinalIgnoreCase) || !caminho.EndsWith(SufixoDoConsentimento, StringComparison.OrdinalIgnoreCase)
+            || caminho.Length <= PrefixoDoConsentimento.Length + SufixoDoConsentimento.Length)
+        {
+            return false;
+        }
+
+        var cliente = caminho.AsSpan(PrefixoDoConsentimento.Length, caminho.Length - PrefixoDoConsentimento.Length - SufixoDoConsentimento.Length);
+        return cliente.Length > 0 && !cliente.Contains('/');
     }
 
     private readonly RequestDelegate _next;

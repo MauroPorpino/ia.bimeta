@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using IaBimeta.Identity.Application;
+using IaBimeta.Identity.Contracts.Integration;
 using IaBimeta.Identity.Contracts.Queries;
 using IaBimeta.Identity.Domain;
 using IaBimeta.SharedKernel;
@@ -228,6 +229,25 @@ public class EmbeddedDomainTests
         Assert.DoesNotContain(RolePermissions.Expand(Role.OrganizationAdmin, org), g => g.Permission == Permission.EmbedManage);
         Assert.DoesNotContain(RolePermissions.Expand(Role.Manager, org), g => g.Permission == Permission.EmbedManage);
         Assert.Contains(RolePermissions.Expand(Role.OrganizationAdmin, null), g => g.Permission == Permission.EmbedManage && g.OrganizationId is null);
+    }
+
+    [Fact]
+    public void ConsentManage_e_so_do_gestor_e_do_administrador_da_organizacao_e_nunca_da_sessao_embutida()
+    {
+        var org = Guid.NewGuid();
+
+        Assert.Contains(RolePermissions.Expand(Role.Manager, org), g => g.Permission == Permission.ConsentManage && g.OrganizationId == org);
+        Assert.Contains(RolePermissions.Expand(Role.OrganizationAdmin, org), g => g.Permission == Permission.ConsentManage && g.OrganizationId == org);
+        Assert.Contains(RolePermissions.Expand(Role.OrganizationAdmin, null), g => g.Permission == Permission.ConsentManage && g.OrganizationId is null);
+
+        // O atendente (o papel da federação) e o usuário comum não a recebem.
+        Assert.DoesNotContain(RolePermissions.Expand(Role.Attendant, org), g => g.Permission == Permission.ConsentManage);
+        Assert.DoesNotContain(RolePermissions.Expand(Role.User, org), g => g.Permission == Permission.ConsentManage);
+
+        // A lista fechada da sessão embutida NÃO a contém, e o filtro a descarta mesmo de um usuário gestor ou administrador (inclusive com concessão de tenant).
+        Assert.DoesNotContain(Permission.ConsentManage, EmbeddedSessionPolicy.AllowedPermissions);
+        var concessoes = RolePermissions.Expand(Role.Manager, org).Concat(RolePermissions.Expand(Role.OrganizationAdmin, org)).Concat(RolePermissions.Expand(Role.OrganizationAdmin, null));
+        Assert.DoesNotContain(EmbeddedSessionPolicy.Filter(concessoes, org), g => g.Permission == Permission.ConsentManage);
     }
 
     [Fact]
@@ -687,6 +707,125 @@ public class EmbeddedServicesTests
             await Assert.ThrowsAsync<EmbeddedAuthenticationException>(() => a.AuthenticateAsync(falha));
         }
     }
+
+    // A porta de autenticação do Identity.Contracts (ADR 0041, seção 1): as mesmas verificações e a mesma recusa do autenticador existente, por valor e com falha fechada
+
+    private static IntegrationSignedCall Chamada(IntegrationSignedRequest r) => new(r.KeyId, r.Timestamp, r.Nonce, r.Signature, r.Method, r.Path, r.Body);
+
+    [Fact]
+    public async Task A_porta_autentica_e_devolve_o_mesmo_chamador_que_o_autenticador_existente()
+    {
+        var h = new CenarioHmac();
+        var porta = new IntegrationRequestAuthenticatorPort(h.Autenticador);
+
+        var resultado = await porta.AuthenticateAsync(Chamada(h.Assinada()));
+
+        Assert.True(resultado.IsAuthenticated);
+        Assert.Equal(IntegrationAuthenticationOutcome.Authenticated, resultado.Outcome);
+        var chamador = resultado.Caller!;
+        Assert.Equal(h.Base.Tenant.TenantId, chamador.TenantId);
+        Assert.Equal(h.Base.Conexao.Id, chamador.ConnectionId);
+        Assert.Equal(h.Base.Organizacao, chamador.OrganizationId);
+        Assert.Equal(h.Chave.Id, chamador.KeyId);
+        Assert.Equal(h.Base.Conexao.Mode, chamador.Mode);
+    }
+
+    [Fact]
+    public async Task A_porta_recusa_igual_ao_autenticador_atual_em_todos_os_casos_de_recusa()
+    {
+        var h = new CenarioHmac();
+        var porta = new IntegrationRequestAuthenticatorPort(h.Autenticador);
+        var primeira = h.Assinada(nonce: "nonce-unico-123456");
+        Assert.True((await porta.AuthenticateAsync(Chamada(primeira))).IsAuthenticated);
+
+        var falhas = new[]
+        {
+            primeira,                                                                          // replay
+            h.Assinada(segredo: "ibsk_errado"),                                                // segredo
+            h.Assinada(instante: h.Base.Relogio.GetUtcNow().AddMinutes(-3)),                   // fora da janela
+            h.Assinada(instante: h.Base.Relogio.GetUtcNow().AddMinutes(3)),
+            h.Assinada(corpo: Encoding.UTF8.GetBytes("{\"x\":1}"), corpoAssinado: Encoding.UTF8.GetBytes("{}")), // corpo adulterado
+            h.Assinada(nonce: "curto"),                                                        // nonce inválido
+            primeira with { KeyId = "ibk_" + Guid.NewGuid().ToString("N") },                   // chave desconhecida
+            primeira with { KeyId = null },
+            primeira with { Signature = new string('0', 64) },
+            primeira with { Signature = "zz" },
+            primeira with { Timestamp = "abc" },
+        };
+
+        foreach (var falha in falhas)
+        {
+            // O autenticador atual lançaria; a porta devolve a MESMA recusa genérica, sem chamador.
+            var resultado = await porta.AuthenticateAsync(Chamada(falha));
+            Assert.Equal(IntegrationAuthenticationOutcome.Denied, resultado.Outcome);
+            Assert.Null(resultado.Caller);
+            Assert.False(resultado.IsAuthenticated);
+        }
+
+        // O caminho adulterado depois de assinar também é recusado (a assinatura cobre o caminho).
+        var assinada = h.Assinada();
+        Assert.Equal(IntegrationAuthenticationOutcome.Denied, (await porta.AuthenticateAsync(Chamada(assinada with { Path = assinada.Path + "/" }))).Outcome);
+        Assert.Equal(IntegrationAuthenticationOutcome.Denied, (await porta.AuthenticateAsync(Chamada(assinada with { Method = "PUT" }))).Outcome);
+    }
+
+    [Fact]
+    public async Task A_porta_recusa_chave_vencida_como_o_autenticador_atual()
+    {
+        var h = new CenarioHmac();
+        var porta = new IntegrationRequestAuthenticatorPort(h.Autenticador);
+        Assert.True((await porta.AuthenticateAsync(Chamada(h.Assinada()))).IsAuthenticated);
+
+        h.Chave.ExpireAt(h.Base.Relogio.GetUtcNow().AddMinutes(10));
+        Assert.True((await porta.AuthenticateAsync(Chamada(h.Assinada()))).IsAuthenticated);
+        h.Base.Relogio.Avancar(TimeSpan.FromMinutes(11));
+        Assert.Equal(IntegrationAuthenticationOutcome.Denied, (await porta.AuthenticateAsync(Chamada(h.Assinada()))).Outcome);
+    }
+
+    [Fact]
+    public async Task A_porta_falha_fechada_so_o_veredito_de_credencial_e_recusa_e_a_falha_operacional_vira_indisponivel()
+    {
+        var h = new CenarioHmac();
+        var porta = new IntegrationRequestAuthenticatorPort(h.Autenticador);
+
+        // E1 (ressalva da E2.1): uma falha operacional (banco, E/S, defeito) NÃO é um veredito sobre a chave: 503 (repetir é seguro), nunca 401, e sem chamador (falha fechada).
+        foreach (var falha in new Exception[] { new InvalidOperationException("falha inesperada"), new TimeoutException("banco lento"), new System.IO.IOException("rede"), new NullReferenceException() })
+        {
+            h.Base.Embedded.FalharBuscaDeChaveCom = falha;
+            var inesperada = await porta.AuthenticateAsync(Chamada(h.Assinada()));
+            Assert.Equal(IntegrationAuthenticationOutcome.Unavailable, inesperada.Outcome);
+            Assert.Null(inesperada.Caller);
+            Assert.False(inesperada.IsAuthenticated);
+        }
+
+        // O veredito de credencial continua sendo a recusa genérica.
+        h.Base.Embedded.FalharBuscaDeChaveCom = null;
+        var recusada = await porta.AuthenticateAsync(Chamada(h.Assinada(segredo: "ibsk_errado")));
+        Assert.Equal(IntegrationAuthenticationOutcome.Denied, recusada.Outcome);
+        Assert.Null(recusada.Caller);
+
+        h.Base.Embedded.FalharBuscaDeChaveCom = new EmbeddedBusyException(new InvalidOperationException("deadlock"));
+        var ocupada = await porta.AuthenticateAsync(Chamada(h.Assinada()));
+        Assert.Equal(IntegrationAuthenticationOutcome.Unavailable, ocupada.Outcome);
+        Assert.Null(ocupada.Caller);
+
+        // O cancelamento do pedido propaga (não vira recusa).
+        h.Base.Embedded.FalharBuscaDeChaveCom = new OperationCanceledException();
+        await Assert.ThrowsAsync<OperationCanceledException>(() => porta.AuthenticateAsync(Chamada(h.Assinada())));
+
+        // Chamada nula: recusa, nunca exceção.
+        h.Base.Embedded.FalharBuscaDeChaveCom = null;
+        Assert.Equal(IntegrationAuthenticationOutcome.Denied, (await porta.AuthenticateAsync(null!)).Outcome);
+    }
+
+    [Fact]
+    public void Um_resultado_so_autentica_com_o_desfecho_e_o_chamador_juntos()
+    {
+        Assert.False(new IntegrationAuthenticationResult(IntegrationAuthenticationOutcome.Authenticated, null, null).IsAuthenticated);
+        Assert.False(IntegrationAuthenticationResult.Denied.IsAuthenticated);
+        Assert.False(IntegrationAuthenticationResult.Unavailable.IsAuthenticated);
+        Assert.False(IntegrationAuthenticationResult.RateLimited(TimeSpan.FromSeconds(3)).IsAuthenticated);
+    }
+
 
     [Fact]
     public async Task Chave_revogada_chave_vencida_conexao_desativada_e_tenant_suspenso_nao_autenticam()

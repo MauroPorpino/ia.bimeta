@@ -15,7 +15,7 @@ internal static class EmbeddedRoutePolicy
     internal sealed record Route(string Method, string Pattern)
     {
         internal Regex Matcher { get; } = new(
-            "^" + Regex.Escape(Pattern).Replace(@"\{guid}", "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}") + "$",
+            "^" + Regex.Escape(Pattern).Replace(@"\{guid}", "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}").Replace(@"\{ref}", "[^/]{1,300}") + "$",
             RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
         public override string ToString() => $"{Method} {Pattern}";
@@ -48,12 +48,36 @@ internal static class EmbeddedRoutePolicy
         new("POST", "/contact-center/items/{guid}/reply-media"),
         new("POST", "/contact-center/items/{guid}/close"),
 
+        // O vínculo do cliente em foco com o contato da conversa (ADR 0041, E2.2): só a sessão FullAttendant (o subconjunto CustomerOnly abaixo não o alcança: CustomerOnly é só leitura). O {ref} é o identificador opaco do cliente.
+        new("POST", "/contact-center/items/{guid}/customer-link"),
+        new("DELETE", "/contact-center/items/{guid}/customer-link/{ref}"),
+
+        // O histórico por cliente (ADR 0041, E2.3): sessão embutida com o cliente autorizado nela, nos dois modos.
+        new("GET", "/contact-center/customers/{ref}/history"),
+
         new("GET", "/embed/v1/session"),
         new("POST", "/embed/v1/context"),
     };
 
-    // O modo CustomerOnly (E1-R) não alcança a fila geral nem atendimento algum até a autorização por cliente (E2): só a própria sessão e o resgate do contexto.
-    private static readonly string[] CustomerOnlyPatterns = { "/auth/me", "/auth/logout", "/embed/v1/session", "/embed/v1/context" };
+    // O modo CustomerOnly (ADR 0041, D5; E2.3): a própria sessão, o resgate do contexto e SÓ LEITURA dos itens dos clientes autorizados (lista, item, conversa, mensagens, anexo e histórico por cliente). Nenhuma escrita, nenhuma
+    // operação de fila, resposta, modelo, transferência, devolução à IA, encerramento, vínculo, presença nem fila geral. Cada entrada é MÉTODO + padrão e tem de estar também em Allowed; o item decide o acesso a cada
+    // requisição (vínculo ativo, cliente autorizado na sessão, organização da conexão).
+    private static readonly HashSet<string> CustomerOnlyRoutes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "GET /auth/me",
+        "POST /auth/logout",
+        "GET /contact-center/items",
+        "GET /contact-center/items/{guid}",
+        "GET /contact-center/items/{guid}/conversation",
+        "GET /contact-center/items/{guid}/messages",
+        "GET /contact-center/items/{guid}/messages/{guid}/attachment",
+        "GET /contact-center/customers/{ref}/history",
+        "GET /embed/v1/session",
+        "POST /embed/v1/context",
+    };
+
+    /// <summary>As rotas do subconjunto <c>CustomerOnly</c> (para o teste de arquitetura compará-las com a lista aprovada).</summary>
+    internal static IReadOnlyCollection<string> CustomerOnlyList => CustomerOnlyRoutes;
 
     /// <summary>Se o método e o caminho estão na lista E, para a sessão <c>CustomerOnly</c>, no subconjunto que ela alcança.</summary>
     public static bool IsAllowed(string? method, string? path, bool customerOnly)
@@ -69,7 +93,9 @@ internal static class EmbeddedRoutePolicy
         }
 
         var caminho = path!.Length > 1 ? path.TrimEnd('/') : path;
-        return CustomerOnlyPatterns.Contains(caminho, StringComparer.OrdinalIgnoreCase);
+        return Allowed.Any(r => CustomerOnlyRoutes.Contains(r.ToString())
+            && string.Equals(r.Method, method, StringComparison.OrdinalIgnoreCase)
+            && r.Matcher.IsMatch(caminho));
     }
 
     /// <summary>Se o método e o caminho (sem consulta) estão na lista. Sem exceção: caminho vazio, com <c>..</c>, barras duplas ou fora do padrão nega.</summary>

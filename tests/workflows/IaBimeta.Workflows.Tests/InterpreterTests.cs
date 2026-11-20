@@ -236,3 +236,36 @@ public sealed class InterpreterTests
         Assert.True(_i.Advance(g, c.State, new InboundInput("oi"), T0).Ignored);
     }
 }
+
+/// <summary>E2.5 (ADR 0041, regra 3): o marcador EXPLÍCITO de pergunta de texto livre, que o Conversations lê na decisão de saída do cliente. Vem do tipo de resposta do nó, nunca de texto.</summary>
+public sealed class FreeTextMarkerTests
+{
+    private readonly FlowInterpreter _i = new();
+
+    [Fact]
+    public void Mensagem_simples_e_pergunta_de_escolha_nao_esperam_texto_livre_e_pergunta_de_texto_espera()
+    {
+        var g = Samples.Menu();
+        var inicio = _i.Start(g, Samples.T0, new InboundInput("oi"));
+
+        // "Olá!" é uma mensagem; "Escolha..." é pergunta de ESCOLHA: nenhuma espera texto livre.
+        Assert.All(inicio.Effects.OfType<SendMessageEffect>(), m => Assert.False(m.ExpectsFreeText));
+
+        // O próximo nó pergunta o código do exame (resposta de texto): termina esperando TEXTO LIVRE.
+        var proximo = _i.Advance(g, inicio.State, new InboundInput(ChoiceId: "preco"), Samples.T0);
+        Assert.True(Assert.Single(proximo.Effects.OfType<SendMessageEffect>()).ExpectsFreeText);
+    }
+
+    [Fact]
+    public void Repetir_a_pergunta_de_texto_depois_de_resposta_invalida_mantem_o_marcador_e_a_de_escolha_nao()
+    {
+        var g = Samples.Menu();
+        var escolha = _i.Start(g, Samples.T0).State;
+        var repetidaEscolha = _i.Advance(g, escolha, new InboundInput(Text: "talvez"), Samples.T0);
+        Assert.False(Assert.Single(repetidaEscolha.Effects.OfType<SendMessageEffect>()).ExpectsFreeText);
+
+        var texto = _i.Advance(g, escolha, new InboundInput(ChoiceId: "preco"), Samples.T0).State;
+        var repetidaTexto = _i.Advance(g, texto, new InboundInput(Text: "   "), Samples.T0);
+        Assert.Contains(repetidaTexto.Effects.OfType<SendMessageEffect>(), m => m.ExpectsFreeText);
+    }
+}

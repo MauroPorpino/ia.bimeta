@@ -68,7 +68,8 @@ public sealed record MessageView(
     Locale? Locale = null,
     MessageLocaleOrigin? LocaleOrigin = null,
     string? TemplateName = null,
-    AttachmentView? Attachment = null);
+    AttachmentView? Attachment = null,
+    bool IsOptOutCommand = false);
 
 /// <summary>
 /// Um encaminhamento da sessão entre unidades (e setores): de onde, para onde, quem pediu, por quê e quando. O rastro é só

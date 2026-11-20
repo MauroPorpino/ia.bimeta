@@ -56,14 +56,16 @@ internal sealed class ErpAssinante(ApiServer api, string keyId, string segredo, 
         string? keyIdUsado = null,
         byte[]? corpoEnviado = null,
         string? caminhoAssinado = null,
-        Action<HttpRequestMessage>? ajustar = null)
+        Action<HttpRequestMessage>? ajustar = null,
+        HttpMethod? metodo = null)
     {
+        var verbo = metodo ?? HttpMethod.Post;
         var bytes = corpo is null ? Array.Empty<byte>() : JsonSerializer.SerializeToUtf8Bytes(corpo, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         var timestamp = (instante ?? relogio?.GetUtcNow() ?? DateTimeOffset.UtcNow).ToUnixTimeSeconds().ToString();
         var n = nonce ?? NonceNovo();
-        var assinatura = Assinar(segredoUsado ?? Segredo, timestamp, n, "POST", caminhoAssinado ?? caminho, bytes);
+        var assinatura = Assinar(segredoUsado ?? Segredo, timestamp, n, verbo.Method, caminhoAssinado ?? caminho, bytes);
 
-        using var requisicao = new HttpRequestMessage(HttpMethod.Post, caminho) { Content = new ByteArrayContent(corpoEnviado ?? bytes) };
+        using var requisicao = new HttpRequestMessage(verbo, caminho) { Content = new ByteArrayContent(corpoEnviado ?? bytes) };
         requisicao.Content.Headers.ContentType = new("application/json");
         requisicao.Headers.Add("X-IaB-Key-Id", keyIdUsado ?? KeyId);
         requisicao.Headers.Add("X-IaB-Timestamp", timestamp);

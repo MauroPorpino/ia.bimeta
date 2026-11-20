@@ -116,6 +116,9 @@ public interface IQueueItemRepository
     /// <summary>Os itens em espera da fila, sem operação pendente, do mais urgente para o menos e, na mesma prioridade, do mais antigo.</summary>
     Task<IReadOnlyList<QueueItem>> ListWaitingAsync(Guid queueId, int take, CancellationToken cancellationToken);
 
+    /// <summary>Os itens (de qualquer estado) das sessões informadas, sem rastreamento, em UMA consulta: o histórico por cliente e a lista do CustomerOnly. O chamador limita a quantidade de sessões.</summary>
+    Task<IReadOnlyList<QueueItem>> ListBySessionsAsync(IReadOnlyCollection<Guid> sessionIds, CancellationToken cancellationToken);
+
     /// <summary>
     /// Quantas conversas ocupam o atendente nesta fila: as atribuídas a ele, ativas, MAIS as que têm uma atribuição ou transferência
     /// para ele ainda pendente (a intenção já gravada, que o Conversations ainda não confirmou).

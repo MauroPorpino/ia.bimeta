@@ -152,7 +152,8 @@ internal static class ConversationMapping
         m.Locale,
         m.LocaleOrigin,
         m.ChannelDataValues is { } dados && dados.TryGetValue(ChannelDataKeys.TemplateName, out var modelo) ? modelo : null,
-        anexo?.ToView());
+        anexo?.ToView(),
+        m.IsOptOutCommand);
 
     /// <summary>O arquivo como o histórico o mostra: o tipo verificado e o tamanho só com o arquivo disponível; nunca o caminho, o identificador do provedor nem URL.</summary>
     public static AttachmentView ToView(this MessageAttachment a) =>

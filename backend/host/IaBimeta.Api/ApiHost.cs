@@ -78,6 +78,9 @@ public static class ApiHost
         builder.Services.AddScoped<RequestContextHolder>();
         builder.Services.AddScoped<IRequestContextAccessor>(provider => provider.GetRequiredService<RequestContextHolder>());
 
+        // O contexto das chamadas assinadas do sistema externo que chegam ao Conversations (ADR 0041): o tenant vem do autenticador, nunca do corpo.
+        builder.Services.AddScoped<IIntegrationRequestContext, Embedded.IntegrationRequestContext>();
+
         // Cada módulo tem esquema, DbContext e migrations próprios, no mesmo banco por enquanto.
         builder.Services.AddAudit(provider => ConnectionStringOf(provider, "Audit"));
         builder.Services.AddTenancy(provider => ConnectionStringOf(provider, "Tenancy"));
@@ -280,6 +283,9 @@ public static class ApiHost
         app.MapTenancyEndpoints();
         app.MapAuditEndpoints();
         app.MapConversationsEndpoints();
+
+        // As rotas servidor-a-servidor do vínculo (ADR 0041): HMAC pela porta do Identity, com a mesma política de taxa das demais chamadas assinadas do Embedded.
+        app.MapConversationsIntegrationEndpoints(EmbeddedRateLimits.IntegrationPolicy);
         app.MapChannelsEndpoints();
 
         // A API administrativa do agente do tenant (ADR 0030): revisão das lacunas do FAQ, rascunho e publicação da definição.

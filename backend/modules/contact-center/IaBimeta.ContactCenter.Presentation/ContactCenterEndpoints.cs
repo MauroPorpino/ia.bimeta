@@ -140,6 +140,16 @@ public static class ContactCenterEndpoints
         central.MapPost("/handoffs", async (RequestHandoffRequest pedido, QueueItemService servico, CancellationToken ct) =>
             Resultado(await servico.RequestHandoffAsync(pedido.SessionId, pedido.QueueId, pedido.RequestId, pedido.Reason ?? "handoff", ct)));
 
+        // O histórico por cliente (ADR 0041, E2.3): só em sessão embutida com o cliente AUTORIZADO nela; 404 para tudo o mais (cliente não autorizado, sem sessão embutida, inexistente), sem oráculo. Paginado por chave estável
+        // (cursor opaco, limite de 1 a 100), só com o que o usuário já enxerga; o conteúdo das mensagens segue pelas rotas de item.
+        // LIMITAÇÃO DOCUMENTADA (ressalva da E2.3): o limite conta SESSÕES, e o que não vira item visível é omitido DEPOIS de paginar. Uma página pode trazer MENOS itens que o limite, ou ZERO, e mesmo assim trazer
+        // nextCursor: quem consome segue o cursor até nextCursor = null para alcançar todos os itens (o cursor nunca trunca). Sessão que nunca entrou em fila não tem item e não aparece.
+        central.MapGet("/customers/{customerRef}/history", async (string customerRef, int? limit, string? cursor, QueueItemService servico, CancellationToken ct) =>
+        {
+            var historico = await servico.GetCustomerHistoryAsync(customerRef, limit ?? 50, cursor, ct);
+            return historico is null ? Results.NotFound() : Results.Ok(historico);
+        });
+
         var itens = central.MapGroup("/items");
 
         itens.MapGet("/", async (Guid? queueId, string? status, bool? assignedToMe, int? take, QueueItemService servico, CancellationToken ct) =>
@@ -292,6 +302,112 @@ public static class ContactCenterEndpoints
             return MediaReplyResult(resultado);
         });
 
+        // O vínculo do cliente em foco com o contato do item (ADR 0041, E2.2): só em sessão embutida, com ConversationManage e o cliente autorizado pelo servidor do sistema externo. 404 para tudo o que não é permissão
+        // (item fora do escopo, sessão que não é embutida, cliente não autorizado): a mesma resposta, sem oráculo. O vínculo apenas localiza o contato; nunca concede visibilidade.
+        itens.MapPost("/{id:guid}/customer-link", async (Guid id, CustomerLinkRequest pedido, CustomerLinkService servico, CancellationToken ct) =>
+        {
+            var resultado = await servico.LinkAsync(id, pedido.CustomerRef, ct);
+            return resultado is null ? Results.NotFound() : Results.Ok(new { shared = resultado.Shared });
+        });
+
+        // Desvincula (lógico) e é idempotente: 204 existindo ou não vínculo ativo, desde que o atendente possa agir sobre o cliente.
+        itens.MapDelete("/{id:guid}/customer-link/{customerRef}", async (Guid id, string customerRef, CustomerLinkService servico, CancellationToken ct) =>
+            await servico.UnlinkAsync(id, customerRef, ct) ? Results.NoContent() : Results.NotFound());
+
+        // O consentimento do contato do item (ADR 0041, E2.4). Só ConsentManage (administrador e gestor da organização do item); atendente comum e TODA sessão embutida recebem 403 (a rota nem consta da lista embutida).
+        // O telefone é o do contato do item. 404 para item fora do escopo; 409 consent-phone-unavailable para contato de referência opaca; 409 consent-superseded para registro defasado.
+        itens.MapPost("/{id:guid}/consents", async (Guid id, RecordConsentRequest pedido, ItemConsentService servico, CancellationToken ct) =>
+        {
+            if (!TryParsePurpose(pedido.Purpose, out var finalidade))
+            {
+                throw new ContactCenterValidationException("invalid-purpose", "A finalidade deve ser Utility ou Marketing.");
+            }
+
+            if (!TryParseStatus(pedido.Status, out var situacao))
+            {
+                throw new ContactCenterValidationException("invalid-status", "A situação deve ser Granted ou Revoked.");
+            }
+
+            var resultado = await servico.RecordAsync(id, finalidade, situacao, pedido.Evidence, ParseCollectedAt(pedido.CollectedAt), ct);
+            return resultado switch
+            {
+                null => Results.NotFound(),
+                { Outcome: ConsentRecordOutcome.Recorded or ConsentRecordOutcome.Unchanged } r => Results.Ok(new { recorded = r.Outcome == ConsentRecordOutcome.Recorded, status = r.Status.ToString(), purpose = r.Purpose.ToString() }),
+                { Outcome: ConsentRecordOutcome.Superseded } => ConsentProblem(StatusCodes.Status409Conflict, "Registro defasado", "Há uma revogação posterior à data da coleta informada.", "consent-superseded"),
+                { Outcome: ConsentRecordOutcome.PhoneUnavailable } => ConsentProblem(StatusCodes.Status409Conflict, "Telefone indisponível", "O contato desta conversa não tem telefone para o consentimento.", "consent-phone-unavailable"),
+                { Outcome: ConsentRecordOutcome.Invalid } r => ConsentProblem(StatusCodes.Status400BadRequest, "Dados inválidos", "Um campo do consentimento é inválido.", r.RejectionCode ?? "invalid-request"),
+                _ => Results.NotFound(),
+            };
+        });
+
+        itens.MapGet("/{id:guid}/consents", async (Guid id, int? limit, ItemConsentService servico, CancellationToken ct) =>
+        {
+            var visao = await servico.GetAsync(id, limit ?? ConsentLimits.DefaultHistory, ct);
+            if (visao is null)
+            {
+                return Results.NotFound();
+            }
+
+            if (visao.Phone is null)
+            {
+                return ConsentProblem(StatusCodes.Status409Conflict, "Telefone indisponível", "O contato desta conversa não tem telefone para o consentimento.", "consent-phone-unavailable");
+            }
+
+            // O estado efetivo (a última linha por finalidade) traz a evidência completa; o histórico, só um resumo. A origem distingue o que a integração afirmou, o que o atendente registrou e o que o próprio titular disse.
+            return Results.Ok(new
+            {
+                organizationId = visao.OrganizationId,
+                phone = visao.Phone,
+                effective = visao.Effective.Select(ConsentJson),
+                history = visao.History.Select(ConsentJson),
+            });
+        });
+
+        // As ocorrências de possível saída (a estrutura de revisão; o reconhecimento por palavra-chave é da E2.5) e a decisão da pessoa autorizada, uma única vez.
+        itens.MapGet("/{id:guid}/optout-reviews", async (Guid id, ItemConsentService servico, CancellationToken ct) =>
+        {
+            var lista = await servico.ListOptOutReviewsAsync(id, ct);
+            return lista is null
+                ? Results.NotFound()
+                : Results.Ok(lista.Select(o => new
+                {
+                    id = o.Id,
+                    messageId = o.MessageId,
+                    reason = o.Reason.ToString(),
+                    keyword = o.Keyword,
+                    openedAt = o.OpenedAt,
+                    resolution = o.Resolution?.ToString(),
+                    resolvedAt = o.ResolvedAt,
+                    resolvedBy = o.ResolvedBy,
+                }));
+        });
+
+        itens.MapPost("/{id:guid}/optout-reviews/{messageId:guid}", async (Guid id, Guid messageId, ResolveOptOutRequest pedido, ItemConsentService servico, CancellationToken ct) =>
+        {
+            OptOutResolution decisao;
+            switch (pedido.Resolution?.Trim().ToLowerInvariant())
+            {
+                case "revoked":
+                    decisao = OptOutResolution.Revoked;
+                    break;
+                case "kept":
+                    decisao = OptOutResolution.Kept;
+                    break;
+                default:
+                    throw new ContactCenterValidationException("invalid-resolution", "A decisão deve ser Revoked ou Kept.");
+            }
+
+            var resultado = await servico.ResolveOptOutReviewAsync(id, messageId, decisao, ct);
+            return resultado switch
+            {
+                null => Results.NotFound(),
+                { Outcome: OptOutResolveOutcome.Resolved or OptOutResolveOutcome.AlreadyResolved } r => Results.Ok(new { resolved = r.Outcome == OptOutResolveOutcome.Resolved, resolution = r.Resolution.ToString() }),
+                { Outcome: OptOutResolveOutcome.Conflict } r => ConsentProblem(StatusCodes.Status409Conflict, "Ocorrência já resolvida", $"A ocorrência já foi resolvida como {r.Resolution}.", "optout-review-already-resolved"),
+                { Outcome: OptOutResolveOutcome.PhoneUnavailable } => ConsentProblem(StatusCodes.Status409Conflict, "Telefone indisponível", "O contato desta conversa não tem telefone para o consentimento.", "consent-phone-unavailable"),
+                _ => Results.NotFound(),
+            };
+        });
+
         itens.MapPost("/{id:guid}/close", async (Guid id, CloseItemRequest pedido, QueueItemService servico, CancellationToken ct) =>
         {
             var resultado = await servico.CloseAsync(id, pedido.RequestId, pedido.ReasonCode, ct);
@@ -309,6 +425,63 @@ public static class ContactCenterEndpoints
 
         return app;
     }
+
+    private static object ConsentJson(ConsentRecordView c) => new
+    {
+        id = c.Id,
+        purpose = c.Purpose.ToString(),
+        status = c.Status.ToString(),
+        origin = c.Origin.ToString(),
+        evidence = c.Evidence,
+        collectedAt = c.CollectedAt,
+        recordedAt = c.RecordedAt,
+        actorKind = c.ActorKind.ToString(),
+        actorId = c.ActorId,
+        customerRef = c.CustomerRef,
+    };
+
+    private static IResult ConsentProblem(int status, string title, string detail, string code) =>
+        Results.Problem(title: title, detail: detail, statusCode: status, extensions: new Dictionary<string, object?> { ["code"] = code });
+
+    private static bool TryParsePurpose(string? valor, out ConsentPurpose finalidade)
+    {
+        finalidade = default;
+        switch (valor?.Trim().ToLowerInvariant())
+        {
+            case "utility":
+                finalidade = ConsentPurpose.Utility;
+                return true;
+            case "marketing":
+                finalidade = ConsentPurpose.Marketing;
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private static bool TryParseStatus(string? valor, out ConsentStatus situacao)
+    {
+        situacao = default;
+        switch (valor?.Trim().ToLowerInvariant())
+        {
+            case "granted":
+                situacao = ConsentStatus.Granted;
+                return true;
+            case "revoked":
+                situacao = ConsentStatus.Revoked;
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    // Só ISO 8601 COM fuso (Z ou ±hh:mm): sem fuso a data seria ambígua. Qualquer outra coisa vira "ausente", e o Conversations a recusa com collected-at-invalid.
+    private static DateTimeOffset? ParseCollectedAt(string? texto) =>
+        texto is not null
+        && System.Text.RegularExpressions.Regex.IsMatch(texto.Trim(), @"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,7})?)?(Z|[+-]\d{2}:\d{2})$")
+        && DateTimeOffset.TryParse(texto.Trim(), System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var data)
+            ? data
+            : null;
 
     // O desfecho do Conversations vira o status HTTP (o mesmo para a resposta de texto e para a de modelo).
     private static IResult ReplyResult(RegisterHumanReplyResult resultado) => resultado.Outcome switch
@@ -383,7 +556,9 @@ public static class ContactCenterEndpoints
         }
         catch (ContactCenterValidationException ex)
         {
-            return Results.Problem(title: "Dados inválidos", detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+            return ex.Code is null
+                ? Results.Problem(title: "Dados inválidos", detail: ex.Message, statusCode: StatusCodes.Status400BadRequest)
+                : Results.Problem(title: "Dados inválidos", detail: ex.Message, statusCode: StatusCodes.Status400BadRequest, extensions: new Dictionary<string, object?> { ["code"] = ex.Code });
         }
         catch (QueueItemConflictException ex)
         {

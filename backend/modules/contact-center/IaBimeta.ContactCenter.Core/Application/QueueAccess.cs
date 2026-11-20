@@ -9,8 +9,15 @@ namespace IaBimeta.ContactCenter.Application;
 /// fila (atendente ou supervisor) e o fato de ser o responsável pela conversa. Estar em uma fila não dá acesso a nenhuma outra
 /// fila, unidade ou conversa do tenant, e o contexto de sistema (o worker, o Agents) passa por todas as portas.
 /// </summary>
-internal sealed record QueueAccess(RequestContext Context, ServiceQueue Queue, QueueMemberRole? Role)
+internal sealed record QueueAccess(RequestContext Context, ServiceQueue Queue, QueueMemberRole? Role, bool GrantedCustomerSession = false)
 {
+    /// <summary>
+    /// SÓ de leitura, e SÓ no modo <c>CustomerOnly</c> (ADR 0041, D5): a sessão do item é de um contato com vínculo ATIVO para um cliente autorizado na sessão embutida, verificado agora pelo Conversations. Nessas condições o item
+    /// aparece e o conteúdo pode ser lido, na organização da conexão, mesmo sem papel na fila; nada aqui abre escrita (<see cref="Outside"/> continua fechando <see cref="CanWork(QueueItem)"/>, gestão e participação).
+    /// </summary>
+    private bool CustomerRead(QueueItem item) =>
+        GrantedCustomerSession && Context.Principal?.Embedded is { CustomerOnly: true } escopo && item.OrganizationId == escopo.OrganizationId && Queue.OrganizationId == escopo.OrganizationId;
+
     public Guid? UserId => Context.Principal?.UserId;
 
     /// <summary>A sessão embutida (ADR 0039) só alcança filas da organização da conexão, e a de modo CustomerOnly nenhuma: fora do limite, nenhuma via de acesso vale (grupo, participação nem responsável).</summary>
@@ -33,7 +40,10 @@ internal sealed record QueueAccess(RequestContext Context, ServiceQueue Queue, Q
     /// (TEN-2): uma fila de que o usuário não participa e que ele não lê não existe para ele. O conteúdo da conversa tem regra
     /// própria (<see cref="CanReadConversation"/>).
     /// </summary>
-    public bool CanSee(QueueItem item) => CanSeeQueue && !Context.IsOutsideEmbeddedScope(item.OrganizationId);
+    public bool CanSee(QueueItem item) => CustomerRead(item) || (CanSeeQueue && !Context.IsOutsideEmbeddedScope(item.OrganizationId));
+
+    /// <summary>A leitura do conteúdo por cliente autorizado (<c>CustomerOnly</c>): vale para o item da sessão vinculada, em qualquer estado, e só leitura.</summary>
+    public bool CanReadConversation(QueueItem item, QueueItemStatus status, Guid? assignedUserId) => CustomerRead(item) || CanReadConversation(status, assignedUserId);
 
     /// <summary>
     /// A fila atende o lugar onde o item diz que a conversa está (organização, unidade e setor)? Quem lê o conteúdo por uma fila não pode ler

@@ -210,23 +210,98 @@ public sealed class InboundMessageService : IConversationIngestion
                 trabalho.Add(MessageAttachment.CreatePending(contexto.TenantId, mensagem.Id, sessao.Id, mensagem.Kind, arquivo, agora));
             }
 
-            await trabalho.CommitAsync(
-                new[]
-                {
-                    ConversationEventFactory.Create(
-                        contexto.TenantId,
-                        sessao.Id,
-                        ConversationEventTypes.InboundMessageRegistered,
-                        new InboundMessageRegisteredV1(sessao.Id, conversa.Id, mensagem.Id, registro.InboundSeq, mensagem.Kind, mensagem.ContentState, registro.LateArrival, mensagem.ChannelInstanceId),
-                        agora),
-                },
-                cancellationToken);
+            // A saída do cliente (ADR 0041, seção 5; E2.5): a decisão é determinística e o efeito (revogação ou ocorrência de possível saída), a auditoria e o evento entram na MESMA transação da mensagem,
+            // sob a trava da sessão. A reentrega do mesmo evento do provedor já saiu acima (duplicada), então a decisão acontece uma única vez por mensagem.
+            var eventos = new List<EventEnvelope>();
+            var comandoDeSaida = await ApplyOptOutAsync(trabalho, contexto, sessao, contato, mensagem, eventos, agora, cancellationToken);
+            eventos.Insert(
+                0,
+                ConversationEventFactory.Create(
+                    contexto.TenantId,
+                    sessao.Id,
+                    ConversationEventTypes.InboundMessageRegistered,
+                    new InboundMessageRegisteredV1(sessao.Id, conversa.Id, mensagem.Id, registro.InboundSeq, mensagem.Kind, mensagem.ContentState, registro.LateArrival, mensagem.ChannelInstanceId, comandoDeSaida),
+                    agora));
+            await trabalho.CommitAsync(eventos, cancellationToken);
 
             return new IngestInboundMessageResult(
                 IngestOutcome.Registered, sessao.Id, conversa.Id, mensagem.Id, registro.InboundSeq, registro.MessageSeq, registro.LateArrival, mensagem.ContentState);
         }
 
         throw new InvalidOperationException("Não foi possível obter uma sessão aberta para o contato.");
+    }
+
+    /// <summary>
+    /// Decide e aplica a saída do cliente para a mensagem recém-criada (ainda não gravada). Devolve <c>true</c> SÓ para o comando confirmado (<c>IsOptOutCommand</c>). Confirmado: revoga, na ORGANIZAÇÃO DA SESSÃO, as finalidades
+    /// da política que ainda não estão revogadas (origem <c>CustomerKeyword</c>, evidência = mensagem e palavra, nunca o texto livre) e levanta <c>OptOutRevoked</c>; sem telefone E.164 (contato opaco) não há o que revogar, e a
+    /// resposta automática continua suprimida. Ambíguo ou linguagem natural: NÃO revoga, abre a ocorrência (uma por mensagem) e levanta <c>PossibleOptOut</c>. Nenhum modelo de IA participa.
+    /// </summary>
+    private static async Task<bool> ApplyOptOutAsync(
+        IConversationUnitOfWork trabalho, RequestContext contexto, ServiceSession sessao, Contact contato, Message mensagem, List<EventEnvelope> eventos, DateTimeOffset agora, CancellationToken cancellationToken)
+    {
+        if (mensagem.Kind != MessageKind.Text)
+        {
+            return false;
+        }
+
+        var ultima = await trabalho.LastOutboundAsync(sessao.Id, cancellationToken);
+        var sinais = OptOutContext.NoOutbound;
+        if (ultima is not null)
+        {
+            var dados = ultima.ChannelDataValues;
+            sinais = new OptOutContext(
+                true,
+                ultima.Author,
+                dados is not null && dados.ContainsKey(ChannelDataKeys.TemplateName),
+                dados is not null && dados.TryGetValue(ChannelDataKeys.FlowExpectsFreeText, out var marcador) && marcador == "1",
+                await trabalho.HasInboundAfterAsync(sessao.Id, ultima.MessageSeq, cancellationToken));
+        }
+
+        var decisao = OptOutDecider.Decide(mensagem.Kind, mensagem.Text, sinais, OptOutPolicy.Default);
+        switch (decisao.Kind)
+        {
+            case OptOutDecisionKind.PossibleOptOut:
+                {
+                    var ocorrencia = OptOutReview.Open(contexto.TenantId, sessao.OrganizationId, sessao.Id, mensagem.Id, decisao.Reason!.Value, decisao.Keyword, agora);
+                    trabalho.Add(ocorrencia);
+                    eventos.Add(ConsentAuditEvents.Opened(contexto, ocorrencia, agora));
+                    eventos.Add(ConversationEventFactory.Create(
+                        contexto.TenantId, sessao.Id, ConversationEventTypes.SessionAttentionRaised, new SessionAttentionRaisedV1(sessao.Id, SessionAttentionReason.PossibleOptOut, 0, 0), agora));
+                    return false;
+                }
+
+            case OptOutDecisionKind.Confirmed:
+                {
+                    if (E164PhoneNumber.TryNormalize(contato.ExternalRef, out var telefone))
+                    {
+                        // A mesma trava do registro de consentimento: a revogação e um registro concorrente do mesmo telefone se serializam. A coleta é o instante da mensagem no provedor (nunca no futuro).
+                        await trabalho.LockConsentPhoneAsync(sessao.OrganizationId, telefone, cancellationToken);
+                        var coleta = mensagem.ProviderTimestamp is { } instante && instante < agora ? instante : agora;
+                        foreach (var finalidade in OptOutPolicy.Default.Purposes)
+                        {
+                            var atual = await trabalho.GetLatestConsentAsync(sessao.OrganizationId, telefone, finalidade, cancellationToken);
+                            if (atual is { Status: ConsentStatus.Revoked })
+                            {
+                                continue; // já revogada: nada a acrescentar
+                            }
+
+                            var linha = ContactConsent.Create(
+                                contexto.TenantId, sessao.OrganizationId, telefone, finalidade, ConsentStatus.Revoked, ConsentOrigin.CustomerKeyword, $"message:{mensagem.Id:N}:keyword:{decisao.Keyword}", coleta, ActorKind.System, null, null, sessao.Id, mensagem.Id, agora);
+                            trabalho.Add(linha);
+                            eventos.Add(ConsentAuditEvents.Record(contexto, ConsentAuditEvents.KeywordRevokeOperation, linha, agora));
+                        }
+                    }
+
+                    // O marcador vai com a mensagem (mesma transação): nem agora nem depois, quando outra mensagem reabrir o processamento, a IA ou o fluxo a tratam como entrada.
+                    mensagem.MarkAsOptOutCommand();
+                    eventos.Add(ConversationEventFactory.Create(
+                        contexto.TenantId, sessao.Id, ConversationEventTypes.SessionAttentionRaised, new SessionAttentionRaisedV1(sessao.Id, SessionAttentionReason.OptOutRevoked, 0, 0), agora));
+                    return true;
+                }
+
+            default:
+                return false;
+        }
     }
 
     public async Task<ContentChangeResult> SetMessageContentAsync(SetMessageContentCommand command, CancellationToken cancellationToken = default)

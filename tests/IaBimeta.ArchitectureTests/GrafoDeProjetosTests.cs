@@ -121,7 +121,7 @@ public class GrafoDeProjetosTests
                 ("Capabilities", "Audit"),
                 ("Channels", "Audit"), ("Channels", "Conversations"), ("Channels", "Tenancy"),
                 ("ContactCenter", "Audit"), ("ContactCenter", "Conversations"), ("ContactCenter", "Identity"), ("ContactCenter", "Tenancy"),
-                ("Conversations", "Audit"), ("Conversations", "Tenancy"),
+                ("Conversations", "Audit"), ("Conversations", "Identity"), ("Conversations", "Tenancy"), // Identity (E2.2, ADR 0041 §1): só Identity.Contracts, a aresta que a matriz já permitia (porta HMAC e consulta do contexto embutido)
                 ("Identity", "Audit"), ("Identity", "Tenancy"),
                 ("Tenancy", "Audit"),
                 ("Workflows", "Audit"), ("Workflows", "Capabilities"), ("Workflows", "Conversations"),

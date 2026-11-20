@@ -77,6 +77,12 @@ internal sealed class InboundForFlowHandler : EventHandlerBase<InboundMessageReg
             payload.SessionId,
             async token =>
             {
+                // ADR 0041 (E2.5): o comando de saída confirmado não escolhe fluxo nem acorda instância (a mensagem fica registrada e visível).
+                if (payload.IsOptOutCommand)
+                {
+                    return;
+                }
+
                 if (await _router.ResolveOnInboundAsync(payload.SessionId, payload.InboundSeq, token) != AutomationOwner.Flow)
                 {
                     return;

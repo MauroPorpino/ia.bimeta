@@ -125,7 +125,7 @@ public sealed class FlowInterpreter
         // Ainda há tentativas: repete a pergunta (texto de "inválido" se houver), sem sair do nó.
         var effects = new List<FlowEffect>();
         var text = TemplateRenderer.Render(string.IsNullOrWhiteSpace(cfg.InvalidText) ? cfg.Prompt : cfg.InvalidText, vars);
-        effects.Add(new SendMessageEffect(Key(step, effects), node.Id, text, cfg.Choices ?? []));
+        effects.Add(new SendMessageEffect(Key(step, effects), node.Id, text, cfg.Choices ?? [], cfg.AnswerType != AnswerType.Choice));
         return new StepResult(
             new FlowState(FlowStatus.WaitingInput, node.Id, Freeze(vars), attempts, step, Deadline(cfg, now)),
             effects,
@@ -174,7 +174,7 @@ public sealed class FlowInterpreter
                     continue;
 
                 case NodeType.Question:
-                    effects.Add(new SendMessageEffect(Key(step, effects), node.Id, TemplateRenderer.Render(cfg.Prompt, vars), cfg.Choices ?? []));
+                    effects.Add(new SendMessageEffect(Key(step, effects), node.Id, TemplateRenderer.Render(cfg.Prompt, vars), cfg.Choices ?? [], cfg.AnswerType != AnswerType.Choice));
                     return new StepResult(new FlowState(FlowStatus.WaitingInput, node.Id, Freeze(vars), 0, step, Deadline(cfg, now)), effects, visited);
 
                 case NodeType.Condition:

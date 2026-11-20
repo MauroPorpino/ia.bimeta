@@ -150,6 +150,9 @@ public enum RegisterReplyOutcome
 
     /// <summary>Tipo ou conteúdo não permitido, ou destino que não pertence à sessão.</summary>
     ShapeNotAllowed = 8,
+
+    /// <summary>A última entrada do cliente é um comando de saída CONFIRMADO (ADR 0041): nenhuma mensagem automática de fluxo é registrada. Só a mensagem de fluxo devolve isto (a resposta de IA já é recusada por defasagem).</summary>
+    OptOutCommand = 9,
 }
 
 public sealed record RegisterAiReplyResult(RegisterReplyOutcome Outcome, Guid? MessageId, long? AnsweredThroughSeq, long? LastInboundSeq);
@@ -191,6 +194,7 @@ public interface IFlowCommands
 /// <param name="BasedOnInboundSeq">O <c>LastInboundSeq</c> do snapshot: a cerca de entrada (defasada é recusada).</param>
 /// <param name="TargetConversationId">A conversa de destino: precisa pertencer à sessão.</param>
 /// <param name="CoversInbound">Se a mensagem cobre logicamente a entrada até <paramref name="BasedOnInboundSeq"/>. Falso quando o passo termina entregando a conversa ao agente: ele ainda precisa responder à última pergunta.</param>
+/// <param name="ExpectsFreeText">Verdadeiro quando o passo termina numa pergunta de TEXTO LIVRE do fluxo (marcador explícito do nó, nunca texto de modelo): a primeira entrada do cliente depois desta mensagem pode ser a resposta, e por isso uma palavra de saída é ambígua (ADR 0041, regra 3). Ausente = falso.</param>
 public sealed record RegisterFlowMessageCommand(
     Guid SessionId,
     Guid TurnId,
@@ -199,7 +203,8 @@ public sealed record RegisterFlowMessageCommand(
     long BasedOnInboundSeq,
     Guid TargetConversationId,
     string Text,
-    bool CoversInbound = true);
+    bool CoversInbound = true,
+    bool ExpectsFreeText = false);
 
 public sealed record RegisterFlowMessageResult(RegisterReplyOutcome Outcome, Guid? MessageId, long? AnsweredThroughSeq, long? LastInboundSeq);
 

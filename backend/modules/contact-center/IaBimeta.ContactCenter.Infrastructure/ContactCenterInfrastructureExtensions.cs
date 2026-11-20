@@ -45,6 +45,8 @@ public static class ContactCenterInfrastructureExtensions
         services.AddScoped<ServiceQueueService>();
         services.AddScoped<HandlingExecutor>();
         services.AddScoped<QueueItemService>();
+        services.AddScoped<CustomerLinkService>();
+        services.AddScoped<ItemConsentService>();
         services.AddScoped<IHandoffRequests, HandoffRequests>();
 
         // Consumo durável do estado de atendimento do Conversations (etapa 4): o inbox do módulo e os handlers. Quem entrega os

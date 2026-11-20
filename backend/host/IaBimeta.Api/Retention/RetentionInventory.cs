@@ -77,9 +77,12 @@ internal static class RetentionInventory
         ["identity.user_organization_grants"] = (DataClass.Personal, "papéis dos colaboradores"),
         ["identity.external_identities"] = (DataClass.Personal, "vínculo entre o usuário do ERP e o usuário interno (Embedded, ADR 0039): identificador externo e usuário"),
         ["identity.session_customer_grants"] = (DataClass.Personal, "clientes do ERP em foco numa sessão embutida (identificador opaco do cliente); morre com a sessão"),
+        ["conversations.contact_external_links"] = (DataClass.Personal, "vínculo entre o cliente do sistema externo (identificador opaco) e o contato (ADR 0041): só identificadores, origem e autores; descobribilidade, nunca visibilidade; a desvinculação é lógica e a linha nunca é apagada por prazo. Retenção provisória, sem expurgo, até a avaliação jurídica e da LGPD antes da produção (D7)"),
 
         // Registros de referência (não se apagam por prazo)
         ["audit.audit_events"] = (DataClass.LegalRecord, "trilha de auditoria"),
+        ["conversations.contact_consents"] = (DataClass.LegalRecord, "consentimento de contato por organização, telefone E.164 e finalidade (ADR 0040 e 0041): SOMENTE ACRÉSCIMO (o banco recusa UPDATE e DELETE), com origem, evidência e autor. Não se apaga por prazo; nenhuma pseudonimização sem decisão formal e ADR. Retenção provisória, sem prazo definido: a ausência de prazo NÃO autoriza retenção ilimitada e a política definitiva depende da avaliação jurídica e da LGPD antes da produção (D7)"),
+        ["conversations.optout_reviews"] = (DataClass.LegalRecord, "ocorrência de possível saída do cliente e a decisão da pessoa autorizada sobre o consentimento (ADR 0041, E2.4): resolvida uma única vez (o banco recusa a segunda atualização e qualquer exclusão); guarda só o motivo, a palavra normalizada e o responsável, nunca o texto livre. Mesma retenção provisória do consentimento: sem prazo definido, sem expurgo, a política depende da avaliação jurídica e da LGPD (D7)"),
         ["contact_center.audit_outbox"] = (DataClass.LegalRecord, "auditoria pendente de entrega ao Audit"),
         ["identity.audit_outbox"] = (DataClass.LegalRecord, "auditoria do Embedded pendente de entrega ao Audit (E1-R): guardada na transação do consumo do ticket, entregue pelo Worker e apagada só depois da entrega"),
         ["ai_gateway.ai_requests"] = (DataClass.LegalRecord, "ledger de consumo de IA (a correlação com o atendimento é a parte a pseudonimizar)"),

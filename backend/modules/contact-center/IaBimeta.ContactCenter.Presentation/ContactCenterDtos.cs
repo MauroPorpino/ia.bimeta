@@ -40,3 +40,15 @@ public sealed record RoutingPreviewRequest(Guid SessionId);
 public sealed record SetPresenceRequest(AgentStatus Status);
 
 public sealed record SetPriorityRequest(int Priority, Guid RequestId, string? Reason);
+
+/// <summary>O cliente em foco que o atendente vincula ao contato do item (ADR 0041). O identificador é opaco, do sistema externo; só vale se a sessão embutida o autorizou.</summary>
+public sealed record CustomerLinkRequest(string? CustomerRef);
+
+/// <summary>
+/// O consentimento que o atendente com <c>ConsentManage</c> registra para o telefone do contato do item (ADR 0041, E2.4). Finalidade e situação são NOMES (<c>Utility</c>/<c>Marketing</c>, <c>Granted</c>/<c>Revoked</c>);
+/// a data da coleta é texto ISO 8601 com fuso. O telefone não vem aqui: é o do contato do item.
+/// </summary>
+public sealed record RecordConsentRequest(string? Purpose, string? Status, string? Evidence, string? CollectedAt);
+
+/// <summary>A decisão da pessoa autorizada sobre uma possível saída: <c>Revoked</c> ou <c>Kept</c>.</summary>
+public sealed record ResolveOptOutRequest(string? Resolution);

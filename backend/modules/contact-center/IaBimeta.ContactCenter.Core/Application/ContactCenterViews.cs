@@ -161,3 +161,9 @@ public enum OperationOutcome
 }
 
 public sealed record QueueItemOperationResult(QueueItemView Item, OperationOutcome Outcome);
+
+/// <summary>Um item do histórico por cliente (ADR 0041): só identificadores, datas, fila e situação. O conteúdo das mensagens segue pelas rotas de item, com as autorizações delas.</summary>
+public sealed record CustomerHistoryItem(Guid ItemId, Guid SessionId, Guid ContactId, DateTimeOffset OpenedAt, DateTimeOffset? ClosedAt, Guid QueueId, QueueItemStatus Status);
+
+/// <summary>O histórico de um cliente autorizado na sessão embutida. <c>Resolved</c>: há vínculo ativo; <c>Shared</c>: o vínculo é ambíguo (contato ou cliente compartilhado) e a interface o mostra como tal.</summary>
+public sealed record CustomerHistoryView(string CustomerRef, bool Resolved, bool Shared, IReadOnlyList<CustomerHistoryItem> Items, string? NextCursor);

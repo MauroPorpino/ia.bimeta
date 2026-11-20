@@ -132,6 +132,24 @@ public interface IConversationUnitOfWork : IAsyncDisposable
 
     void Add(MessageAttachment attachment);
 
+    // E2.5 (ADR 0041, seção 5): a decisão de saída e o seu efeito entram na MESMA transação da mensagem de entrada, sob a trava da sessão.
+
+    /// <summary>Já houve entrada do cliente com <c>MessageSeq</c> maior que o informado (a mensagem que está sendo registrada ainda não conta: não foi gravada).</summary>
+    Task<bool> HasInboundAfterAsync(Guid sessionId, long messageSeq, CancellationToken cancellationToken);
+
+    /// <summary>A última entrada do cliente (a de <c>InboundSeq</c> informado) é um comando de saída confirmado? Lida sob a trava da sessão: é o ponto efetivo de autorização do trabalho automático pendente (ADR 0041).</summary>
+    Task<bool> LastInboundIsOptOutCommandAsync(Guid sessionId, long lastInboundSeq, CancellationToken cancellationToken);
+
+    /// <summary>Trava (até o fim da transação) o telefone na organização, a MESMA trava do registro de consentimento: a revogação por palavra-chave e um registro concorrente se serializam.</summary>
+    Task LockConsentPhoneAsync(Guid organizationId, string phone, CancellationToken cancellationToken);
+
+    /// <summary>A última linha (maior <c>seq</c>) do consentimento da chave (organização, telefone, finalidade), ou <c>null</c>.</summary>
+    Task<ContactConsent?> GetLatestConsentAsync(Guid organizationId, string phone, IaBimeta.Conversations.Contracts.ConsentPurpose purpose, CancellationToken cancellationToken);
+
+    void Add(ContactConsent consent);
+
+    void Add(OptOutReview review);
+
     /// <summary>O arquivo da mensagem, rastreado para alteração (a mensagem e a sessão já devem estar travadas por <see cref="LockMessageAsync"/>), ou nulo.</summary>
     Task<MessageAttachment?> FindAttachmentForUpdateAsync(Guid messageId, CancellationToken cancellationToken);
 

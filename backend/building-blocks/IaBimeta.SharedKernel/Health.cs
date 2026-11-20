@@ -33,6 +33,12 @@ public sealed class HealthThresholds
     /// <summary>Conversa esperando atendente há mais que isto (aviso: pode ser só falta de atendente).</summary>
     public TimeSpan QueueWaitingAfter { get; set; } = TimeSpan.FromMinutes(30);
 
+    /// <summary>
+    /// A meta operacional para decidir uma possível saída do cliente (<c>PossibleOptOut</c>, ADR 0041): a pendência mais antiga acima disto vira aviso. Diretriz, SEM expiração automática: nenhum prazo revoga nem mantém sozinho.
+    /// O padrão é de 24 h corridas (a aproximação de "um dia útil": o calendário de dias úteis da empresa não existe no produto).
+    /// </summary>
+    public TimeSpan OptOutReviewTarget { get; set; } = TimeSpan.FromHours(24);
+
     /// <summary>O Worker some do banco (nenhuma atividade das suas conexões) há mais que isto: parado ou travado.</summary>
     public TimeSpan WorkerSilenceAfter { get; set; } = TimeSpan.FromSeconds(60);
 
@@ -43,7 +49,7 @@ public sealed class HealthThresholds
     public void Validate()
     {
         if (EventStuckAfter <= TimeSpan.Zero || OutboundStuckAfter <= TimeSpan.Zero || TurnStuckAfter <= TimeSpan.Zero || QueueWaitingAfter <= TimeSpan.Zero
-            || WorkerSilenceAfter <= TimeSpan.Zero || RecentFailureWindow <= TimeSpan.Zero)
+            || WorkerSilenceAfter <= TimeSpan.Zero || RecentFailureWindow <= TimeSpan.Zero || OptOutReviewTarget <= TimeSpan.Zero)
         {
             throw new InvalidOperationException("A configuração de Health é inválida: todo limite deve ser positivo.");
         }

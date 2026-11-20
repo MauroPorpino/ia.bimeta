@@ -2,6 +2,7 @@ using IaBimeta.Conversations.Application;
 using IaBimeta.Conversations.Contracts.Commands;
 using IaBimeta.Conversations.Contracts.Queries;
 using IaBimeta.Conversations.Domain;
+using IaBimeta.Messaging;
 using IaBimeta.SharedKernel;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -73,6 +74,27 @@ public static class ConversationsInfrastructureExtensions
 
         services.AddScoped<ConversationQueryService>();
         services.AddScoped<IConversationQueries>(provider => provider.GetRequiredService<ConversationQueryService>());
+
+        // O vínculo entre o cliente do sistema externo e o contato (ADR 0041, E2.2): o serviço serve as rotas assinadas do sistema externo (Presentation) e o atendente em sessão embutida (ContactCenter, pela porta).
+        // A auditoria vai ao outbox do módulo na transação do efeito e é entregue pelo handler (o relay do Worker).
+        services.AddScoped<IContactLinkStore, ContactLinkStore>();
+        services.AddScoped<ContactLinkService>();
+        services.AddScoped<IContactLinkCommands>(provider => provider.GetRequiredService<ContactLinkService>());
+        services.AddEventHandler<ConversationAuditHandler>();
+
+        // As consultas do vínculo para o ContactCenter (E2.3): histórico por cliente e leitura do CustomerOnly.
+        services.AddScoped<IContactLinkReader, ContactLinkReader>();
+        services.AddScoped<ContactLinkQueryService>();
+        services.AddScoped<IContactLinkQueries>(provider => provider.GetRequiredService<ContactLinkQueryService>());
+
+        // O consentimento (E2.4): registro pelo servidor do sistema externo (Presentation) e pelo atendente com ConsentManage (ContactCenter, pela porta), resolução de possível saída e consulta. A auditoria usa o
+        // mesmo outbox e o mesmo handler do vínculo.
+        services.AddScoped<IConsentStore, ConsentStore>();
+        services.AddScoped<ConsentService>();
+        services.AddScoped<IConsentCommands>(provider => provider.GetRequiredService<ConsentService>());
+        services.AddScoped<IConsentReader, ConsentReader>();
+        services.AddScoped<ConsentQueryService>();
+        services.AddScoped<IConsentQueries>(provider => provider.GetRequiredService<ConsentQueryService>());
 
         return services;
     }

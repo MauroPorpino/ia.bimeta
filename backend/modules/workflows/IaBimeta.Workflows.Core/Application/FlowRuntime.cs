@@ -262,7 +262,7 @@ public sealed class FlowRuntime
                 return null;
             }
 
-            var doCliente = historico.Items.Where(m => m.Direction == MessageDirection.Inbound && m.Author == MessageAuthor.Customer).OrderBy(m => m.MessageSeq).ToList();
+            var doCliente = historico.Items.Where(m => m.Direction == MessageDirection.Inbound && m.Author == MessageAuthor.Customer && !m.IsOptOutCommand).OrderBy(m => m.MessageSeq).ToList();
             if (doCliente.Count > 0 || historico.NextCursor is null)
             {
                 return doCliente;
@@ -321,11 +321,11 @@ public sealed class FlowRuntime
         await _store.SaveAsync(ct);
     }
 
-    private sealed record EffectPayload(string? Text, IReadOnlyList<FlowChoice>? Choices, string? OperationKey, Dictionary<string, string>? Parameters, string? Query, string? SourceKey, string? ReasonCode);
+    private sealed record EffectPayload(string? Text, IReadOnlyList<FlowChoice>? Choices, string? OperationKey, Dictionary<string, string>? Parameters, string? Query, string? SourceKey, string? ReasonCode, bool ExpectsFreeText = false);
 
     private static (EffectKind Kind, EffectPayload Payload) Describe(FlowEffect e) => e switch
     {
-        SendMessageEffect m => (EffectKind.SendMessage, new EffectPayload(m.Text, m.Choices, null, null, null, null, null)),
+        SendMessageEffect m => (EffectKind.SendMessage, new EffectPayload(m.Text, m.Choices, null, null, null, null, null, m.ExpectsFreeText)),
         CallCapabilityEffect c => (EffectKind.CallCapability, new EffectPayload(null, null, c.OperationKey, new Dictionary<string, string>(c.Parameters), null, null, null)),
         LookupKnowledgeEffect k => (EffectKind.LookupKnowledge, new EffectPayload(null, null, null, null, k.Query, k.SourceKey, null)),
         RequestHandoffEffect h => (EffectKind.RequestHandoff, new EffectPayload(null, null, null, null, null, null, h.ReasonCode)),
@@ -423,6 +423,7 @@ public sealed class FlowRuntime
     {
         var partes = new List<string>();
         IReadOnlyList<FlowChoice>? opcoes = null;
+        var esperaTextoLivre = false;
         foreach (var e in grupo)
         {
             var conteudo = ReadPayload(e);
@@ -432,6 +433,7 @@ public sealed class FlowRuntime
             }
 
             opcoes = conteudo.Choices is { Count: > 0 } ? conteudo.Choices : null;
+            esperaTextoLivre |= conteudo.ExpectsFreeText;
         }
 
         var texto = string.Join("\n\n", partes);
@@ -471,7 +473,7 @@ public sealed class FlowRuntime
             }
 
             var registro = await _flowCommands.RegisterFlowMessageAsync(
-                new RegisterFlowMessageCommand(inst.SessionId, turno, abertura.Grant!.Epoch, abertura.Grant.StateVersion, abertura.Snapshot!.LastInboundSeq, abertura.Snapshot.ConversationId, texto, cobre), ct);
+                new RegisterFlowMessageCommand(inst.SessionId, turno, abertura.Grant!.Epoch, abertura.Grant.StateVersion, abertura.Snapshot!.LastInboundSeq, abertura.Snapshot.ConversationId, texto, cobre, esperaTextoLivre), ct);
             resultado = registro.Outcome;
             if (resultado is RegisterReplyOutcome.Accepted or RegisterReplyOutcome.AlreadyRegistered)
             {
@@ -495,6 +497,12 @@ public sealed class FlowRuntime
 
                 await _store.SaveAsync(ct);
                 return true;
+
+            case RegisterReplyOutcome.OptOutCommand:
+                // O cliente pediu a saída (comando confirmado): a mensagem preparada NÃO é enviada e o fluxo é cancelado sem falha; a sessão volta ao agente e uma mensagem comum depois é atendida normalmente.
+                await SupersedeAsync(grupo, "opt-out-command", ct);
+                await CancelAsync(inst, "opt-out-command", release: true, ct);
+                return false;
 
             case RegisterReplyOutcome.NotAiResponder:
             case RegisterReplyOutcome.StaleState:

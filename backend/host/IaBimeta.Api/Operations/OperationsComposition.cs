@@ -24,6 +24,7 @@ internal static class OperationsComposition
         services.AddChannelsHealth();
         services.AddAgentsHealth();
         services.AddContactCenterHealth();
+        services.AddConversationsHealth();
         return services;
     }
 }

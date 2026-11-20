@@ -30,6 +30,7 @@ public static class RolePermissions
         Permission.IntegrationRead,
         Permission.WorkflowRead,
         Permission.WorkflowTest,
+        Permission.ConsentManage,
     };
 
     // O atendente (papel da federação, ADR 0039): lê a organização, atende e transfere dentro das filas de que participa. Nada de estrutura, usuários, canais, integrações, fluxos nem auditoria.
@@ -67,6 +68,7 @@ public static class RolePermissions
         Permission.WorkflowManage,
         Permission.WorkflowPublish,
         Permission.WorkflowTest,
+        Permission.ConsentManage,
     };
 
     private static readonly Permission[] TenantAdminExtraPermissions =

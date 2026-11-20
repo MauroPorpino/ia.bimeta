@@ -92,6 +92,12 @@ internal sealed class InboundMessageRegisteredHandler : EventHandlerBase<Inbound
             payload.SessionId,
             async token =>
             {
+                // ADR 0041 (E2.5): o comando de saída CONFIRMADO (PARAR, SAIR, CANCELAR) já revogou o consentimento na transação da mensagem e nunca abre nem estende turno de IA, nem aciona a resposta automática.
+                if (payload.IsOptOutCommand)
+                {
+                    return;
+                }
+
                 // ADR 0038: a sessão que é de um FLUXO não ganha turno de IA (e a primeira mensagem de uma sessão pode escolher o fluxo).
                 if (!await TurnHandling.OwnedByFlowAsync(_router, payload.SessionId, payload.InboundSeq, token))
                 {
