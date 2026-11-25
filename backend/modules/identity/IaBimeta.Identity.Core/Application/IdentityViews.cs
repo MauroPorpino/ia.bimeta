@@ -26,4 +26,5 @@ public sealed record UserAccessView(Guid UserId, string Email, string DisplayNam
 
 public sealed record GrantView(Guid? OrganizationId, Role Role);
 
-public sealed record CurrentUserView(Guid Id, string Email, string DisplayName, IReadOnlyList<GrantView> Grants, Locale? PreferredLocale = null);
+/// <param name="Permissions">As permissões EFETIVAS da sessão (perfil + ajustes individuais, com o teto do Embedded já aplicado): é o que a interface usa para decidir o que mostrar. O servidor continua sendo a autoridade.</param>
+public sealed record CurrentUserView(Guid Id, string Email, string DisplayName, IReadOnlyList<GrantView> Grants, Locale? PreferredLocale = null, IReadOnlyList<PermissionGrant>? Permissions = null);

@@ -144,9 +144,20 @@ internal sealed class EmbeddedEmMemoria : IEmbeddedStore
         return Task.FromResult(true);
     }
 
-    public Task<bool> SetIdentityStatusAsync(TenantId tenantId, Guid connectionId, Guid identityId, ExternalIdentityStatus status, PendingAudit audit, DateTimeOffset now, CancellationToken cancellationToken)
+    public async Task<bool> SetIdentityStatusAsync(TenantId tenantId, Guid connectionId, Guid identityId, ExternalIdentityStatus status, PendingAudit audit, DateTimeOffset now, Func<CancellationToken, Task>? admit, CancellationToken cancellationToken)
     {
         var vinculo = Vinculos.FirstOrDefault(i => i.TenantId == tenantId && i.ConnectionId == connectionId && i.Id == identityId);
+        // Como o store: a verificação de vaga só roda se a transição AUMENTA o uso (usuário federado ativo, este vínculo desativado e nenhum outro vínculo ativo dele), decidida com o estado atual.
+        if (admit is not null && vinculo is { IsActive: false })
+        {
+            var dono = Identidade?.Usuarios.FirstOrDefault(u => u.Id == vinculo.UserId);
+            var outroAtivo = Vinculos.Any(i => i.UserId == vinculo.UserId && i.Id != vinculo.Id && i.IsActive);
+            if (dono is { AuthMode: UserAuthMode.Federated, Status: UserStatus.Active } && !outroAtivo)
+            {
+                await admit(cancellationToken);
+            }
+        }
+
         vinculo?.SetStatus(status);
         if (status == ExternalIdentityStatus.Disabled)
         {
@@ -158,14 +169,15 @@ internal sealed class EmbeddedEmMemoria : IEmbeddedStore
             AuditoriaPendente.Add(audit);
         }
 
-        return Task.FromResult(vinculo is not null);
+        return vinculo is not null;
     }
 
-    public Task<bool> TryProvisionFederatedUserAsync(User user, UserOrganizationGrant grant, ExternalIdentity identity, PendingAudit audit, CancellationToken cancellationToken)
+    public async Task<bool> TryProvisionFederatedUserAsync(User user, UserOrganizationGrant grant, ExternalIdentity identity, PendingAudit audit, Func<CancellationToken, Task> admit, CancellationToken cancellationToken)
     {
+        await admit(cancellationToken);
         if (Vinculos.Any(i => i.TenantId == identity.TenantId && i.ConnectionId == identity.ConnectionId && i.ExternalUserId == identity.ExternalUserId))
         {
-            return Task.FromResult(false);
+            return false;
         }
 
         Identidade?.Usuarios.Add(user);
@@ -173,7 +185,7 @@ internal sealed class EmbeddedEmMemoria : IEmbeddedStore
         Provisionados.Add((user, grant));
         Vinculos.Add(identity);
         AuditoriaPendente.Add(audit);
-        return Task.FromResult(true);
+        return true;
     }
 
     public Task<bool> AddTicketAsync(LaunchTicket ticket, PendingAudit audit, DateTimeOffset now, CancellationToken cancellationToken)

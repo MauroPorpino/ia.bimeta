@@ -79,7 +79,9 @@ public sealed class EmbeddedExchangeService
 
             var vinculo = await _store.FindIdentityAsync(tenantId, conexao.Id, consumido.ExternalUserId, cancellationToken);
             var usuario = await _auth.FindUserByIdAsync(tenantId, consumido.UserId, cancellationToken);
-            if (vinculo is not { IsActive: true } || vinculo.UserId != consumido.UserId || usuario is null)
+            // Usuário inativo (ou reativado DEPOIS de o ticket ser emitido) não abre sessão: um ticket anterior à última mudança de situação nunca é reaproveitado.
+            if (vinculo is not { IsActive: true } || vinculo.UserId != consumido.UserId || usuario is not { Status: UserStatus.Active }
+                || (usuario.StatusChangedAt is { } mudouEm && consumido.CreatedAt < mudouEm))
             {
                 throw new EmbeddedAuthenticationException();
             }

@@ -294,10 +294,34 @@ internal sealed class EmbeddedStore : IEmbeddedStore
         }
     }
 
-    public async Task<bool> SetIdentityStatusAsync(TenantId tenantId, Guid connectionId, Guid identityId, ExternalIdentityStatus status, PendingAudit audit, DateTimeOffset now, CancellationToken cancellationToken)
+    public async Task<bool> SetIdentityStatusAsync(TenantId tenantId, Guid connectionId, Guid identityId, ExternalIdentityStatus status, PendingAudit audit, DateTimeOffset now, Func<CancellationToken, Task>? admit, CancellationToken cancellationToken)
     {
         using var escopo = _db.UseAuthenticationTenant(tenantId);
         await using var transacao = await BeginAsync(cancellationToken);
+        if (admit is not null)
+        {
+            // A ativação do vínculo é decidida SOB a trava de admissão, com o estado ATUAL (relido aqui): se a transição aumenta o uso (usuário federado ativo, este vínculo desativado e nenhum outro vínculo ativo dele), exige vaga.
+            // Nada é decidido com o que foi lido antes da transação: usuário, vínculo, política e ocupação são relidos dentro dela, na mesma conexão.
+            var chaveDaTrava = UserAdmissionLock.KeyFor(tenantId);
+            await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({chaveDaTrava}, 0))", cancellationToken);
+            // Trava a linha do vínculo ANTES de ler o estado (depois da trava de admissão): a decisão vale para o estado que a atualização vai encontrar (nenhuma mudança do vínculo passa entre a leitura e a gravação).
+            await _db.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT 1 FROM identity.external_identities WHERE tenant_id = {tenantId.Value} AND id = {identityId} FOR UPDATE",
+                cancellationToken);
+            var atual = await _db.ExternalIdentities.IgnoreQueryFilters().AsNoTracking()
+                .FirstOrDefaultAsync(i => i.TenantId == tenantId && i.ConnectionId == connectionId && i.Id == identityId, cancellationToken);
+            if (atual is not null && atual.Status != ExternalIdentityStatus.Active)
+            {
+                var dono = await _db.Users.IgnoreQueryFilters().AsNoTracking().FirstOrDefaultAsync(u => u.TenantId == tenantId && u.Id == atual.UserId, cancellationToken);
+                var outroAtivo = dono is not null && await _db.ExternalIdentities.IgnoreQueryFilters().AsNoTracking()
+                    .AnyAsync(i => i.TenantId == tenantId && i.UserId == dono.Id && i.Id != identityId && i.Status == ExternalIdentityStatus.Active, cancellationToken);
+                if (dono is { AuthMode: UserAuthMode.Federated, Status: UserStatus.Active } && !outroAtivo)
+                {
+                    await admit(cancellationToken);
+                }
+            }
+        }
+
         var vinculos = _db.ExternalIdentities.IgnoreQueryFilters()
             .Where(i => i.TenantId == tenantId && i.ConnectionId == connectionId && i.Id == identityId);
 
@@ -316,10 +340,16 @@ internal sealed class EmbeddedStore : IEmbeddedStore
         return alteradas == 1;
     }
 
-    public async Task<bool> TryProvisionFederatedUserAsync(User user, UserOrganizationGrant grant, ExternalIdentity identity, PendingAudit audit, CancellationToken cancellationToken)
+    public async Task<bool> TryProvisionFederatedUserAsync(User user, UserOrganizationGrant grant, ExternalIdentity identity, PendingAudit audit, Func<CancellationToken, Task> admit, CancellationToken cancellationToken)
     {
         using var escopo = _db.UseAuthenticationTenant(identity.TenantId);
         await using var transacao = await _db.Database.BeginTransactionAsync(cancellationToken);
+
+        // O JIT é um INGRESSO: serializa com o cadastro e a alteração do limite (a mesma trava), e a habilitação e a vaga são conferidas sob ela.
+        var chaveDaTrava = UserAdmissionLock.KeyFor(identity.TenantId);
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({chaveDaTrava}, 0))", cancellationToken);
+        await admit(cancellationToken);
+
 
         _db.Users.Add(user);
         _db.Grants.Add(grant);
@@ -441,6 +471,16 @@ internal sealed class EmbeddedStore : IEmbeddedStore
         await _db.Database.ExecuteSqlInterpolatedAsync(
             $"SELECT 1 FROM identity.external_identities WHERE tenant_id = {session.TenantId.Value} AND connection_id = {session.IntegrationId} AND external_user_id = {session.ExternalUserId} FOR UPDATE",
             cancellationToken);
+
+        // O usuário precisa continuar ATIVO e fica travado (compartilhado) até o commit: a desativação (que atualiza a linha e revoga as sessões) se serializa com esta gravação, então uma sessão embutida nunca nasce depois da revogação.
+        // Ordem canônica preservada (chave, vínculo, USUÁRIO, ticket, sessões) e nenhuma segunda conexão.
+        var usuarioAtivo = await _db.Database
+            .SqlQuery<int>($"SELECT 1 AS \"Value\" FROM identity.users WHERE tenant_id = {session.TenantId.Value} AND id = {session.UserId} AND status = 'Active' FOR SHARE")
+            .ToListAsync(cancellationToken);
+        if (usuarioAtivo.Count == 0)
+        {
+            return false;
+        }
 
         // O ticket é consumido na MESMA transação da sessão (ordem canônica: vínculo, ticket, sessões): se qualquer passo falha, o rollback devolve o ticket a pendente. Quem perde a corrida pelo ticket não grava nada.
         if (!await ConsumeTicketInTransactionAsync(session.TenantId, ticket.Id, now, cancellationToken))

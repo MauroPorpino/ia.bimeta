@@ -42,6 +42,10 @@ public static class IdentityInfrastructureExtensions
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IGrantRepository, GrantRepository>();
         services.AddScoped<ISessionRepository, SessionRepository>();
+        services.AddScoped<IUserAdminStore, UserAdminStore>();
+        services.AddScoped<UserAdmissionGuard>();
+        services.AddScoped<UserAdminService>();
+        services.AddScoped<TenantUserPolicyService>();
         services.AddScoped<IAuthenticationStore, AuthenticationStore>();
         services.AddScoped<IEmbeddedStore, EmbeddedStore>();
         services.AddScoped<IIdentityAuditOutbox, IdentityAuditOutbox>();

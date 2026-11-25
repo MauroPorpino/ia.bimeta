@@ -1,4 +1,5 @@
 using System.Net;
+using Microsoft.Extensions.DependencyInjection;
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
 using IaBimeta.Api.Provisioning;
@@ -24,13 +25,13 @@ public sealed class ProvisionamentoDeEmpresaTests(PostgresFixture banco)
 
     private static string NovoSlug() => $"emp-{Guid.NewGuid().ToString("N")[..10]}";
 
-    private static ProvisioningSpec Especificacao(string slug, string modelo = EnsaioDeIa.ModeloDoEnsaio, string instrucoes = "Você é a assistente do laboratório de teste.", string? whatsApp = null, string? administrador = null)
+    private static ProvisioningSpec Especificacao(string slug, string modelo = EnsaioDeIa.ModeloDoEnsaio, string tenantExtra = "\"unlimitedUsers\": true", string? atendentes = null, string instrucoes = "Você é a assistente do laboratório de teste.", string? whatsApp = null, string? administrador = null)
     {
         var adm = administrador ?? $"\"email\": \"admin@{slug}.local\", \"displayName\": \"Administradora\", \"passwordEnv\": \"ADM_SENHA\"";
         var wa = whatsApp ?? "{ \"mode\": \"simulated\" }";
         return ProvisioningSpec.Parse($$"""
         {
-          "tenant": { "slug": "{{slug}}", "name": "Laboratório {{slug}}" },
+          "tenant": { "slug": "{{slug}}", "name": "Laboratório {{slug}}", {{tenantExtra}} },
           "administrator": { {{adm}} },
           "organization": { "name": "Laboratório {{slug}}", "unitName": "Matriz" },
           "queue": { "name": "Atendimento humano" },
@@ -43,7 +44,7 @@ public sealed class ProvisionamentoDeEmpresaTests(PostgresFixture banco)
             "apiKeyEnv": "IA_CHAVE"
           },
           "whatsApp": {{wa}},
-          "attendants": [ { "email": "ana@{{slug}}.local", "displayName": "Ana Atendente", "passwordEnv": "ATD_SENHA" } ]
+          "attendants": {{atendentes ?? "[ { \"email\": \"ana@" + slug + ".local\", \"displayName\": \"Ana Atendente\", \"passwordEnv\": \"ATD_SENHA\" } ]"}}
         }
         """);
     }
@@ -369,5 +370,177 @@ public sealed class ProvisionamentoDeEmpresaTests(PostgresFixture banco)
 
         Assert.Contains("Uso: provision", saida.ToString());
         Assert.Contains("tenant.name", saida.ToString());
+    }
+
+    // Etapa 01: limite de usuários e primeiro administrador.
+
+    [Fact]
+    public async Task Empresa_nova_sem_limite_de_usuarios_e_recusada_a_nao_ser_pela_excecao_explicita()
+    {
+        await using var e = await IniciarAsync("provlimite");
+        var slug = NovoSlug();
+
+        var recusada = await ProvisionarAsync(e, Especificacao(slug, tenantExtra: "", atendentes: "[]"));
+
+        Assert.False(recusada.Succeeded);
+        var passo = recusada.Steps.Single(s => s.Name == "Política de usuários");
+        Assert.Equal(StepOutcome.Failed, passo.Outcome);
+        Assert.Contains("tenant.maxUsers", passo.Detail);
+        await using var escopo = e.Ia.Api.Services.CreateAsyncScope();
+        // A empresa pode ter sido cadastrada, mas NÃO foi liberada: sem política explícita, nada além do tenant existe.
+        Assert.False((await escopo.ServiceProvider.GetRequiredService<IaBimeta.Identity.Application.TenantUserPolicyService>().GetAsync(slug))!.Value.Policy.IsExplicit);
+    }
+
+    [Fact]
+    public async Task Empresa_nova_nasce_com_o_limite_e_o_cadastro_informados_e_o_comando_tenant_users_altera_e_audita()
+    {
+        await using var e = await IniciarAsync("provpolitica");
+        var slug = NovoSlug();
+
+        var relatorio = await ProvisionarAsync(e, Especificacao(slug, tenantExtra: "\"maxUsers\": 3, \"userRegistrationEnabled\": true", atendentes: "[]"));
+        Assert.True(relatorio.Succeeded, string.Join(" | ", relatorio.Steps.Select(s => $"{s.Name}: {s.Outcome} {s.Detail}")));
+
+        async Task<IaBimeta.Identity.Application.UserPolicy> LerAsync()
+        {
+            await using var escopo = e.Ia.Api.Services.CreateAsyncScope();
+            return (await escopo.ServiceProvider.GetRequiredService<IaBimeta.Identity.Application.TenantUserPolicyService>().GetAsync(slug))!.Value.Policy;
+        }
+
+        var nascida = await LerAsync();
+        Assert.Equal(3, nascida.MaxUsers);
+        Assert.True(nascida.RegistrationEnabled);
+        Assert.True(nascida.IsExplicit);
+
+        var saida = new StringWriter();
+        Assert.Equal(0, await TenantUsersCommand.ApplyAsync(e.Ia.Api.Services, slug, 10, false, false, saida));
+        var depois = await LerAsync();
+        Assert.Equal(10, depois.MaxUsers);
+        Assert.False(depois.RegistrationEnabled);
+        Assert.Contains("desabilitado", saida.ToString());
+
+        Assert.Equal(0, await TenantUsersCommand.ApplyAsync(e.Ia.Api.Services, slug, null, true, null, new StringWriter()));
+        Assert.Null((await LerAsync()).MaxUsers);
+
+        Assert.Equal(2, await TenantUsersCommand.ApplyAsync(e.Ia.Api.Services, slug, 0, false, null, new StringWriter()));
+        Assert.Equal(1, await TenantUsersCommand.ApplyAsync(e.Ia.Api.Services, "nao-existe-" + slug, 5, false, null, new StringWriter()));
+    }
+
+    [Fact]
+    public async Task Primeiro_administrador_pelo_comando_emite_token_uma_vez_e_nao_se_repete()
+    {
+        await using var e = await IniciarAsync("provprimeiro");
+        var tenant = await banco.RegistrarTenantAsync("primeiro");
+        var email = $"dono{Guid.NewGuid().ToString("N")[..6]}@teste.local";
+
+        // Sem a política de usuários definida, o primeiro administrador é recusado (a falta de política nunca vira empresa ilimitada).
+        var semPolitica = new StringWriter();
+        Assert.Equal(2, await FirstAdminCommand.IssueAsync(e.Ia.Api.Services, tenant.Slug, email, "Dona da Empresa", semPolitica));
+        Assert.DoesNotContain("ibr_", semPolitica.ToString());
+        Assert.Equal(0, await TenantUsersCommand.ApplyAsync(e.Ia.Api.Services, tenant.Slug, 5, false, null, new StringWriter()));
+
+        var saida = new StringWriter();
+        Assert.Equal(0, await FirstAdminCommand.IssueAsync(e.Ia.Api.Services, tenant.Slug, email, "Dona da Empresa", saida));
+        Assert.Contains("ibr_", saida.ToString());
+        Assert.Contains("UMA vez", saida.ToString());
+
+        var repetido = new StringWriter();
+        Assert.Equal(2, await FirstAdminCommand.IssueAsync(e.Ia.Api.Services, tenant.Slug, "outro" + email, "Outro", repetido));
+        Assert.DoesNotContain("ibr_", repetido.ToString());
+        Assert.Equal(1, await FirstAdminCommand.IssueAsync(e.Ia.Api.Services, "nao-existe-" + tenant.Slug, email, "X", new StringWriter()));
+    }
+
+    [Fact]
+    public async Task Provisionamento_comercial_so_cria_o_primeiro_administrador_e_nunca_atendentes_nem_um_segundo_administrador()
+    {
+        // Atendentes no arquivo só em ambiente interno (unlimitedUsers): numa empresa com limite, quem cadastra usuários é o administrador da empresa.
+        var erro = Assert.Throws<ProvisioningSpecException>(() => Especificacao(NovoSlug(), tenantExtra: "\"maxUsers\": 5"));
+        Assert.Contains(erro.Errors, m => m.Contains("attendants", StringComparison.Ordinal));
+
+        await using var e = await IniciarAsync("provunico");
+        var slug = NovoSlug();
+        var spec = Especificacao(slug, tenantExtra: "\"maxUsers\": 5", atendentes: "[]");
+        Assert.True((await ProvisionarAsync(e, spec)).Succeeded);
+
+        // Repetir com OUTRO e-mail de administrador NÃO cria um segundo administrador (o provisionamento não é meio de cadastrar administradores).
+        var outro = Especificacao(slug, tenantExtra: "\"maxUsers\": 5", atendentes: "[]", administrador: $"\"email\": \"outro@{slug}.local\", \"displayName\": \"Outro\", \"passwordEnv\": \"ADM_SENHA\"");
+        var segunda = await ProvisionarAsync(e, outro);
+
+        Assert.False(segunda.Succeeded);
+        Assert.Equal(StepOutcome.Failed, segunda.Steps.Single(s => s.Name == "Administrador").Outcome);
+        await using var escopo = e.Ia.Api.Services.CreateAsyncScope();
+        var tenant = (await escopo.ServiceProvider.GetRequiredService<IaBimeta.Tenancy.Contracts.Queries.ITenantDirectory>().FindBySlugAsync(slug))!;
+        escopo.ServiceProvider.GetRequiredService<IaBimeta.SharedKernel.RequestContextHolder>().Set(new IaBimeta.SharedKernel.RequestContext(tenant.TenantId, "teste"));
+        var uso = await escopo.ServiceProvider.GetRequiredService<IaBimeta.Identity.Application.IUserAdminStore>().GetSeatUsageAsync(tenant.TenantId, DateTimeOffset.UtcNow, default);
+        Assert.Equal(1, uso.SeatsUsed);
+    }
+
+    [Fact]
+    public async Task Politica_e_criada_antes_de_qualquer_usuario_falha_parcial_nao_libera_a_empresa_e_repetir_completa()
+    {
+        await using var e = await IniciarAsync("provparcial");
+        var slug = NovoSlug();
+
+        // 1.ª execução com o arquivo sem limite: o tenant é cadastrado, mas a política é obrigatória e NADA além dele é criado (nem organização, nem administrador).
+        var falha = await ProvisionarAsync(e, Especificacao(slug, tenantExtra: "", atendentes: "[]"));
+        Assert.False(falha.Succeeded);
+        Assert.Equal(StepOutcome.Failed, falha.Steps.Single(s => s.Name == "Política de usuários").Outcome);
+        Assert.DoesNotContain(falha.Steps, s => s.Name is "Organização" or "Administrador");
+
+        await using (var escopo = e.Ia.Api.Services.CreateAsyncScope())
+        {
+            var sp = escopo.ServiceProvider;
+            var estado = (await sp.GetRequiredService<IaBimeta.Identity.Application.TenantUserPolicyService>().GetAsync(slug))!.Value;
+            Assert.False(estado.Policy.IsExplicit);
+            sp.GetRequiredService<IaBimeta.SharedKernel.RequestContextHolder>().Set(new IaBimeta.SharedKernel.RequestContext(estado.TenantId, "teste"));
+            Assert.Equal(0, (await sp.GetRequiredService<IaBimeta.Identity.Application.IUserAdminStore>().GetSeatUsageAsync(estado.TenantId, DateTimeOffset.UtcNow, default)).SeatsUsed);
+
+            // Mesmo chamando o primeiro administrador direto, sem política explícita, ele é recusado.
+            var usuarios = sp.GetRequiredService<IaBimeta.Identity.Application.UserService>();
+            await Assert.ThrowsAsync<IaBimeta.Identity.Domain.IdentityValidationException>(() => usuarios.EnsureFirstTenantAdministratorAsync($"admin@{slug}.local", "Administradora", SenhaDoAdministrador));
+        }
+
+        // 2.ª execução, agora com o limite: completa o que faltava (o tenant já existe; política, organização e administrador são criados).
+        var segunda = await ProvisionarAsync(e, Especificacao(slug, tenantExtra: "\"maxUsers\": 3", atendentes: "[]"));
+        Assert.True(segunda.Succeeded, string.Join(" | ", segunda.Steps.Select(s => $"{s.Name}: {s.Outcome} {s.Detail}")));
+        Assert.Equal(StepOutcome.Exists, segunda.Steps.Single(s => s.Name == "Tenant").Outcome);
+        Assert.Equal(StepOutcome.Created, segunda.Steps.Single(s => s.Name == "Política de usuários").Outcome);
+        Assert.Equal(StepOutcome.Created, segunda.Steps.Single(s => s.Name == "Administrador").Outcome);
+
+        // 3.ª execução: tudo existe, e o limite NÃO é alterado por um arquivo diferente.
+        var terceira = await ProvisionarAsync(e, Especificacao(slug, tenantExtra: "\"maxUsers\": 50", atendentes: "[]"));
+        Assert.True(terceira.Succeeded);
+        Assert.Equal(StepOutcome.Exists, terceira.Steps.Single(s => s.Name == "Política de usuários").Outcome);
+        await using var final = e.Ia.Api.Services.CreateAsyncScope();
+        Assert.Equal(3, (await final.ServiceProvider.GetRequiredService<IaBimeta.Identity.Application.TenantUserPolicyService>().GetAsync(slug))!.Value.Policy.MaxUsers);
+    }
+
+    [Fact]
+    public async Task Atendentes_do_provisionamento_so_existem_em_Development_mesmo_com_unlimitedUsers_e_o_seed_interno_so_e_chamado_pelo_codigo_de_desenvolvimento()
+    {
+        // 1) Num ambiente que não é Development, "unlimitedUsers" sozinho não libera atendentes pelo provisionamento.
+        await using var api = await ApiServer.StartAsync("Production", ApiServer.ConfiguracaoDeProducao());
+        var slug = NovoSlug();
+        // Modelo do catálogo de produção e sem chave de IA (nenhuma credencial real): o provisionamento chega ao passo dos atendentes.
+        var semChave = SegredosPadrao().Where(p => p.Key != "IA_CHAVE").ToDictionary(p => p.Key, p => p.Value);
+        var relatorio = await new TenantProvisioner(api.Services, new Segredos(semChave)).ProvisionAsync(Especificacao(slug, modelo: "gpt-6-luna", whatsApp: "null"));
+        var atendente = relatorio.Steps.SingleOrDefault(s => s.Name.StartsWith("Atendente ", StringComparison.Ordinal));
+        Assert.True(atendente is not null, string.Join(" | ", relatorio.Steps.Select(s => $"{s.Name}: {s.Outcome} {s.Detail}")));
+        Assert.Equal(StepOutcome.Failed, atendente!.Outcome);
+        Assert.Contains("Development", atendente.Detail, StringComparison.Ordinal);
+
+        // 2) O seed interno (senha escolhida por quem opera) só é chamado pelo código de desenvolvimento: nenhum código de produção o chama.
+        var pasta = new DirectoryInfo(AppContext.BaseDirectory);
+        while (pasta is not null && !Directory.Exists(Path.Combine(pasta.FullName, "backend", "host")))
+        {
+            pasta = pasta.Parent;
+        }
+
+        Assert.NotNull(pasta);
+        var chamadores = Directory.EnumerateFiles(Path.Combine(pasta!.FullName, "backend"), "*.cs", SearchOption.AllDirectories)
+            .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal) && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            .Where(f => File.ReadAllText(f).Contains(".EnsureTenantAdministratorAsync(", StringComparison.Ordinal))
+            .Select(f => Path.GetRelativePath(pasta.FullName, f).Replace(Path.DirectorySeparatorChar, '/'))
+            .ToList();
+        Assert.All(chamadores, f => Assert.StartsWith("backend/host/IaBimeta.Api/Development/", f, StringComparison.Ordinal));
     }
 }

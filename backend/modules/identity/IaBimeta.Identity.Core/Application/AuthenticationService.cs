@@ -82,7 +82,7 @@ public sealed class AuthenticationService
             : PasswordVerification.Failed;
 
         // Usuário federado (Embedded, ADR 0039) nunca entra por senha, nem que alguém grave um hash para ele: a mesma recusa de credencial.
-        if (verificacao == PasswordVerification.Failed || usuario is null || usuario.AuthMode == UserAuthMode.Federated)
+        if (verificacao == PasswordVerification.Failed || usuario is null || usuario.AuthMode == UserAuthMode.Federated || usuario.Status != UserStatus.Active)
         {
             // A contagem vem primeiro: é a proteção, e não pode depender de a trilha de auditoria estar disponível.
             var bloqueou = chave is not null
@@ -113,7 +113,11 @@ public sealed class AuthenticationService
 
         var (token, hash) = SessionTokens.Generate();
         var sessao = Session.Create(tenant!.TenantId, usuario.Id, hash, agora, _options.SessionLifetime);
-        await _store.AddSessionAsync(sessao, cancellationToken);
+        if (!await _store.AddSessionAsync(sessao, cancellationToken))
+        {
+            // O usuário foi desativado entre a verificação da senha e a gravação da sessão: a mesma recusa de credencial.
+            throw new InvalidCredentialsException();
+        }
 
         if (verificacao == PasswordVerification.SuccessRehashNeeded)
         {

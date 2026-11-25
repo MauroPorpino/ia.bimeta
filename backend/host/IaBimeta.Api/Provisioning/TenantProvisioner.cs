@@ -1,6 +1,8 @@
 using System.Security.Cryptography;
 using System.Text;
 using IaBimeta.Agents.Application;
+using IaBimeta.Audit.Contracts;
+using IaBimeta.Audit.Contracts.Commands;
 using IaBimeta.Agents.Domain;
 using IaBimeta.AiGateway.Application;
 using IaBimeta.AiGateway.Domain;
@@ -126,6 +128,8 @@ internal sealed class TenantProvisioner
             sp.GetRequiredService<RequestContextHolder>().Set(new RequestContext(tenant.TenantId, Origin));
             report.TenantId = tenant.TenantId.Value;
 
+            await RunAsync(report, "Política de usuários", () => EnsurePolicyAsync(sp, tenant, spec, report, cancellationToken));
+
             var organizacao = await RunAsync(report, "Organização", () => EnsureOrganizationAsync(sp, spec, report, cancellationToken));
             var unidade = await RunAsync(report, "Unidade", () => EnsureUnitAsync(sp, organizacao.Id, spec, report, cancellationToken));
             var fila = await RunAsync(report, "Fila de atendimento humano", () => EnsureQueueAsync(sp, organizacao.Id, spec, report, cancellationToken));
@@ -228,6 +232,45 @@ internal sealed class TenantProvisioner
         }
     }
 
+    /// <summary>
+    /// A política de usuários da empresa (limite contratado ou a exceção explícita "unlimitedUsers") é criada ANTES de qualquer organização, usuário ou administrador: o provisionamento comercial só prossegue com ela, e o primeiro
+    /// administrador exige que ela já exista (o Identity recusa). Repetível: não altera a de uma empresa que já tem. Uma empresa anterior à Etapa 01 (sem política) que o arquivo não descreve fica como estava (ilimitada, compatibilidade).
+    /// </summary>
+    private async Task EnsurePolicyAsync(IServiceProvider sp, TenantInfo tenant, ProvisioningSpec spec, ProvisioningReport report, CancellationToken ct)
+    {
+        var servico = sp.GetRequiredService<TenantUserPolicyService>();
+        var atual = await servico.GetAsync(tenant.Slug, ct);
+        if (atual is { Policy.IsExplicit: true })
+        {
+            report.Steps.Add(new ProvisioningStep("Política de usuários", StepOutcome.Exists, "já definida (use tenant-users para alterar)."));
+            return;
+        }
+
+        var informada = spec.Tenant.MaxUsers is not null || spec.Tenant.UnlimitedUsers;
+        if (spec.Tenant.MaxUsers is not null && spec.Tenant.UnlimitedUsers)
+        {
+            throw new InvalidOperationException("tenant.maxUsers e tenant.unlimitedUsers não podem ser usados juntos.");
+        }
+
+        if (!informada)
+        {
+            var nova = report.Steps.Any(s => s.Name == "Tenant" && s.Outcome == StepOutcome.Created);
+            if (nova)
+            {
+                throw new InvalidOperationException("Informe o limite de usuários da empresa nova (tenant.maxUsers) ou a exceção explícita tenant.unlimitedUsers = true. Repita o comando depois de corrigir o arquivo: a empresa não foi liberada para uso.");
+            }
+
+            report.Steps.Add(new ProvisioningStep("Política de usuários", StepOutcome.Skipped, "empresa anterior à Etapa 01, sem política: continua sem limite (use tenant-users para definir)."));
+            return;
+        }
+
+        var limite = spec.Tenant.UnlimitedUsers ? null : spec.Tenant.MaxUsers;
+        await servico.EnsureAsync(tenant.TenantId, limite, spec.Tenant.UserRegistrationEnabled, ct);
+        sp.GetRequiredService<RequestContextHolder>().Set(new RequestContext(tenant.TenantId, Origin));
+        await sp.GetRequiredService<IAuditWriter>().WriteAsync(new AuditEntry(limite is null ? "identity.user-limit.unlimited" : "identity.user-limit.set", "tenant", tenant.TenantId.ToString(), AuditOutcome.Success), ct);
+        report.Steps.Add(new ProvisioningStep("Política de usuários", StepOutcome.Created, limite is null ? "ilimitada (exceção explícita e auditada)." : $"limite de {limite} usuário(s); cadastro {(spec.Tenant.UserRegistrationEnabled ? "habilitado" : "desabilitado")}."));
+    }
+
     private async Task EnsureAdministratorAsync(IServiceProvider sp, Guid organizationId, ProvisioningSpec spec, ProvisioningReport report, CancellationToken ct)
     {
         var usuarios = sp.GetRequiredService<UserService>();
@@ -240,7 +283,7 @@ internal sealed class TenantProvisioner
         }
 
         var (senha, gerada) = PasswordFor(spec.Administrator.PasswordEnv);
-        await usuarios.EnsureTenantAdministratorAsync(email, spec.Administrator.DisplayName, senha, ct);
+        await usuarios.EnsureFirstTenantAdministratorAsync(email, spec.Administrator.DisplayName, senha, ct);
         if (gerada)
         {
             report.GeneratedSecrets.Add(new GeneratedSecret(email, "senha do administrador", senha));
@@ -251,6 +294,12 @@ internal sealed class TenantProvisioner
 
     private async Task EnsureAttendantAsync(IServiceProvider sp, Guid organizationId, Guid queueId, AttendantSpec spec, ProvisioningReport report, CancellationToken ct)
     {
+        // Seed de atendentes é de ambiente INTERNO: só no ambiente Development (a flag unlimitedUsers sozinha não torna uma empresa comercial interna). Numa empresa comercial, quem cadastra os usuários é o administrador dela.
+        if (!sp.GetRequiredService<Microsoft.Extensions.Hosting.IHostEnvironment>().IsDevelopment())
+        {
+            throw new InvalidOperationException("A criação de atendentes pelo provisionamento só é permitida no ambiente de desenvolvimento (Development): numa empresa comercial, o administrador da empresa cadastra os usuários.");
+        }
+
         var usuarios = sp.GetRequiredService<UserService>();
         var email = spec.Email!.Trim();
         var existente = (await usuarios.ListAsync(organizationId, ct)).FirstOrDefault(u => string.Equals(u.Email, email, StringComparison.OrdinalIgnoreCase));

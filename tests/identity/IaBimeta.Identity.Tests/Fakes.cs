@@ -54,6 +54,15 @@ internal sealed class TenantsEmMemoria : ITenantDirectory
         return info;
     }
 
+    public TenantInfo Adicionar(TenantId id, string slug)
+    {
+        var info = new TenantInfo(id, slug, $"Tenant {slug}", TenantStatus.Active);
+        _tenants.Add(info);
+        return info;
+    }
+
+    public bool Contem(TenantId tenantId) => _tenants.Any(t => t.TenantId == tenantId);
+
     public void Suspender(TenantId tenantId)
     {
         var indice = _tenants.FindIndex(t => t.TenantId == tenantId);
@@ -168,10 +177,16 @@ internal sealed class IdentidadeEmMemoria : IUserRepository, IGrantRepository, I
         return Task.FromResult(Sessoes.FirstOrDefault(s => s.TokenHash.AsSpan().SequenceEqual(tokenHash)));
     }
 
-    public Task AddSessionAsync(Session session, CancellationToken cancellationToken)
+    public Task<bool> AddSessionAsync(Session session, CancellationToken cancellationToken)
     {
+        // Como o banco: só grava a sessão se o usuário continua ativo.
+        if (Usuarios.FirstOrDefault(u => u.TenantId == session.TenantId && u.Id == session.UserId) is not { Status: UserStatus.Active })
+        {
+            return Task.FromResult(false);
+        }
+
         Sessoes.Add(session);
-        return Task.CompletedTask;
+        return Task.FromResult(true);
     }
 
     public Task UpdatePasswordHashAsync(TenantId tenantId, Guid userId, string newHash, CancellationToken cancellationToken)
@@ -183,6 +198,28 @@ internal sealed class IdentidadeEmMemoria : IUserRepository, IGrantRepository, I
     public Task<IReadOnlyList<UserOrganizationGrant>> ListGrantsAsync(TenantId tenantId, Guid userId, CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<UserOrganizationGrant>>(Concessoes.Where(g => g.TenantId == tenantId && g.UserId == userId).ToList());
 
+
+    public List<UserPermissionOverride> Ajustes { get; } = new();
+
+    /// <summary>A política de usuários por tenant (a existência da entrada é a decisão explícita; sem entrada, empresa anterior à Etapa 01).</summary>
+    public Dictionary<TenantId, UserPolicy> Politicas { get; } = new();
+
+    public void DefinirPolitica(TenantId tenant, int? maxUsers, bool cadastroHabilitado) => Politicas[tenant] = new UserPolicy(maxUsers, cadastroHabilitado, true);
+
+    public Task<IReadOnlyList<UserPermissionOverride>> ListOverridesAsync(TenantId tenantId, Guid userId, CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<UserPermissionOverride>>(Ajustes.Where(o => o.TenantId == tenantId && o.UserId == userId).ToList());
+
+    public Task<bool> ActivatePendingUserAsync(TenantId tenantId, Guid userId, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var usuario = Usuarios.FirstOrDefault(u => u.TenantId == tenantId && u.Id == userId && u.Status == UserStatus.Pending);
+        if (usuario is null)
+        {
+            return Task.FromResult(false);
+        }
+
+        usuario.Activate(now);
+        return Task.FromResult(true);
+    }
     public Dictionary<(TenantId Tenant, string Chave), LoginThrottle> Contagens { get; } = new();
 
     public Task<LoginThrottle?> FindLoginThrottleAsync(TenantId tenantId, string key, CancellationToken cancellationToken) =>
@@ -276,4 +313,168 @@ internal static class Senhas
     public const string Outra = "Outra-Senha-456!";
 
     public static IdentityOptions Rapidas() => new() { PasswordHashIterations = IdentityOptions.MinimumPasswordHashIterations };
+}
+
+/// <summary>
+/// A administração de usuários em memória, sobre os mesmos dados do <see cref="IdentidadeEmMemoria"/>. Não há trava nem transação (a concorrência é provada com PostgreSQL real em <c>IaBimeta.IntegrationTests</c>); as regras de vagas,
+/// status e permissões são as mesmas que o serviço aplica.
+/// </summary>
+internal sealed class AdminEmMemoria : IUserAdminStore
+{
+    private readonly IdentidadeEmMemoria _dados;
+    private readonly RequestContextHolder _holder;
+
+    public AdminEmMemoria(IdentidadeEmMemoria dados, RequestContextHolder holder)
+    {
+        _dados = dados;
+        _holder = holder;
+    }
+
+    /// <summary>Os vínculos externos (do fake do Embedded), para contar a vaga do usuário federado só enquanto houver vínculo ativo.</summary>
+    public Func<IEnumerable<ExternalIdentity>>? Vinculos { get; set; }
+
+    private TenantId Tenant => _holder.GetRequired().TenantId;
+
+    public Task<T> RunExclusiveAsync<T>(Func<CancellationToken, Task<T>> action, CancellationToken cancellationToken) => action(cancellationToken);
+
+    /// <summary>Roda ao ENTRAR na seção exclusiva (depois de a trava ser obtida): permite ao teste fazer o tempo passar enquanto a requisição "esperava" a trava.</summary>
+    public Func<Task>? AoEntrarNaTrava { get; set; }
+
+    public async Task<T> RunExclusiveAsync<T>(TenantId tenantId, Func<CancellationToken, Task<T>> action, CancellationToken cancellationToken)
+    {
+        if (AoEntrarNaTrava is not null)
+        {
+            await AoEntrarNaTrava();
+        }
+
+        return await action(cancellationToken);
+    }
+
+    private UserDetail Detail(User u, DateTimeOffset now) => new(
+        u,
+        _dados.Concessoes.Where(g => g.UserId == u.Id).ToList(),
+        _dados.Ajustes.Where(o => o.UserId == u.Id).ToList(),
+        _dados.TokensDeRedefinicao.Any(t => t.UserId == u.Id && !_dados.TokensUsados.ContainsKey(t.Id) && !_dados.TokensRevogados.ContainsKey(t.Id) && t.ExpiresAt > now),
+        Vinculos?.Invoke().Any(i => i.UserId == u.Id && i.IsActive) == true);
+
+    public Task<UserPolicy> GetPolicyAsync(TenantId tenantId, CancellationToken cancellationToken) =>
+        Task.FromResult(_dados.Politicas.TryGetValue(tenantId, out var politica) ? politica : UserPolicy.Legacy);
+
+    public Task<(UserPolicy Previous, UserPolicy Current)> SetPolicyAsync(TenantId tenantId, int? maxUsers, bool registrationEnabled, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var anterior = _dados.Politicas.TryGetValue(tenantId, out var existente) ? existente : UserPolicy.Legacy;
+        _dados.DefinirPolitica(tenantId, maxUsers, registrationEnabled);
+        return Task.FromResult((anterior, _dados.Politicas[tenantId]));
+    }
+
+    public Task<(UserPolicy Previous, UserPolicy Current)> ChangePolicyAsync(TenantId tenantId, bool changeMaxUsers, int? maxUsers, bool? registrationEnabled, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var anterior = _dados.Politicas.TryGetValue(tenantId, out var existente) ? existente : UserPolicy.Legacy;
+        _dados.DefinirPolitica(tenantId, changeMaxUsers ? maxUsers : anterior.MaxUsers, registrationEnabled ?? anterior.RegistrationEnabled);
+        return Task.FromResult((anterior, _dados.Politicas[tenantId]));
+    }
+
+    public Task<bool> EnsurePolicyAsync(TenantId tenantId, int? maxUsers, bool registrationEnabled, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        if (_dados.Politicas.ContainsKey(tenantId))
+        {
+            return Task.FromResult(false);
+        }
+
+        _dados.DefinirPolitica(tenantId, maxUsers, registrationEnabled);
+        return Task.FromResult(true);
+    }
+
+    public Task<SeatUsage> GetSeatUsageAsync(TenantId tenantId, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var detalhes = _dados.Usuarios.Where(u => u.TenantId == tenantId).Select(u => Detail(u, now)).ToList();
+        var uso = new SeatUsage(
+            detalhes.Count(d => d.DisplayStatus == "Active"),
+            detalhes.Count(d => d.DisplayStatus == "Inactive"),
+            detalhes.Count(d => d.DisplayStatus == "Pending"),
+            detalhes.Count(d => d.DisplayStatus == "Expired"),
+            detalhes.Count(d => d.DisplayStatus == "Cancelled"));
+        return Task.FromResult(uso);
+    }
+
+    public Task<UserPage> ListUsersAsync(UserListQuery query, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var itens = _dados.Usuarios.Where(u => u.TenantId == Tenant).Select(u => Detail(u, now))
+            .Where(d => query.VisibleOrganizations is null || d.Grants.Any(g => g.OrganizationId is null || query.VisibleOrganizations.Contains(g.OrganizationId.Value)))
+            .Where(d => string.IsNullOrWhiteSpace(query.Search)
+                || d.User.Email.Contains(query.Search, StringComparison.OrdinalIgnoreCase) || d.User.DisplayName.Contains(query.Search, StringComparison.OrdinalIgnoreCase))
+            .Where(d => query.OrganizationId is null || d.Grants.Any(g => g.OrganizationId == query.OrganizationId || g.OrganizationId is null))
+            .Where(d => query.Role is null || d.Grants.Any(g => g.Role == query.Role))
+            .Where(d => string.IsNullOrEmpty(query.Status) || string.Equals(d.DisplayStatus, query.Status, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(d => d.User.DisplayName).ThenBy(d => d.User.Email).ToList();
+        var pagina = itens.Skip((query.Page - 1) * query.PageSize).Take(query.PageSize).ToList();
+        return Task.FromResult(new UserPage(pagina, itens.Count));
+    }
+
+    public Task<UserDetail?> GetDetailAsync(Guid userId, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var usuario = _dados.Usuarios.FirstOrDefault(u => u.TenantId == Tenant && u.Id == userId);
+        return Task.FromResult(usuario is null ? null : Detail(usuario, now));
+    }
+
+    public Task<IReadOnlyList<UserDetail>> ListTenantScopeUsersAsync(DateTimeOffset now, CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<UserDetail>>(_dados.Usuarios.Where(u => u.TenantId == Tenant && _dados.Concessoes.Any(g => g.UserId == u.Id && g.OrganizationId is null)).Select(u => Detail(u, now)).ToList());
+
+    public Task<UserPermissionOverride?> FindOverrideAsync(Guid userId, Guid? organizationId, Permission permission, CancellationToken cancellationToken) =>
+        Task.FromResult(_dados.Ajustes.FirstOrDefault(o => o.UserId == userId && o.OrganizationId == organizationId && o.Permission == permission));
+
+    public Task AddOverrideAsync(UserPermissionOverride item, CancellationToken cancellationToken)
+    {
+        _dados.Ajustes.Add(item);
+        return Task.CompletedTask;
+    }
+
+    public Task RemoveOverrideAsync(UserPermissionOverride item, CancellationToken cancellationToken)
+    {
+        _dados.Ajustes.Remove(item);
+        return Task.CompletedTask;
+    }
+
+    public Task<int> RemoveOverridesAsync(Guid userId, Guid? organizationId, CancellationToken cancellationToken) =>
+        Task.FromResult(_dados.Ajustes.RemoveAll(o => o.UserId == userId && o.OrganizationId == organizationId));
+
+    public Task SaveChangesAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+/// <summary>Monta, sobre as fakes em memória, os serviços da administração de usuários com as mesmas dependências de produção.</summary>
+internal static class AdminFabrica
+{
+    public static AdminEmMemoria Loja(IdentidadeEmMemoria dados, RequestContextHolder holder) => new(dados, holder);
+
+    public static UserAdmissionGuard Guard(IdentidadeEmMemoria dados, RequestContextHolder holder, EmbeddedEmMemoria? embedded = null) =>
+        new(new AdminEmMemoria(dados, holder) { Vinculos = embedded is null ? null : () => embedded.Vinculos });
+
+    public static UserAdminService Admin(
+        IdentidadeEmMemoria dados, ITenantDirectory tenants, IOrganizationDirectory organizacoes, PasswordHasher hasher, IdentityOptions opcoes,
+        RequestContextHolder holder, TimeProvider relogio, IAuditWriter auditoria)
+    {
+        var loja = Loja(dados, holder);
+        return new UserAdminService(dados, dados, dados, loja, organizacoes, new UserAdmissionGuard(loja), hasher, opcoes, holder, relogio, auditoria);
+    }
+
+    public static UserService Usuarios(
+        IdentidadeEmMemoria dados, ITenantDirectory tenants, IOrganizationDirectory organizacoes, PasswordHasher hasher, IdentityOptions opcoes,
+        RequestContextHolder holder, TimeProvider relogio, IAuditWriter auditoria)
+    {
+        var loja = Loja(dados, holder);
+        var guard = new UserAdmissionGuard(loja);
+        var admin = new UserAdminService(dados, dados, dados, loja, organizacoes, guard, hasher, opcoes, holder, relogio, auditoria);
+        return new UserService(dados, dados, organizacoes, hasher, holder, relogio, auditoria, admin, loja, guard, dados, opcoes);
+    }
+
+    public static PasswordService Senha(
+        IdentidadeEmMemoria dados, ITenantDirectory tenants, IOrganizationDirectory organizacoes, PasswordHasher hasher, IdentityOptions opcoes,
+        RequestContextHolder holder, TimeProvider relogio, IAuditWriter auditoria, Func<Task>? aoEntrarNaTrava = null)
+    {
+        var loja = Loja(dados, holder);
+        loja.AoEntrarNaTrava = aoEntrarNaTrava;
+        var guard = new UserAdmissionGuard(loja);
+        var admin = new UserAdminService(dados, dados, dados, loja, organizacoes, guard, hasher, opcoes, holder, relogio, auditoria);
+        return new PasswordService(tenants, dados, dados, organizacoes, hasher, opcoes, relogio, auditoria, holder, admin, loja, guard);
+    }
 }

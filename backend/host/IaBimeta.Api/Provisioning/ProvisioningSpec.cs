@@ -154,6 +154,11 @@ internal sealed class ProvisioningSpec
             }
         }
 
+        if (Attendants.Count > 0 && !Tenant.UnlimitedUsers)
+        {
+            erros.Add("attendants só é aceito em ambiente interno ou de teste (tenant.unlimitedUsers = true): numa empresa comercial, quem cadastra os usuários é o administrador da própria empresa; a BImeta provisiona só o primeiro administrador.");
+        }
+
         if (Attendants.Count > MaxAttendants)
         {
             erros.Add($"attendants aceita no máximo {MaxAttendants} atendentes por execução.");
@@ -199,6 +204,15 @@ internal sealed class TenantSpec
 
     /// <summary>Idioma padrão do tenant (BCP 47). Vazio usa o inicial da plataforma. Só vale na criação.</summary>
     public string? DefaultLocale { get; set; }
+
+    /// <summary>O limite contratado de usuários humanos. OBRIGATÓRIO para uma empresa nova: informe este campo OU <see cref="UnlimitedUsers"/>. Só vale na criação (depois, use o comando tenant-users).</summary>
+    public int? MaxUsers { get; set; }
+
+    /// <summary>Exceção explícita: a empresa nasce sem limite de usuários (ambientes internos e de teste). Fica registrada na trilha de auditoria.</summary>
+    public bool UnlimitedUsers { get; set; }
+
+    /// <summary>Se a empresa admite o cadastro de novos usuários. Padrão: sim. Só vale na criação.</summary>
+    public bool UserRegistrationEnabled { get; set; } = true;
 }
 
 internal sealed class AdministratorSpec

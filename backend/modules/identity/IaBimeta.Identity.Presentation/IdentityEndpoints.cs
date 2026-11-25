@@ -114,6 +114,9 @@ public static class IdentityEndpoints
             return Results.NoContent();
         });
 
+        // Administração de usuários do tenant: vagas, admissão, status, permissões individuais (Etapa 01).
+        app.MapUserAdminEndpoints();
+
         // Administração das conexões de integração do Embedded (ADR 0039): só EmbedManage (escopo do tenant).
         app.MapEmbeddedAdminEndpoints();
 
@@ -127,6 +130,8 @@ public static class IdentityEndpoints
 
     private static bool TryParseRole(string? texto, out Role papel) =>
         Enum.TryParse(texto, ignoreCase: true, out papel) && Enum.IsDefined(papel);
+
+    internal static IResult RoleInvalidoResult() => RoleInvalido();
 
     private static IResult RoleInvalido() =>
         Results.Problem(title: "Dados inválidos", detail: "O papel deve ser User, Attendant, Manager ou OrganizationAdmin.", statusCode: StatusCodes.Status400BadRequest);
@@ -206,6 +211,22 @@ public static class IdentityEndpoints
         catch (IdentityValidationException ex)
         {
             return Results.Problem(title: "Dados inválidos", detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+        catch (RegistrationDisabledException ex)
+        {
+            return Results.Problem(title: "Cadastro desabilitado", detail: ex.Message, statusCode: StatusCodes.Status409Conflict, extensions: Code("registration-disabled"));
+        }
+        catch (UserLimitReachedException ex)
+        {
+            return Results.Problem(
+                title: "Limite de usuários atingido",
+                detail: ex.Message,
+                statusCode: StatusCodes.Status409Conflict,
+                extensions: new Dictionary<string, object?> { ["code"] = "user-limit-reached", ["limit"] = ex.Limit, ["used"] = ex.Used });
+        }
+        catch (LastAdministratorException ex)
+        {
+            return Results.Problem(title: "Último administrador", detail: ex.Message, statusCode: StatusCodes.Status409Conflict, extensions: Code("last-administrator"));
         }
         catch (DuplicateUserEmailException ex)
         {

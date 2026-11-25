@@ -72,10 +72,12 @@ public interface IEmbeddedStore
     Task<bool> TryAddIdentityAsync(ExternalIdentity identity, PendingAudit audit, CancellationToken cancellationToken);
 
     /// <summary>Muda o estado do vínculo. Ao DESATIVAR, o estado, a marca de revogação (monotônica, em <paramref name="now"/>) e a auditoria confirmam na MESMA transação; a limpeza física das sessões é outro passo.</summary>
-    Task<bool> SetIdentityStatusAsync(TenantId tenantId, Guid connectionId, Guid identityId, ExternalIdentityStatus status, PendingAudit audit, DateTimeOffset now, CancellationToken cancellationToken);
+    /// <param name="admit">Se informada (reativar o vínculo de um usuário federado, que volta a ocupar vaga), é chamada DENTRO da transação e da trava de admissão do tenant; se lançar, nada é gravado.</param>
+    Task<bool> SetIdentityStatusAsync(TenantId tenantId, Guid connectionId, Guid identityId, ExternalIdentityStatus status, PendingAudit audit, DateTimeOffset now, Func<CancellationToken, Task>? admit, CancellationToken cancellationToken);
 
     /// <summary>Cria, juntos ou nenhum, o usuário federado, a concessão e o vínculo. Devolve <c>false</c> se o vínculo já existe (corrida entre duas primeiras entradas): quem chama relê o existente.</summary>
-    Task<bool> TryProvisionFederatedUserAsync(User user, UserOrganizationGrant grant, ExternalIdentity identity, PendingAudit audit, CancellationToken cancellationToken);
+    /// <param name="admit">A verificação de ingresso (habilitação e vaga), chamada DENTRO da transação e da trava de admissão do tenant; se lançar, nada é gravado e a exceção sobe.</param>
+    Task<bool> TryProvisionFederatedUserAsync(User user, UserOrganizationGrant grant, ExternalIdentity identity, PendingAudit audit, Func<CancellationToken, Task> admit, CancellationToken cancellationToken);
 
     /// <summary>
     /// Grava o ticket SOB a trava da chave que o emite: a revogação da chave e a gravação do ticket se enfileiram, então um ticket nunca nasce de uma chave já revogada. Devolve <c>false</c> (e não grava) quando a chave

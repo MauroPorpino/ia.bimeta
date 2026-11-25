@@ -55,11 +55,19 @@ public sealed class SessionAuthenticator
             return null;
         }
 
+        // Só o usuário ATIVO acessa (inativo, pendente e cancelado nunca): a situação é conferida a cada requisição, e desativar derruba a sessão na próxima. Uma sessão criada ANTES da última mudança de situação (desativação e reativação) nunca
+        // volta a valer, mesmo que tenha escapado da revogação por qualquer falha: a marca de situação do usuário é a segunda defesa (a primeira é gravar a sessão sob a trava da linha do usuário).
+        if (usuario.Status != UserStatus.Active || (usuario.StatusChangedAt is { } mudouEm && sessao.CreatedAt < mudouEm))
+        {
+            return null;
+        }
+
         var concessoes = await _store.ListGrantsAsync(sessao.TenantId, usuario.Id, cancellationToken);
+        var ajustes = await _store.ListOverridesAsync(sessao.TenantId, usuario.Id, cancellationToken);
 
         if (sessao.Kind == SessionKind.Embedded)
         {
-            return await AuthenticateEmbeddedAsync(sessao, usuario, concessoes, cancellationToken);
+            return await AuthenticateEmbeddedAsync(sessao, usuario, concessoes, ajustes, cancellationToken);
         }
 
         // Usuário federado nunca tem sessão interativa (o login por senha o recusa); se aparecer uma, não vale.
@@ -68,15 +76,12 @@ public sealed class SessionAuthenticator
             return null;
         }
 
-        var permissoes = concessoes
-            .SelectMany(c => RolePermissions.Expand(c.Role, c.OrganizationId))
-            .Distinct()
-            .ToList();
+        var permissoes = EffectivePermissions.Compute(concessoes, ajustes).ToList();
 
         return new AuthenticatedPrincipal(sessao.TenantId, usuario.Id, sessao.Id, permissoes);
     }
 
-    private async Task<AuthenticatedPrincipal?> AuthenticateEmbeddedAsync(Session sessao, User usuario, IReadOnlyList<UserOrganizationGrant> concessoes, CancellationToken cancellationToken)
+    private async Task<AuthenticatedPrincipal?> AuthenticateEmbeddedAsync(Session sessao, User usuario, IReadOnlyList<UserOrganizationGrant> concessoes, IReadOnlyList<UserPermissionOverride> ajustes, CancellationToken cancellationToken)
     {
         if (sessao.IntegrationId is not { } conexaoId || sessao.ExternalUserId is null)
         {
@@ -124,7 +129,7 @@ public sealed class SessionAuthenticator
         var somenteCliente = conexao.Mode == EmbeddedMode.CustomerOnly;
         var permissoes = somenteCliente
             ? new List<PermissionGrant>()
-            : EmbeddedSessionPolicy.Filter(concessoes.SelectMany(c => RolePermissions.Expand(c.Role, c.OrganizationId)), conexao.OrganizationId);
+            : EmbeddedSessionPolicy.Filter(EffectivePermissions.Compute(concessoes, ajustes), conexao.OrganizationId);
 
         return new AuthenticatedPrincipal(
             sessao.TenantId, usuario.Id, sessao.Id, permissoes, SessionKind.Embedded, conexaoId, new EmbeddedScope(conexao.OrganizationId, somenteCliente));

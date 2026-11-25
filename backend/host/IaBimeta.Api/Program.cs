@@ -9,6 +9,16 @@ if (args.Length > 0 && string.Equals(args[0], IaBimeta.Api.Provisioning.ResetPas
     return await IaBimeta.Api.Provisioning.ResetPasswordCommand.RunAsync(args[1..], Console.Out);
 }
 
+if (args.Length > 0 && string.Equals(args[0], IaBimeta.Api.Provisioning.TenantUsersCommand.Verb, StringComparison.Ordinal))
+{
+    return await IaBimeta.Api.Provisioning.TenantUsersCommand.RunAsync(args[1..], Console.Out);
+}
+
+if (args.Length > 0 && string.Equals(args[0], IaBimeta.Api.Provisioning.FirstAdminCommand.Verb, StringComparison.Ordinal))
+{
+    return await IaBimeta.Api.Provisioning.FirstAdminCommand.RunAsync(args[1..], Console.Out);
+}
+
 if (args.Length > 0 && string.Equals(args[0], IaBimeta.Api.Provisioning.MigrateCommand.Verb, StringComparison.Ordinal))
 {
     return await IaBimeta.Api.Provisioning.MigrateCommand.RunAsync(args[1..], Console.Out);

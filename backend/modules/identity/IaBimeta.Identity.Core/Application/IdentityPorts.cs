@@ -67,11 +67,18 @@ public interface IAuthenticationStore
     /// <summary>Busca pelo hash do token (único e não enumerável). O tenant vem da própria sessão encontrada.</summary>
     Task<Session?> FindSessionByTokenHashAsync(byte[] tokenHash, CancellationToken cancellationToken);
 
-    Task AddSessionAsync(Session session, CancellationToken cancellationToken);
+    /// <summary>Grava a sessão SÓ se o usuário continua ATIVO, confirmando as duas coisas numa transação que trava a linha do usuário em modo compartilhado: a desativação (que atualiza a linha) e a gravação da sessão se serializam, então uma sessão nunca nasce depois da revogação feita pela desativação. <c>false</c> = usuário não ativo, nada gravado.</summary>
+    Task<bool> AddSessionAsync(Session session, CancellationToken cancellationToken);
 
     Task UpdatePasswordHashAsync(TenantId tenantId, Guid userId, string newHash, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<UserOrganizationGrant>> ListGrantsAsync(TenantId tenantId, Guid userId, CancellationToken cancellationToken);
+
+    /// <summary>Os ajustes individuais de permissão do usuário (restrições e concessões sobre o perfil), para o cálculo das permissões efetivas.</summary>
+    Task<IReadOnlyList<UserPermissionOverride>> ListOverridesAsync(TenantId tenantId, Guid userId, CancellationToken cancellationToken);
+
+    /// <summary>Ativa o usuário PENDENTE (primeiro acesso concluído). <c>false</c> se ele já não estava pendente.</summary>
+    Task<bool> ActivatePendingUserAsync(TenantId tenantId, Guid userId, DateTimeOffset now, CancellationToken cancellationToken);
 
     /// <summary>A contagem de falhas do e-mail no tenant, ou <c>null</c> se não há falha registrada.</summary>
     Task<LoginThrottle?> FindLoginThrottleAsync(TenantId tenantId, string key, CancellationToken cancellationToken);

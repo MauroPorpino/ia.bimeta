@@ -4,7 +4,10 @@
 {
   "tenant": {
     "slug": "laboratorio-exemplo",          // minusculas, numeros e hifens (3 a 40 caracteres); e o que se digita na tela de entrada
-    "name": "Laboratorio Exemplo"
+    "name": "Laboratorio Exemplo",
+    // Etapa 01: o limite de usuarios e OBRIGATORIO para empresa nova. Este exemplo e de demonstracao (WhatsApp simulado, atendentes no arquivo), entao usa a excecao explicita e auditada.
+    // Numa empresa COMERCIAL troque por "maxUsers": 10 e REMOVA "attendants": quem cadastra os usuarios e o administrador da propria empresa (a BImeta provisiona so o primeiro administrador).
+    "unlimitedUsers": true
   },
   "administrator": {
     "email": "admin@laboratorio-exemplo.local",

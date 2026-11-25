@@ -90,4 +90,10 @@ public enum Permission
     /// <c>EmbeddedSessionPolicy.AllowedPermissions</c>: a sessão embutida não a recebe, mesmo de um usuário gestor, e o sistema externo nunca a concede.
     /// </summary>
     ConsentManage = 26,
+
+    /// <summary>Ativar e desativar usuários humanos de uma organização (Etapa 01). Desativar impede o acesso, libera a vaga e preserva o histórico.</summary>
+    UserStatusManage = 27,
+
+    /// <summary>Atribuir papéis acima de Atendente e personalizar as permissões individuais de um usuário (Etapa 01). Distinta de <see cref="UserManage"/> de propósito: quem cadastra atendentes não altera permissões administrativas.</summary>
+    UserPermissionManage = 28,
 }

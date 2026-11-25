@@ -1,0 +1,86 @@
+# ADR 0042 — Etapa 01 de prontidão: usuários, status, vagas, habilitação de cadastro, permissões individuais e primeiro acesso
+
+- **Status:** **Proposto (25/11/2026), Etapa 01 concluída e aprovada tecnicamente (25/11/2026)** — ver "Encerramento da Etapa 01". A ratificação do ADR como Aceito segue com o decisor; não é autorização de implantação em produção.
+- **Data:** 25/11/2026
+- **Decisor:** Mauro Porpino
+- **Referências:** ADR 0005 e `BOUNDARIES.md`, ADR 0039 e 0041 (Embedded), `docs/architecture/EMBEDDED-PLANO.md`.
+- **Altera (aditivamente):** `Identity` (status do usuário, ajustes individuais, **política de usuários: limite e habilitação**, administração de usuários, primeiro acesso), `SharedKernel` (duas permissões e a chave da trava de admissão), host (comandos `tenant-users` e `first-admin`, política na criação da empresa). **`Tenancy` não muda.**
+- **Não altera:** a matriz de dependências entre módulos (nenhuma aresta nova), `AccessPolicy`, E1-R, E2.
+
+## Contexto
+
+O tenant precisa cadastrar e gerenciar os próprios usuários; a BImeta cadastra a empresa, o **primeiro administrador**, a habilitação do cadastro e o limite de usuários. Até aqui não havia status do usuário, limite, habilitação, permissões individuais nem primeiro acesso por token.
+
+## Decisões
+
+### 1. Status do usuário (`identity.users.status`)
+`Active`, `Inactive`, `Pending`, `Cancelled`. Só o `Active` acessa (login e `SessionAuthenticator` conferem **a cada requisição**, então desativar derruba a sessão na requisição seguinte). Desativar revoga sessões e tokens, **preserva** concessões, histórico e auditoria e libera a vaga. Não há exclusão. `UserDirectory.ExistsAsync` só aceita usuário ativo (não recebe novas atribuições operacionais). Um `Pending` cujo token expirou aparece como **"Expirado"** (derivado, sem job): não ocupa vaga.
+
+### 2. Vagas
+Uma vaga por **pessoa por tenant** (`User` pertence a um tenant; várias organizações = uma vaga). Ocupa vaga: usuário `Active` (federado só enquanto houver vínculo externo `Active`) e usuário `Pending` com token de primeiro acesso **vivo** (não usado, não revogado, não expirado). Não ocupam: inativos, cancelados, expirados, contas técnicas, chaves, agentes de IA e clientes finais. A reserva é o próprio usuário pendente (sem tabela de convites). Mesma estratégia em todos os caminhos: `UserAdmissionGuard`.
+
+### 3. Política de usuários no Identity (`identity.tenant_user_policies`): habilitação e limite
+**Decisão arquitetural (25/11/2026, aprovada pelo decisor):** o limite contratado e a habilitação do cadastro vivem no **Identity**, não no Tenancy. Motivo comprovado: lidos no Tenancy, o cadastro/JIT/reativação seguravam a conexão da transação com a trava e pediam uma **segunda conexão** ao Tenancy (segurar-e-esperar), o que, sob saturação do pool, derrubava até a primeira entrada pelo JIT (o teste existente `Saturacao_do_pool_na_autenticacao_da_sessao_vira_503_controlado_e_nao_500` falhou). No Identity, a política é lida **na mesma conexão e transação** da admissão, depois da trava. O Tenancy não foi alterado e nenhuma aresta nova entre módulos foi criada.
+
+Só a plataforma altera (comando `tenant-users`, `TenantUserPolicyService`; a interface da Etapa 02 usará o mesmo serviço); o tenant só consulta (`GET /users/usage`) e nenhuma rota ou permissão do tenant a altera (provado por teste que enumera as rotas). **Ausência de linha = empresa anterior à Etapa 01** (ilimitada e habilitada, compatibilidade); a **existência** da linha é a decisão explícita. Empresa comercial **nova**: o `provision` cria a política (limite ou a exceção explícita `unlimitedUsers`, auditada) **antes** de qualquer organização, usuário ou administrador, e o primeiro administrador do provisionamento comercial é **recusado** se a política não existir (uma falha parcial nunca libera uma empresa ilimitada por omissão; repetir completa). `unlimitedUsers` sozinho não torna uma empresa "interna": a criação de **atendentes** pelo `provision` exige o ambiente Development (e `unlimitedUsers`), e o seed interno `EnsureTenantAdministratorAsync` só é chamado por código de `Development` (teste de varredura). Desabilitado bloqueia **ingresso** (admissão, readmissão, novo token de pendente sem reserva viva, JIT, aceitação de admissão pendente) e **não** bloqueia quem já foi admitido: acesso, vínculos organizacionais, reativação (respeitando o limite). **Primeiro administrador** é exceção única: vale com o cadastro desabilitado, continua sujeito ao limite, não se repete e é atômico. Reduzir o limite abaixo do uso **não desativa ninguém**: indica o excesso e bloqueia ingresso; desativar continua permitido.
+
+### 4. Concorrência
+Uma única trava consultiva de transação por tenant (`UserAdmissionLock`, `pg_advisory_xact_lock`) para **vagas e último administrador** (uma chave só evita ordem de trava invertida/deadlock). Tomam a trava: cadastro, admissão, readmissão, token de pendente, ativação/desativação, perfis, ajustes, provisionamento inicial, primeiro acesso de pendente, JIT, reativação de vínculo externo e a **alteração do limite/habilitação pela plataforma**. O limite e a habilitação são lidos **depois** de obter a trava (leitura sem rastreamento). Uma exceção desfaz a transação inteira. Provado com PostgreSQL real (`UserAdmissionTests`).
+
+### 5. Permissões: modelo híbrido
+Perfil padrão (`RolePermissions`) + ajustes individuais (`identity.user_permission_overrides`, só a **diferença**: `Grant`/`Deny`, no escopo da concessão). Perfis funcionais: Administrador=`OrganizationAdmin`, Supervisor=`Manager`, Atendente=`Attendant`, Usuário=`User` (sem papel novo; o supervisor de **fila** do ContactCenter continua distinto e não confere permissão administrativa). Cálculo (`EffectivePermissions`, função pura): `(perfil ∪ concessões) − restrições` por escopo; **restrição vence concessão**. Precedência entre escopos: restrição de **tenant** retira a permissão de todos os escopos; restrição de **organização** retira só dela; se a permissão chegaria à organização apenas por concessão de tenant, a concessão de tenant dessa permissão é **descartada por inteiro** (falha fechada) e a escrita recusa a combinação. O resultado continua sendo lista positiva, que `AccessPolicy` já avalia (sem alterá-la); o teto do Embedded é aplicado **depois**.
+
+Novas permissões: `UserStatusManage` (ativar/desativar) e `UserPermissionManage` (perfis acima de Atendente e personalização). **Apenas o perfil Administrador as recebe** (intencional; é a única mudança de permissão padrão desta etapa). `/auth/me` devolve as permissões efetivas.
+
+### 6. Proteção contra elevação de privilégio (todas as operações administrativas)
+(a) só se atribui papel/permissão que o responsável **tem** no escopo; papéis acima de Atendente exigem `UserPermissionManage`; (b) toda operação sobre um usuário (cadastro, edição, e-mail, status, redefinição, token, sessões, vínculos) exige que as permissões **efetivas do alvo estejam cobertas** pelas do responsável; (c) ninguém administra a si mesmo (a troca da própria senha segue pelo mecanismo existente); (d) usuário **sem vínculo visível** ao responsável não é alcançável por identificador (404): sem adoção; (e) isolamento por tenant (filtro global) e por organização (visibilidade por `UserRead`). Limitação conhecida: um alvo com vínculos em organizações que o responsável não administra só é alcançado por quem as cobre todas.
+
+### 7. Último administrador
+Administrador utilizável = `Active`, autenticação por senha, credencial real e, no escopo do tenant, **efetivamente** `UserManage`, `UserPermissionManage` e `UserStatusManage`. Verificado **após a mudança, dentro da trava e da transação** (se o tocado era administrador e não sobra nenhum, a exceção desfaz tudo).
+
+### 8. Primeiro acesso
+Usuário nasce `Pending` com credencial inutilizável (`!pending`) e token de uso único (`ibr_…`, hash SHA-256, até **24 h**, mostrado só na resposta, `Cache-Control: no-store`, nunca em log nem em auditoria). Emitir outro **substitui** (invalida) o anterior; cancelar invalida sem mudar a situação; cancelar a admissão libera a vaga. O usuário define a própria senha na tela existente de token; consumir o token, definir a senha e ativar acontecem **juntos** sob a trava, e a aceitação é recusada (sem consumir o token) se o cadastro estiver desabilitado (exceto o primeiro administrador). Sem SMTP.
+
+### 9. Evolução dos perfis padrão (regra de segurança)
+Mudar as permissões padrão de um perfil é **mudança de segurança**: só com ADR/emenda, listando as permissões novas e **quem as recebe**; nunca é silenciosa. Como os ajustes guardam só diferenças, as **restrições individuais continuam valendo** após a mudança; uma concessão individual que passou a coincidir com o perfil fica inofensiva (a interface a mostra como "igual ao perfil"). Permissão **sensível** nova entra no perfil Administrador por decisão explícita e **não** em Supervisor/Atendente/Usuário por herança. Sem versionamento de perfis nesta etapa.
+
+## Migrations (somente bancos de desenvolvimento e teste)
+
+| Módulo | Migration | Mudança | Valores iniciais |
+|---|---|---|---|
+| Identity | `AddTenantUserPolicies` | tabela `tenant_user_policies` (PK `tenant_id`; `max_users int null`, `registration_enabled`, `updated_at`; `ck_tenant_user_policies_max_users (>= 1)`) | sem linha = empresa anterior à Etapa 01 (**ilimitada e habilitada**, compatibilidade); nenhuma linha é criada na migration |
+| Identity | `AddUserStatusAndPermissionOverrides` | `users.status varchar(20) not null default 'Active'`, `users.status_changed_at`, tabela `user_permission_overrides` (PK `tenant_id,id`; FK ao usuário; índice único `tenant,user,organization,permission` com `NULLS NOT DISTINCT`) | todos os usuários existentes: **Active**; nenhum ajuste (as permissões de cada usuário permanecem **exatamente** as de antes) |
+
+**Impacto nos dados:** aditivo; nenhuma linha é alterada além dos valores padrão das colunas novas. Os administradores existentes **ganham** `UserStatusManage` e `UserPermissionManage` (nova capacidade, intencional); nenhum outro perfil muda.
+
+**Compatibilidade e recuperação.** Uma versão **anterior** do aplicativo ignora status, ajustes, habilitação e limite: ela voltaria a aceitar login de usuário `Inactive`/`Pending` (a credencial do pendente é inutilizável, mas o inativo manteria a senha), a ignorar restrições individuais e a não aplicar limite. Por isso o **rollback do aplicativo não é seguro por si só**: antes de aplicar as migrations em qualquer ambiente faça **backup verificado** do banco (`pg_dump`) e, para voltar, restaure o backup junto com a versão anterior (não use apenas o `Down` das migrations, que descarta o status e os ajustes). Em desenvolvimento, o backup anterior a esta etapa está em `C:\Projetos\ferramentas\backups\iabimeta_test-pre-etapa01-20261125.dump`.
+
+## Consequências
+- Nova capacidade de administração completa do tenant; a BImeta não cadastra usuários rotineiros (só o primeiro administrador).
+- A interface da plataforma (Etapa 02) reaproveitará `TenantUserPolicyService` e os comandos.
+- Pendências: suspensão completa de tenant, interface da plataforma, redistribuição em lote de atendimentos de usuário desativado (reaproveita assign/transfer/release do ContactCenter, sem interface nesta etapa).
+
+## Emenda — revisão independente (25/11/2026)
+Sete correções, todas dentro da Etapa 01 e sem nova aresta entre módulos:
+1. **Sessão x desativação (Standalone e Embedded).** A sessão (interativa e embutida) só é gravada dentro de uma transação que trava a linha do usuário em modo compartilhado e confere que ele continua `Active` (`FOR SHARE`); a desativação atualiza a mesma linha e revoga as sessões, então as duas se serializam (uma conexão só, sem trava nova). Segunda defesa: uma sessão criada **antes** da última mudança de situação do usuário (`status_changed_at`) nunca autentica, e um ticket Embedded anterior a essa marca não abre sessão. Emissão e troca do Embedded exigem usuário `Active`.
+2. **Primeiro acesso.** O instante de validação do resgate é lido **dentro** da seção exclusiva; o consumo condicional do token (não usado, não revogado, não expirado nesse instante) é a confirmação atômica de que ainda é uma reserva válida.
+3. **Vínculo externo.** A ativação do vínculo trava a linha do vínculo e relê usuário, vínculo e outros vínculos **sob a trava de admissão**; exige vaga quando a transição realmente aumenta o uso (usuário federado ativo, este vínculo desativado, nenhum outro vínculo ativo dele).
+4. **Redefinição pelo operador.** `reset-password` só vale para usuário **ativo**; admissão pendente (inclusive vencida ou cancelada) usa exclusivamente o primeiro acesso (habilitação, reserva e limite). Limitação: o primeiro administrador cujo token venceu precisa de nova decisão (o `first-admin` não se repete).
+5. **Permissões na interface.** O detalhe lista todas as permissões válidas do escopo (herdada, não concedida pelo perfil, concedida, retirada, efetiva); "Conceder" só aparece a quem tem a permissão no escopo (o backend continua sendo a autoridade).
+6. **Admissão expirada.** A interface oferece novo token de primeiro acesso (sujeito a vaga e habilitação) e cancelar a admissão.
+7. **Política.** `tenant-users` altera **só os campos pedidos** sobre a política relida sob a trava (`ChangePolicyAsync`).
+
+## Emenda — reemissão do token do administrador inicial (25/11/2026)
+O comando `first-admin`, repetido para o **mesmo e-mail**, reemite o token de primeiro acesso do administrador inicial provisionado pela BImeta, **somente enquanto ele não concluiu o primeiro acesso**. Critério inequívoco: a marca `users.initial_administrator` (migration aditiva `AddInitialAdministratorFlag`, padrão falso), ligada só pelo provisionamento e **apagada para sempre** quando o primeiro acesso é concluído ou a admissão é cancelada; e-mail, perfil administrativo ou "não há outro administrador" não bastam. A reemissão ocorre sob a mesma trava de admissão: mesma conta (nada é duplicado), token anterior invalidado, 24 h, uso único, exibição única, auditoria `identity.tenant-admin.first-access.reissue` sem token. Reserva ainda viva: não muda as vagas. Reserva vencida: volta a ocupar vaga e **exige o limite**; a exceção da habilitação do cadastro vale só para essa conclusão (nunca para outro usuário). Outro e-mail, conta sem a marca ou já concluída: recusado. Não cobre a recuperação de administradores que já concluíram o primeiro acesso, nem interface (Etapa 02). Contas pendentes provisionadas antes desta emenda não têm a marca e não são reemitíveis.
+
+## Encerramento da Etapa 01 (25/11/2026)
+**Situação:** concluída e aprovada tecnicamente. Não é autorização de implantação em produção; a Etapa 02 (administração de tenants pela BImeta) depende de autorização específica.
+
+- **Implementado:** status do usuário (Pendente, Ativo, Inativo, Cancelado); vagas e limite por empresa; habilitação do cadastro; política de usuários no Identity; permissões híbridas (perfil + ajustes individuais, restrição vence concessão); proteção contra elevação de privilégio e do último administrador; primeiro acesso por token de uso único (24 h, exibição única); reemissão do token do administrador inicial; sessões e tickets Embedded invalidados por mudança de status; comandos `tenant-users` e `first-admin`; tela Configurações → Usuários.
+- **Testes:** testes unitários do Identity, testes de integração em PostgreSQL real (inclusive corridas determinísticas de vaga, trava e reemissão) e testes do frontend, executados ao longo da etapa. No fechamento foram rodados só os testes direcionados e as regressões diretamente afetadas pelo último P1 (51 de integração e 335 unitários do Identity, aprovados); a suíte completa não foi reexecutada, por decisão do proprietário.
+- **Validação funcional inicial:** feita pelo proprietário do produto, pelo roteiro `docs/operations/ETAPA-01-USUARIOS-VALIDACAO.md`.
+- **Aprovação independente:** Codex, por inspeção do código e dos testes, **sem execução independente**. Parecer final: aprovado com ressalvas não impeditivas.
+- **Problemas impeditivos corrigidos:** 7 achados da primeira revisão (emenda acima), a reemissão do token do administrador inicial e o último P1 (horário da reemissão lido dentro da trava, após adquiri-la, para que uma reserva vencida durante a espera não seja recriada acima do limite).
+- **Pendências não impeditivas (backlog):** BL-26 (teste concorrente em PostgreSQL da troca Embedded com desativação) e BL-27 (teste com banco real de ticket Embedded antigo após reativação), em `docs/architecture/EMBEDDED-BACKLOG.md`.
+- **Limitações conhecidas:** sem suspensão completa de tenant, TOTP, e-mail/SMTP ou redistribuição em lote de atendimentos de usuário desativado; interface da plataforma é a Etapa 02; métodos de admissão e de seed interno capturam o horário antes da trava (direção conservadora, sem efeito de limite acima do permitido).
+- **Migrations (3, aditivas, só bancos de desenvolvimento e teste):** `AddUserStatusAndPermissionOverrides`, `AddTenantUserPolicies`, `AddInitialAdministratorFlag`. Compatibilidade e recuperação: ver a seção "Migrations" (o rollback do aplicativo sozinho não é seguro; exige backup prévio do banco e a reversão das migrations na ordem inversa).

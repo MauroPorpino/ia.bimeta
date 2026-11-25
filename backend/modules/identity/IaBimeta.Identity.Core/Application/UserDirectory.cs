@@ -19,6 +19,7 @@ public sealed class UserDirectory : IUserDirectory
     {
         _ = _context.GetRequired();
 
-        return userId != Guid.Empty && await _users.FindByIdAsync(userId, cancellationToken) is not null;
+        // Só o usuário ATIVO existe para receber atribuições operacionais (inativo, pendente e cancelado não recebem novos atendimentos).
+        return userId != Guid.Empty && await _users.FindByIdAsync(userId, cancellationToken) is { Status: IaBimeta.Identity.Domain.UserStatus.Active };
     }
 }

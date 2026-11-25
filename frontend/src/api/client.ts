@@ -5,6 +5,17 @@ import type {
   AgentDefinition,
   AgentPresence,
   AgentStatus,
+  AdmissionResult,
+  AdmitUserRequest,
+  IssuedToken,
+  ListUsersParams,
+  OrganizationSummary,
+  PermissionCatalog,
+  PermissionEffect,
+  UserDetail,
+  UserListItem,
+  UserPage,
+  UserUsage,
   ChangePasswordRequest,
   CloseRequest,
   Conversation,
@@ -84,6 +95,8 @@ export class ApiError extends Error {
   readonly motivo: string | null;
   /** Os problemas de validação do motor de integração (400 `problems`): uma frase fixa por campo, nunca o valor digitado; vazio nos demais erros. */
   readonly problemas: string[];
+  /** Extensões numéricas do problema (`limit` e `used` do 409 `user-limit-reached`); vazio nos demais erros. */
+  readonly numeros: Record<string, number>;
 
   constructor(
     status: number,
@@ -94,6 +107,7 @@ export class ApiError extends Error {
     erros: TemplateParameterError[] = [],
     motivo: string | null = null,
     problemas: string[] = [],
+    numeros: Record<string, number> = {},
   ) {
     super(detail ?? title);
     this.name = 'ApiError';
@@ -105,6 +119,7 @@ export class ApiError extends Error {
     this.erros = erros;
     this.motivo = motivo;
     this.problemas = problemas;
+    this.numeros = numeros;
   }
 }
 
@@ -308,7 +323,15 @@ export function createApi(opcoes: ApiOptions = {}) {
       ? problema.errors.filter((e): e is TemplateParameterError => !!e && typeof e.key === 'string' && typeof e.message === 'string')
       : [];
     const problemas = Array.isArray(problema?.problems) ? problema.problems.filter((p): p is string => typeof p === 'string') : [];
-    return new ApiError(status, titulo, detalhe, typeof problema?.code === 'string' ? problema.code : null, problema === null, erros, typeof problema?.reason === 'string' ? problema.reason : null, problemas);
+    const codigo = typeof problema?.code === 'string' ? problema.code : typeof problema?.extensions?.code === 'string' ? problema.extensions.code : null;
+    const numeros: Record<string, number> = {};
+    for (const nome of ['limit', 'used']) {
+      const valor = (problema as Record<string, unknown> | null)?.[nome] ?? problema?.extensions?.[nome];
+      if (typeof valor === 'number') {
+        numeros[nome] = valor;
+      }
+    }
+    return new ApiError(status, titulo, detalhe, codigo, problema === null, erros, typeof problema?.reason === 'string' ? problema.reason : null, problemas, numeros);
   }
 
   /**
@@ -335,6 +358,7 @@ export function createApi(opcoes: ApiOptions = {}) {
 
   const rotaItem = (itemId: string) => `/contact-center/items/${encodeURIComponent(itemId)}`;
   const rotaLacuna = (lacunaId: string) => `/agents/knowledge-gaps/${encodeURIComponent(lacunaId)}`;
+  const rotaUsuario = (id: string) => `/users/${encodeURIComponent(id)}`;
   const rotaConexao = (id: string) => `/capabilities/connections/${encodeURIComponent(id)}`;
   const rotaOperacao = (id: string) => `/capabilities/definitions/${encodeURIComponent(id)}`;
 
@@ -358,6 +382,37 @@ export function createApi(opcoes: ApiOptions = {}) {
     // Troca da própria senha (exige a atual; as outras sessões caem e esta continua) e uso do token de redefinição (anônimo; todas as sessões da pessoa caem).
     trocarSenha: (pedido: ChangePasswordRequest) => requisitar<void>('PUT', '/auth/me/password', { corpo: pedido }),
     redefinirSenha: (pedido: RedeemPasswordResetRequest) => requisitar<void>('POST', '/auth/password-reset/redeem', { corpo: pedido, semSessao: true }),
+
+    // ---- Configurações → Usuários. Os tokens (primeiro acesso, redefinição) voltam em claro UMA vez: quem chama os mostra e os descarta.
+    listarOrganizacoes: () => requisitar<OrganizationSummary[]>('GET', '/organizations'),
+    usoDeUsuarios: () => requisitar<UserUsage>('GET', '/users/usage'),
+    catalogoDePermissoes: () => requisitar<PermissionCatalog>('GET', '/users/permission-catalog'),
+    listarUsuarios: (p: ListUsersParams = {}) =>
+      requisitar<UserPage>('GET', '/users', { consulta: { search: p.search, role: p.role, organizationId: p.organizationId, status: p.status, page: p.page, pageSize: p.pageSize } }),
+    obterUsuario: (id: string) => requisitar<UserDetail>('GET', rotaUsuario(id)),
+    admitirUsuario: (organizationId: string, pedido: AdmitUserRequest) =>
+      requisitar<AdmissionResult>('POST', `/organizations/${encodeURIComponent(organizationId)}/users/admissions`, { corpo: pedido }),
+    editarUsuario: (id: string, dados: { email: string; displayName: string }) => requisitar<UserListItem>('PUT', rotaUsuario(id), { corpo: dados }),
+    desativarUsuario: (id: string) => requisitar<void>('POST', `${rotaUsuario(id)}/deactivate`),
+    reativarUsuario: (id: string) => requisitar<void>('POST', `${rotaUsuario(id)}/reactivate`),
+    emitirPrimeiroAcesso: (id: string) => requisitar<IssuedToken>('POST', `${rotaUsuario(id)}/first-access`),
+    cancelarTokenDoUsuario: (id: string) => requisitar<void>('DELETE', `${rotaUsuario(id)}/tokens`),
+    cancelarAdmissao: (id: string) => requisitar<void>('POST', `${rotaUsuario(id)}/admission/cancel`),
+    readmitirUsuario: (id: string) => requisitar<AdmissionResult>('POST', `${rotaUsuario(id)}/admission/readmit`),
+    definirPerfilNaOrganizacao: (organizationId: string, id: string, role: string) =>
+      requisitar<void>('PUT', `/organizations/${encodeURIComponent(organizationId)}/users/${encodeURIComponent(id)}/role`, { corpo: { role } }),
+    retirarVinculoComOrganizacao: (organizationId: string, id: string) =>
+      requisitar<void>('DELETE', `/organizations/${encodeURIComponent(organizationId)}/users/${encodeURIComponent(id)}/role`),
+    definirPermissaoDoUsuario: (id: string, organizationId: string | null, permission: string, effect: PermissionEffect) =>
+      requisitar<void>('PUT', `${rotaUsuario(id)}/permissions`, { corpo: { organizationId, permission, effect } }),
+    removerPersonalizacaoDaPermissao: (id: string, permission: string, organizationId: string | null) =>
+      requisitar<void>('DELETE', `${rotaUsuario(id)}/permissions`, { consulta: { permission, organizationId: organizationId ?? undefined } }),
+    restaurarPermissoesDoPerfil: (id: string, escopo: { allScopes: boolean; organizationId: string | null }) =>
+      requisitar<void>('POST', `${rotaUsuario(id)}/permissions/reset`, { corpo: escopo }),
+    redefinirAcessoDoUsuario: (organizationId: string, id: string) =>
+      requisitar<IssuedToken>('POST', `/organizations/${encodeURIComponent(organizationId)}/users/${encodeURIComponent(id)}/password-reset`),
+    revogarSessoesDoUsuario: (organizationId: string, id: string) =>
+      requisitar<{ revoked: number }>('POST', `/organizations/${encodeURIComponent(organizationId)}/users/${encodeURIComponent(id)}/sessions/revoke`),
 
     // ---- Fila
     listarMinhasFilas: () => requisitar<ServiceQueue[]>('GET', '/contact-center/me/queues'),

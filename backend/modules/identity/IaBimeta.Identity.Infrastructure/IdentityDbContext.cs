@@ -31,6 +31,10 @@ public sealed class IdentityDbContext : DbContext
 
     public DbSet<Session> Sessions => Set<Session>();
 
+    public DbSet<UserPermissionOverride> PermissionOverrides => Set<UserPermissionOverride>();
+
+    public DbSet<TenantUserPolicy> TenantUserPolicies => Set<TenantUserPolicy>();
+
     public DbSet<LoginThrottle> LoginThrottles => Set<LoginThrottle>();
 
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
@@ -59,6 +63,9 @@ public sealed class IdentityDbContext : DbContext
         modelBuilder.ApplyConfiguration(new UserConfiguration());
         modelBuilder.ApplyConfiguration(new UserOrganizationGrantConfiguration());
         modelBuilder.ApplyConfiguration(new SessionConfiguration());
+        modelBuilder.ApplyConfiguration(new UserPermissionOverrideConfiguration());
+        modelBuilder.ApplyConfiguration(new TenantUserPolicyConfiguration());
+        modelBuilder.Entity<UserPermissionOverride>().HasQueryFilter(o => o.TenantId == TenantAtual);
         modelBuilder.ApplyConfiguration(new LoginThrottleConfiguration());
         modelBuilder.ApplyConfiguration(new PasswordResetTokenConfiguration());
         modelBuilder.ApplyConfiguration(new IntegrationConnectionConfiguration());

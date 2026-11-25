@@ -1,0 +1,24 @@
+// Empresa SINTETICA para validar a Etapa 01 (usuarios, vagas, habilitacao e permissoes). Usada por tools\dev\Novo-TenantDeUsuariosDeDemonstracao.ps1.
+// Nenhum segredo aqui: a senha do administrador vem da variavel de ambiente que o script define so para o processo dele.
+{
+  "tenant": {
+    "slug": "demo-usuarios",
+    "name": "Empresa Demo de Usuarios",
+    "maxUsers": 5,
+    "userRegistrationEnabled": true
+  },
+  "administrator": {
+    "email": "admin@demo-usuarios.local",
+    "displayName": "Marina Administradora",
+    "passwordEnv": "DEMO_USUARIOS_SENHA_ADMIN"
+  },
+  "organization": { "name": "Empresa Demo de Usuarios", "unitName": "Matriz" },
+  "queue": { "name": "Atendimento humano" },
+  "ai": {
+    "providerId": "openai",
+    "modelId": "gpt-6-luna",
+    "instructions": "Voce e uma assistente de demonstracao. Responda de forma curta e cordial.",
+    "handoffNotice": "Vou chamar uma pessoa da equipe. Um instante!",
+    "faq": []
+  }
+}

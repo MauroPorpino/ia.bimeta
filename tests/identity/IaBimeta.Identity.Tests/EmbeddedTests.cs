@@ -328,7 +328,7 @@ public class EmbeddedServicesTests
             Embedded.Chaves.Add(Chave);
         }
 
-        public EmbeddedTicketService Tickets => new(Embedded, Dados, Opcoes, Relogio, Auditoria);
+        public EmbeddedTicketService Tickets => new(Embedded, Dados, Opcoes, Relogio, Auditoria, AdminFabrica.Guard(Dados, Holder, Embedded));
 
         public EmbeddedExchangeService Troca => new(Embedded, Dados, Tenants, Opcoes, Holder, Relogio, Auditoria);
 
@@ -877,5 +877,160 @@ public class EmbeddedServicesTests
             var assinatura = Convert.ToHexStringLower(IntegrationRequestAuthenticator.ComputeSignature(segredo, ts, "nonce-1234567890123", "POST", "/embed/v1/launch-tickets", Array.Empty<byte>()));
             await h.Autenticador.AuthenticateAsync(new IntegrationSignedRequest(chave.PublicId, ts, "nonce-1234567890123", assinatura, "POST", "/embed/v1/launch-tickets", Array.Empty<byte>()));
         }
+    }
+
+    // Etapa 01: o JIT é ingresso de uma pessoa nova (habilitação e vaga).
+
+    [Fact]
+    public async Task JIT_com_cadastro_desabilitado_e_recusado_e_nao_cria_nada()
+    {
+        var c = new Cenario();
+        c.Dados.DefinirPolitica(c.Tenant.TenantId, null, cadastroHabilitado: false);
+
+        await Assert.ThrowsAsync<ExternalIdentityNotAllowedException>(() => c.Tickets.IssueLaunchTicketAsync(c.Integracao, c.Pedido("u-1", Verifier)));
+
+        Assert.Empty(c.Embedded.Provisionados);
+        Assert.Empty(c.Embedded.Vinculos);
+        Assert.Empty(c.Embedded.Tickets);
+        Assert.Contains(c.Auditoria.Eventos, e => e.Entrada.Operation == "identity.embed.ticket.issue" && e.Entrada.Outcome == IaBimeta.Audit.Contracts.AuditOutcome.Denied);
+    }
+
+    [Fact]
+    public async Task JIT_no_limite_e_recusado_e_com_vaga_consome_exatamente_uma()
+    {
+        var c = new Cenario();
+        c.NovoUsuario("ana@exemplo.com", Role.Attendant);
+        c.Dados.DefinirPolitica(c.Tenant.TenantId, 2, cadastroHabilitado: true);
+
+        await c.Tickets.IssueLaunchTicketAsync(c.Integracao, c.Pedido("u-1", Verifier)); // ocupa a 2.ª vaga
+        await Assert.ThrowsAsync<ExternalIdentityNotAllowedException>(() => c.Tickets.IssueLaunchTicketAsync(c.Integracao, c.Pedido("u-2", Verifier)));
+
+        Assert.Single(c.Embedded.Provisionados);
+        Assert.Single(c.Embedded.Vinculos);
+        // O mesmo usuário externo voltando não consome outra vaga (o vínculo já existe).
+        await c.Tickets.IssueLaunchTicketAsync(c.Integracao, c.Pedido("u-1", Verifier));
+        Assert.Single(c.Embedded.Provisionados);
+    }
+
+    [Fact]
+    public async Task Usuario_federado_desativado_nao_autentica_sessao_embutida_e_libera_a_vaga()
+    {
+        var c = new Cenario();
+        await c.Tickets.IssueLaunchTicketAsync(c.Integracao, c.Pedido("u-1", Verifier));
+        var provisionado = c.Embedded.Provisionados.Single().Usuario;
+        var guard = AdminFabrica.Loja(c.Dados, c.Holder);
+        guard.Vinculos = () => c.Embedded.Vinculos;
+        Assert.Equal(1, (await guard.GetSeatUsageAsync(c.Tenant.TenantId, c.Relogio.GetUtcNow(), default)).SeatsUsed);
+
+        c.Embedded.Vinculos.Single().SetStatus(ExternalIdentityStatus.Disabled);
+
+        Assert.Equal(0, (await guard.GetSeatUsageAsync(c.Tenant.TenantId, c.Relogio.GetUtcNow(), default)).SeatsUsed);
+        Assert.Equal(UserStatus.Active, provisionado.Status);
+    }
+
+    // Etapa 01: as permissões individuais nunca ampliam o teto do Embedded, e o usuário desativado perde a sessão embutida.
+
+    [Fact]
+    public async Task Ajustes_individuais_nunca_ampliam_o_teto_da_sessao_embutida_e_as_restricoes_continuam_valendo()
+    {
+        var c = new Cenario(ProvisioningMode.MappedOnly);
+        var gerente = c.NovoUsuario("g@exemplo.com", Role.Manager);
+        c.Embedded.Vinculos.Add(ExternalIdentity.Create(c.Tenant.TenantId, c.Conexao.Id, "u-g", gerente.Id, IdentitySource.Mapped, c.Relogio.GetUtcNow(), null));
+        foreach (var p in new[] { Permission.UserManage, Permission.UserStatusManage, Permission.UserPermissionManage, Permission.ConsentManage, Permission.QueueManage, Permission.ChannelManage })
+        {
+            c.Dados.Ajustes.Add(UserPermissionOverride.Create(c.Tenant.TenantId, gerente.Id, c.Organizacao, p, OverrideEffect.Grant, c.Relogio.GetUtcNow(), null));
+        }
+
+        c.Dados.Ajustes.Add(UserPermissionOverride.Create(c.Tenant.TenantId, gerente.Id, c.Organizacao, Permission.ConversationManage, OverrideEffect.Deny, c.Relogio.GetUtcNow(), null));
+        var ticket = await c.Tickets.IssueLaunchTicketAsync(c.Integracao, c.Pedido("u-g", Verifier));
+        var troca = await c.Troca.ExchangeAsync(ticket.Ticket, Verifier, "https://erp.exemplo.com.br");
+
+        var principal = await c.Autenticador.AuthenticateAsync(troca.Token);
+
+        Assert.NotNull(principal);
+        Assert.All(principal!.Permissions, g => Assert.Contains(g.Permission, EmbeddedSessionPolicy.AllowedPermissions));
+        Assert.DoesNotContain(principal.Permissions, g => g.Permission is Permission.UserManage or Permission.UserStatusManage or Permission.UserPermissionManage or Permission.ConsentManage or Permission.QueueManage or Permission.ChannelManage);
+        Assert.DoesNotContain(principal.Permissions, g => g.Permission == Permission.ConversationManage); // a restrição individual vale também no Embedded
+        Assert.Contains(principal.Permissions, g => g.Permission == Permission.ConversationRead);
+    }
+
+    [Fact]
+    public async Task Usuario_desativado_perde_a_sessao_embutida_na_proxima_requisicao()
+    {
+        var c = new Cenario();
+        var ticket = await c.Tickets.IssueLaunchTicketAsync(c.Integracao, c.Pedido("u-1", Verifier));
+        var troca = await c.Troca.ExchangeAsync(ticket.Ticket, Verifier, "https://erp.exemplo.com.br");
+        Assert.NotNull(await c.Autenticador.AuthenticateAsync(troca.Token));
+
+        c.Embedded.Provisionados.Single().Usuario.Deactivate(c.Relogio.GetUtcNow());
+
+        Assert.Null(await c.Autenticador.AuthenticateAsync(troca.Token));
+    }
+
+    [Fact]
+    public async Task Modo_CustomerOnly_continua_sem_nenhuma_permissao_mesmo_com_ajustes_individuais()
+    {
+        var c = new Cenario(ProvisioningMode.MappedOnly);
+        var tenantId = c.Tenant.TenantId;
+        var conexao = IntegrationConnection.Create(tenantId, c.Organizacao, "ERP somente cliente", EmbeddedMode.CustomerOnly, ProvisioningMode.MappedOnly, new[] { "https://erp.exemplo.com.br" }, false, c.Relogio.GetUtcNow(), null);
+        c.Embedded.Conexoes.Add(conexao);
+        var chave = IntegrationKey.Create(tenantId, conexao.Id, Guid.NewGuid(), "id2", "cifrado", c.Relogio.GetUtcNow(), null);
+        c.Embedded.Chaves.Add(chave);
+        var atendente = c.NovoUsuario("a@exemplo.com", Role.Attendant);
+        c.Dados.Ajustes.Add(UserPermissionOverride.Create(tenantId, atendente.Id, c.Organizacao, Permission.ConversationManage, OverrideEffect.Grant, c.Relogio.GetUtcNow(), null));
+        c.Embedded.Vinculos.Add(ExternalIdentity.Create(tenantId, conexao.Id, "u-a", atendente.Id, IdentitySource.Mapped, c.Relogio.GetUtcNow(), null));
+        var integracao = new AuthenticatedIntegration(tenantId, conexao.Id, chave.Id, c.Organizacao, conexao.Mode, conexao.Provisioning, conexao.AllowedOrigins, false);
+        var ticket = await c.Tickets.IssueLaunchTicketAsync(integracao, c.Pedido("u-a", Verifier));
+        var troca = await c.Troca.ExchangeAsync(ticket.Ticket, Verifier, "https://erp.exemplo.com.br");
+
+        var principal = await c.Autenticador.AuthenticateAsync(troca.Token);
+
+        Assert.NotNull(principal);
+        Assert.Empty(principal!.Permissions);
+        Assert.True(principal.Embedded!.CustomerOnly);
+    }
+
+    // Revisão independente: o Embedded respeita o status e não reaproveita ticket anterior à mudança de situação.
+
+    [Fact]
+    public async Task Usuario_inativo_nao_recebe_ticket_nem_abre_sessao_embutida_e_ticket_anterior_a_reativacao_nao_e_reaproveitado()
+    {
+        var c = new Cenario(ProvisioningMode.MappedOnly);
+        var ana = c.NovoUsuario("ana@exemplo.com", Role.Attendant);
+        c.Embedded.Vinculos.Add(ExternalIdentity.Create(c.Tenant.TenantId, c.Conexao.Id, "u-ana", ana.Id, IdentitySource.Mapped, c.Relogio.GetUtcNow(), null));
+        var ticketAntes = await c.Tickets.IssueLaunchTicketAsync(c.Integracao, c.Pedido("u-ana", Verifier));
+
+        // Desativada com o ticket já emitido: nem emite outro, nem troca o que tinha.
+        c.Relogio.Avancar(TimeSpan.FromSeconds(1));
+        ana.Deactivate(c.Relogio.GetUtcNow());
+        await Assert.ThrowsAsync<ExternalIdentityNotAllowedException>(() => c.Tickets.IssueLaunchTicketAsync(c.Integracao, c.Pedido("u-ana", Verifier)));
+        await Assert.ThrowsAsync<EmbeddedAuthenticationException>(() => c.Troca.ExchangeAsync(ticketAntes.Ticket, Verifier, "https://erp.exemplo.com.br"));
+
+        // Reativada: o ticket de ANTES da desativação continua recusado (anterior à última mudança de situação); um ticket novo funciona.
+        c.Relogio.Avancar(TimeSpan.FromSeconds(1));
+        ana.Activate(c.Relogio.GetUtcNow());
+        await Assert.ThrowsAsync<EmbeddedAuthenticationException>(() => c.Troca.ExchangeAsync(ticketAntes.Ticket, Verifier, "https://erp.exemplo.com.br"));
+        c.Relogio.Avancar(TimeSpan.FromSeconds(1));
+        var ticketNovo = await c.Tickets.IssueLaunchTicketAsync(c.Integracao, c.Pedido("u-ana", Verifier));
+        var troca = await c.Troca.ExchangeAsync(ticketNovo.Ticket, Verifier, "https://erp.exemplo.com.br");
+        Assert.NotNull(await c.Autenticador.AuthenticateAsync(troca.Token));
+    }
+
+    [Fact]
+    public async Task Sessao_embutida_aberta_antes_da_desativacao_nao_volta_a_valer_com_a_reativacao()
+    {
+        var c = new Cenario();
+        var ticket = await c.Tickets.IssueLaunchTicketAsync(c.Integracao, c.Pedido("u-1", Verifier));
+        var troca = await c.Troca.ExchangeAsync(ticket.Ticket, Verifier, "https://erp.exemplo.com.br");
+        Assert.NotNull(await c.Autenticador.AuthenticateAsync(troca.Token));
+        var usuario = c.Embedded.Provisionados.Single().Usuario;
+
+        c.Relogio.Avancar(TimeSpan.FromSeconds(2));
+        usuario.Deactivate(c.Relogio.GetUtcNow());
+        c.Relogio.Avancar(TimeSpan.FromSeconds(2));
+        usuario.Activate(c.Relogio.GetUtcNow());
+
+        // Mesmo sem ninguém ter revogado a sessão (a marca de situação é a segunda defesa), ela não volta a valer.
+        Assert.Null(await c.Autenticador.AuthenticateAsync(troca.Token));
     }
 }

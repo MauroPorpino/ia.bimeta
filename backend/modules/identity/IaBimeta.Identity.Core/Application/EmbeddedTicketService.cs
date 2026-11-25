@@ -17,13 +17,16 @@ public sealed class EmbeddedTicketService
     private readonly TimeProvider _clock;
     private readonly IAuditWriter _audit;
 
-    public EmbeddedTicketService(IEmbeddedStore store, IAuthenticationStore auth, IdentityOptions options, TimeProvider clock, IAuditWriter audit)
+    private readonly UserAdmissionGuard _guard;
+
+    public EmbeddedTicketService(IEmbeddedStore store, IAuthenticationStore auth, IdentityOptions options, TimeProvider clock, IAuditWriter audit, UserAdmissionGuard guard)
     {
         _store = store;
         _auth = auth;
         _options = options;
         _clock = clock;
         _audit = audit;
+        _guard = guard;
     }
 
     /// <exception cref="IdentityValidationException">Parâmetros inválidos (challenge, origem do pai fora da lista da conexão, identificadores).</exception>
@@ -143,7 +146,21 @@ public sealed class EmbeddedTicketService
         var concessao = UserOrganizationGrant.Create(integration.TenantId, usuario.Id, integration.OrganizationId, Role.Attendant, now, null);
         var vinculo = ExternalIdentity.Create(integration.TenantId, integration.ConnectionId, externalUserId, usuario.Id, IdentitySource.Jit, now, null);
         var provisao = Pending(integration.TenantId, usuario.Id, "identity.embed.identity.provision", "external_identity", vinculo.Id.ToString(), now);
-        if (await _store.TryProvisionFederatedUserAsync(usuario, concessao, vinculo, provisao, cancellationToken))
+        bool criou;
+        try
+        {
+            // O JIT é INGRESSO de uma pessoa nova: exige o cadastro habilitado e vaga, conferidos sob a trava de admissão do tenant (a mesma do cadastro e da alteração do limite).
+            criou = await _store.TryProvisionFederatedUserAsync(
+                usuario, concessao, vinculo, provisao, ct => _guard.RequireIngressAsync(integration.TenantId, now, firstAdministrator: false, ct), cancellationToken);
+        }
+        catch (Exception ex) when (ex is RegistrationDisabledException or UserLimitReachedException)
+        {
+            // Para o ERP a resposta é a mesma de qualquer recusa; a trilha registra a negação e o administrador do tenant vê o limite na tela de usuários.
+            await DenyAsync(integration, null, cancellationToken);
+            throw new ExternalIdentityNotAllowedException();
+        }
+
+        if (criou)
         {
             return vinculo;
         }
@@ -162,7 +179,8 @@ public sealed class EmbeddedTicketService
     private async Task<bool> IsEligibleAsync(AuthenticatedIntegration integration, Guid userId, CancellationToken cancellationToken)
     {
         var usuario = await _auth.FindUserByIdAsync(integration.TenantId, userId, cancellationToken);
-        if (usuario is null)
+        // Só o usuário ATIVO recebe ticket: inativo, pendente e cancelado não entram pelo Embedded (a elegibilidade é do estado atual).
+        if (usuario is not { Status: UserStatus.Active })
         {
             return false;
         }

@@ -48,6 +48,100 @@ export interface CurrentUser {
   displayName: string;
   grants: Grant[];
   preferredLocale: string | null;
+  /** As permissões EFETIVAS da sessão (organizationId nulo = escopo do tenant, vale para qualquer organização). Ausente em servidor antigo. */
+  permissions?: EffectivePermission[];
+}
+
+export interface EffectivePermission {
+  permission: string;
+  organizationId: string | null;
+}
+
+// ---------------------------------------------------------------- Configurações → Usuários
+
+export type UserStatus = 'Active' | 'Inactive' | 'Pending' | 'Expired' | 'Cancelled';
+export type PermissionEffect = 'Grant' | 'Deny';
+
+export interface OrganizationSummary {
+  id: string;
+  name: string;
+  createdAt?: string;
+}
+
+export interface UserUsage {
+  limit: number | null;
+  registrationEnabled: boolean;
+  active: number;
+  inactive: number;
+  pending: number;
+  expired: number;
+  cancelled: number;
+  seatsUsed: number;
+  available: number | null;
+  overLimit: boolean;
+  excess: number;
+}
+
+export interface UserListItem {
+  id: string;
+  email: string;
+  displayName: string;
+  status: UserStatus;
+  authMode: 'Password' | 'Federated';
+  grants: Grant[];
+  createdAt: string;
+  customized: boolean;
+}
+
+export interface UserPage {
+  items: UserListItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface UserPermissionEntry {
+  permission: string;
+  organizationId: string | null;
+  inProfile: boolean;
+  override: PermissionEffect | null;
+  effective: boolean;
+}
+
+export interface UserDetail extends UserListItem {
+  hasLiveFirstAccessToken: boolean;
+  permissions: UserPermissionEntry[];
+}
+
+export interface PermissionCatalog {
+  permissions: Array<{ permission: string; group: string; label: string; tenantOnly: boolean }>;
+  roles: Array<{ role: string; profile: string; organizationPermissions: string[]; tenantPermissions: string[] }>;
+}
+
+export interface ListUsersParams {
+  search?: string;
+  role?: string;
+  organizationId?: string;
+  status?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface AdmitUserRequest {
+  email: string;
+  displayName: string;
+  role: string;
+  preferredLocale?: string | null;
+}
+
+/** O token entregue UMA ÚNICA VEZ (primeiro acesso ou redefinição): nunca é guardado nem registrado em log. */
+export interface IssuedToken {
+  token: string;
+  expiresAt: string;
+}
+
+export interface AdmissionResult extends IssuedToken {
+  user: UserListItem;
 }
 
 // ---------------------------------------------------------------- Erros (ProblemDetails)
@@ -65,6 +159,11 @@ export interface ProblemDetails {
   reason?: string;
   /** 400 do motor de integração (ADR 0035): os problemas de validação, uma frase fixa por campo (nome e regra, nunca o valor digitado). */
   problems?: string[];
+  /** 409 `user-limit-reached`: o limite contratado e quantas vagas estão usadas. */
+  limit?: number;
+  used?: number;
+  /** Variante em que as extensões vêm aninhadas. */
+  extensions?: Record<string, unknown>;
 }
 
 // ---------------------------------------------------------------- ContactCenter

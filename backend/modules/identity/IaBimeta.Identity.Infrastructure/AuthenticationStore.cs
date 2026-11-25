@@ -32,11 +32,30 @@ internal sealed class AuthenticationStore : IAuthenticationStore
         _db.Sessions.IgnoreQueryFilters().AsNoTracking()
             .FirstOrDefaultAsync(s => s.TokenHash == tokenHash, cancellationToken);
 
-    public async Task AddSessionAsync(Session session, CancellationToken cancellationToken)
+    public async Task<bool> AddSessionAsync(Session session, CancellationToken cancellationToken)
     {
         using var escopo = _db.UseAuthenticationTenant(session.TenantId);
+        var propria = _db.Database.CurrentTransaction is null;
+        await using var transacao = propria ? await _db.Database.BeginTransactionAsync(cancellationToken) : null;
+
+        // Trava a linha do usuário em modo COMPARTILHADO e confere que ele continua ativo, na mesma transação que grava a sessão: a desativação (que atualiza a linha e revoga as sessões existentes) espera esta confirmação ou a antecede,
+        // nunca se intercala. Sem isso, um login concorrente inseria a sessão DEPOIS da revogação e ela voltava a valer na reativação. Uma conexão só (sem segunda conexão dentro da transação).
+        var ativo = await _db.Database
+            .SqlQuery<int>($"SELECT 1 AS \"Value\" FROM identity.users WHERE tenant_id = {session.TenantId.Value} AND id = {session.UserId} AND status = 'Active' FOR SHARE")
+            .ToListAsync(cancellationToken);
+        if (ativo.Count == 0)
+        {
+            return false;
+        }
+
         _db.Sessions.Add(session);
         await _db.SaveChangesAsync(cancellationToken);
+        if (transacao is not null)
+        {
+            await transacao.CommitAsync(cancellationToken);
+        }
+
+        return true;
     }
 
     public async Task UpdatePasswordHashAsync(TenantId tenantId, Guid userId, string newHash, CancellationToken cancellationToken)
@@ -58,6 +77,16 @@ internal sealed class AuthenticationStore : IAuthenticationStore
         await _db.Grants.IgnoreQueryFilters().AsNoTracking()
             .Where(g => g.TenantId == tenantId && g.UserId == userId)
             .ToListAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<UserPermissionOverride>> ListOverridesAsync(TenantId tenantId, Guid userId, CancellationToken cancellationToken) =>
+        await _db.PermissionOverrides.IgnoreQueryFilters().AsNoTracking()
+            .Where(o => o.TenantId == tenantId && o.UserId == userId)
+            .ToListAsync(cancellationToken);
+
+    public async Task<bool> ActivatePendingUserAsync(TenantId tenantId, Guid userId, DateTimeOffset now, CancellationToken cancellationToken) =>
+        await _db.Users.IgnoreQueryFilters()
+            .Where(u => u.TenantId == tenantId && u.Id == userId && u.Status == UserStatus.Pending)
+            .ExecuteUpdateAsync(set => set.SetProperty(u => u.Status, UserStatus.Active).SetProperty(u => u.StatusChangedAt, now).SetProperty(u => u.IsInitialAdministrator, false), cancellationToken) == 1;
 
     public Task<LoginThrottle?> FindLoginThrottleAsync(TenantId tenantId, string key, CancellationToken cancellationToken) =>
         _db.LoginThrottles.IgnoreQueryFilters().AsNoTracking()
@@ -105,12 +134,17 @@ internal sealed class AuthenticationStore : IAuthenticationStore
     public async Task AddPasswordResetTokenAsync(PasswordResetToken token, DateTimeOffset now, CancellationToken cancellationToken)
     {
         using var escopo = _db.UseAuthenticationTenant(token.TenantId);
-        await using var transacao = await _db.Database.BeginTransactionAsync(cancellationToken);
+        // Dentro da trava de admissão já existe uma transação: só a reaproveita (quem a abriu a conclui).
+        var propria = _db.Database.CurrentTransaction is null;
+        await using var transacao = propria ? await _db.Database.BeginTransactionAsync(cancellationToken) : null;
 
         await RevokeUnusedAsync(token.TenantId, token.UserId, now, cancellationToken);
         _db.PasswordResetTokens.Add(token);
         await _db.SaveChangesAsync(cancellationToken);
-        await transacao.CommitAsync(cancellationToken);
+        if (transacao is not null)
+        {
+            await transacao.CommitAsync(cancellationToken);
+        }
     }
 
     public Task RevokePasswordResetTokensAsync(TenantId tenantId, Guid userId, DateTimeOffset now, CancellationToken cancellationToken) =>

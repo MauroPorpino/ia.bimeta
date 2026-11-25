@@ -43,7 +43,18 @@ internal sealed class UserRepository : IUserRepository
     public Task<User?> FindByEmailAsync(string normalizedEmail, CancellationToken cancellationToken) =>
         _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Email == normalizedEmail, cancellationToken);
 
-    public Task SaveChangesAsync(CancellationToken cancellationToken) => _db.SaveChangesAsync(cancellationToken);
+    public async Task SaveChangesAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex) when (PostgresErrors.IsUniqueViolation(ex, UserConfiguration.UniqueEmailIndex))
+        {
+            // Mudar o e-mail para o de outro usuário do mesmo tenant: a mesma recusa do cadastro.
+            throw new DuplicateUserEmailException();
+        }
+    }
 }
 
 internal sealed class GrantRepository : IGrantRepository

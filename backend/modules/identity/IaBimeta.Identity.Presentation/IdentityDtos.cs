@@ -42,8 +42,37 @@ public sealed record UserAccessResponse(Guid UserId, string Email, string Displa
 
 public sealed record GrantResponse(Guid? OrganizationId, string Role);
 
-public sealed record CurrentUserResponse(Guid Id, string Email, string DisplayName, IReadOnlyList<GrantResponse> Grants, string? PreferredLocale)
+public sealed record PermissionGrantResponse(string Permission, Guid? OrganizationId);
+
+/// <param name="Permissions">As permissões EFETIVAS da sessão (perfil + ajustes individuais, com o teto do Embedded). A interface as usa para decidir o que mostrar; o servidor continua sendo a autoridade.</param>
+public sealed record CurrentUserResponse(Guid Id, string Email, string DisplayName, IReadOnlyList<GrantResponse> Grants, string? PreferredLocale, IReadOnlyList<PermissionGrantResponse> Permissions)
 {
     public static CurrentUserResponse From(CurrentUserView view) =>
-        new(view.Id, view.Email, view.DisplayName, view.Grants.Select(g => new GrantResponse(g.OrganizationId, g.Role.ToString())).ToList(), view.PreferredLocale?.ToString());
+        new(
+            view.Id,
+            view.Email,
+            view.DisplayName,
+            view.Grants.Select(g => new GrantResponse(g.OrganizationId, g.Role.ToString())).ToList(),
+            view.PreferredLocale?.ToString(),
+            (view.Permissions ?? Array.Empty<IaBimeta.SharedKernel.PermissionGrant>()).Select(p => new PermissionGrantResponse(p.Permission.ToString(), p.OrganizationId)).ToList());
 }
+
+// Administração de usuários (Etapa 01)
+
+public sealed record AdmitUserRequest(string? Email, string? DisplayName, string? Role, string? PreferredLocale);
+
+public sealed record UpdateUserRequest(string? Email, string? DisplayName);
+
+public sealed record SetPermissionOverrideRequest(Guid? OrganizationId, string? Permission, string? Effect);
+
+public sealed record ResetPermissionOverridesRequest(bool AllScopes, Guid? OrganizationId);
+
+public sealed record AdmissionResponse(UserListItemView User, string Token, DateTimeOffset ExpiresAt);
+
+public sealed record FirstAccessResponse(string Token, DateTimeOffset ExpiresAt);
+
+public sealed record RoleDefaultResponse(string Role, string Profile, IReadOnlyList<string> OrganizationPermissions, IReadOnlyList<string> TenantPermissions);
+
+public sealed record PermissionCatalogResponse(IReadOnlyList<PermissionInfoResponse> Permissions, IReadOnlyList<RoleDefaultResponse> Roles);
+
+public sealed record PermissionInfoResponse(string Permission, string Group, string Label, bool TenantOnly);

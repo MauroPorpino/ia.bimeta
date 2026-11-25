@@ -16,7 +16,7 @@ public sealed class User : ITenantOwned
     private static readonly Regex EmailPattern = new(@"^[^@\s]+@[^@\s]+\.[^@\s]+$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     // Usado pela fábrica e pelo EF Core (que liga os parâmetros às propriedades pelo nome).
-    private User(Guid id, TenantId tenantId, string email, string displayName, string passwordHash, DateTimeOffset createdAt, Locale? preferredLocale, UserAuthMode authMode)
+    private User(Guid id, TenantId tenantId, string email, string displayName, string passwordHash, DateTimeOffset createdAt, Locale? preferredLocale, UserAuthMode authMode, UserStatus status, DateTimeOffset? statusChangedAt, bool isInitialAdministrator)
     {
         Id = id;
         TenantId = tenantId;
@@ -26,6 +26,9 @@ public sealed class User : ITenantOwned
         CreatedAt = createdAt;
         PreferredLocale = preferredLocale;
         AuthMode = authMode;
+        Status = status;
+        StatusChangedAt = statusChangedAt;
+        IsInitialAdministrator = isInitialAdministrator;
     }
 
     public Guid Id { get; }
@@ -33,9 +36,9 @@ public sealed class User : ITenantOwned
     public TenantId TenantId { get; }
 
     /// <summary>Normalizado: sem espaços nas pontas e em minúsculas.</summary>
-    public string Email { get; }
+    public string Email { get; private set; }
 
-    public string DisplayName { get; }
+    public string DisplayName { get; private set; }
 
     public string PasswordHash { get; private set; }
 
@@ -64,7 +67,7 @@ public sealed class User : ITenantOwned
         var nome = (displayName ?? string.Empty).Trim();
         nome = nome.Length == 0 ? "Usuário externo" : nome.Length > DisplayNameMaxLength ? nome[..DisplayNameMaxLength].TrimEnd() : nome;
         var id = Guid.CreateVersion7();
-        return new User(id, tenantId, $"fed.{id:N}@{FederatedEmailDomain}", nome, FederatedPasswordSentinel, now, null, UserAuthMode.Federated);
+        return new User(id, tenantId, $"fed.{id:N}@{FederatedEmailDomain}", nome, FederatedPasswordSentinel, now, null, UserAuthMode.Federated, UserStatus.Active, null, false);
     }
 
     public static User Create(TenantId tenantId, string? email, string? displayName, string passwordHash, DateTimeOffset now, Locale? preferredLocale = null)
@@ -73,7 +76,7 @@ public sealed class User : ITenantOwned
         ArgumentException.ThrowIfNullOrWhiteSpace(passwordHash);
 
         var (emailNormalizado, nome) = ValidateProfile(email, displayName);
-        return new User(Guid.CreateVersion7(), tenantId, emailNormalizado, nome, passwordHash, now, preferredLocale, UserAuthMode.Password);
+        return new User(Guid.CreateVersion7(), tenantId, emailNormalizado, nome, passwordHash, now, preferredLocale, UserAuthMode.Password, UserStatus.Active, null, false);
     }
 
     /// <summary>
@@ -121,6 +124,90 @@ public sealed class User : ITenantOwned
     {
         var normalizado = (email ?? string.Empty).Trim().ToLowerInvariant();
         return normalizado.Length is > 0 and <= EmailMaxLength && EmailPattern.IsMatch(normalizado) ? normalizado : null;
+    }
+
+    /// <summary>A situação do usuário. Muda só pelos métodos abaixo, sempre sob a trava de admissão (Identity).</summary>
+    public UserStatus Status { get; private set; }
+
+    public DateTimeOffset? StatusChangedAt { get; private set; }
+
+    /// <summary>
+    /// Marca INEQUÍVOCA do administrador inicial provisionado pela BImeta (comando first-admin) e ainda sem primeiro acesso concluído. Só o provisionamento a liga; some (para sempre) quando o primeiro acesso é concluído ou a admissão é cancelada.
+    /// É o único critério para a BImeta reemitir o token de primeiro acesso dessa conta: perfil administrativo, e-mail ou "não há outro administrador" não bastam.
+    /// </summary>
+    public bool IsInitialAdministrator { get; private set; }
+
+    /// <summary>O "hash" do usuário pendente: não é um hash válido, então nenhuma senha o confere. A senha só nasce no primeiro acesso, pelo token.</summary>
+    public const string PendingPasswordSentinel = "!pending";
+
+    /// <summary>Cria a ADMISSÃO: usuário pendente com credencial inutilizável. O acesso só nasce quando ele usa o token de primeiro acesso.</summary>
+    public static User CreatePending(TenantId tenantId, string? email, string? displayName, DateTimeOffset now, Locale? preferredLocale = null, bool initialAdministrator = false)
+    {
+        ArgumentNullException.ThrowIfNull(tenantId);
+
+        var (emailNormalizado, nome) = ValidateProfile(email, displayName);
+        return new User(Guid.CreateVersion7(), tenantId, emailNormalizado, nome, PendingPasswordSentinel, now, preferredLocale, UserAuthMode.Password, UserStatus.Pending, now, initialAdministrator);
+    }
+
+    /// <summary>Pendente ou inativo passa a ativo. A admissão cancelada não é reativada (readmitir é <see cref="Readmit"/>, um novo ingresso).</summary>
+    public void Activate(DateTimeOffset now)
+    {
+        if (Status is not (UserStatus.Pending or UserStatus.Inactive))
+        {
+            throw new IdentityValidationException("Só um usuário pendente ou inativo pode ser ativado.");
+        }
+
+        Status = UserStatus.Active;
+        IsInitialAdministrator = false;
+        StatusChangedAt = now;
+    }
+
+    public void Deactivate(DateTimeOffset now)
+    {
+        if (Status != UserStatus.Active)
+        {
+            throw new IdentityValidationException("Só um usuário ativo pode ser desativado.");
+        }
+
+        Status = UserStatus.Inactive;
+        StatusChangedAt = now;
+    }
+
+    public void CancelAdmission(DateTimeOffset now)
+    {
+        if (Status != UserStatus.Pending)
+        {
+            throw new IdentityValidationException("Só uma admissão pendente pode ser cancelada.");
+        }
+
+        Status = UserStatus.Cancelled;
+        IsInitialAdministrator = false;
+        StatusChangedAt = now;
+    }
+
+    /// <summary>Uma admissão cancelada volta a pendente: é um novo ingresso, tratado como tal pelo serviço.</summary>
+    public void Readmit(DateTimeOffset now)
+    {
+        if (Status != UserStatus.Cancelled)
+        {
+            throw new IdentityValidationException("Só uma admissão cancelada pode ser readmitida.");
+        }
+
+        Status = UserStatus.Pending;
+        StatusChangedAt = now;
+    }
+
+    /// <summary>Altera nome e e-mail (só usuário de senha: o e-mail do federado é sintético). A credencial não muda.</summary>
+    public void UpdateProfile(string? email, string? displayName)
+    {
+        var (emailNormalizado, nome) = ValidateProfile(email, displayName);
+        if (AuthMode == UserAuthMode.Federated && !string.Equals(emailNormalizado, Email, StringComparison.Ordinal))
+        {
+            throw new IdentityValidationException("O e-mail de um usuário externo não pode ser alterado.");
+        }
+
+        Email = emailNormalizado;
+        DisplayName = nome;
     }
 
     public void ReplacePasswordHash(string newHash)

@@ -10,6 +10,9 @@ namespace IaBimeta.Identity.Application;
 /// <summary>O token de redefinição EM CLARO, entregue uma única vez a quem o emitiu (nunca registrado em log nem em auditoria).</summary>
 public sealed record PasswordResetIssued(string Token, DateTimeOffset ExpiresAt);
 
+/// <summary>O token de primeiro acesso do administrador inicial (mostrado uma vez). <see cref="Reissued"/>: a conta já existia e o token anterior foi invalidado.</summary>
+public sealed record FirstAdministratorIssued(string Token, DateTimeOffset ExpiresAt, bool Reissued);
+
 /// <summary>
 /// Senha e sessões, sobre o MESMO mecanismo de autenticação (sessões revogáveis, hash PBKDF2, bloqueio por tentativas): trocar a própria senha, redefinir senha por token de uso único e revogar sessões.
 /// <list type="bullet">
@@ -33,6 +36,9 @@ public sealed class PasswordService
     private readonly TimeProvider _clock;
     private readonly IAuditWriter _audit;
     private readonly IRequestContextAccessor _context;
+    private readonly UserAdminService _admin;
+    private readonly IUserAdminStore _adminStore;
+    private readonly UserAdmissionGuard _guard;
 
     public PasswordService(
         ITenantDirectory tenants,
@@ -43,8 +49,14 @@ public sealed class PasswordService
         IdentityOptions options,
         TimeProvider clock,
         IAuditWriter audit,
-        IRequestContextAccessor context)
+        IRequestContextAccessor context,
+        UserAdminService admin,
+        IUserAdminStore adminStore,
+        UserAdmissionGuard guard)
     {
+        _admin = admin;
+        _adminStore = adminStore;
+        _guard = guard;
         _tenants = tenants;
         _store = store;
         _grants = grants;
@@ -143,12 +155,11 @@ public sealed class PasswordService
             throw new IdentityResourceNotFoundException("Usuário");
         }
 
-        // Quem administra só uma organização não toma a conta de quem administra o tenant (escalada de privilégio).
-        var restrito = contexto.OrganizationsWithPermission(Permission.UserManage) is not null;
-        if (restrito && alvo.Any(a => a.Grant.OrganizationId is null))
+        // Quem administra não toma a conta de quem tem mais permissões que ele (escalada de privilégio), nem a própria por esta via: as permissões efetivas do alvo precisam estar cobertas pelas do responsável.
+        var detalhe = await _admin.RequireAdministrableAsync(contexto, userId, Permission.UserManage, "identity.password.reset.issue", cancellationToken);
+        if (detalhe.User.Status != UserStatus.Active)
         {
-            await _audit.WriteAsync(new AuditEntry("identity.password.reset.issue", "user", userId.ToString(), AuditOutcome.Denied), cancellationToken);
-            throw new AccessDeniedException(Permission.UserManage);
+            throw new IdentityValidationException("A redefinição só se aplica a um usuário ativo. Para um usuário pendente, emita o primeiro acesso.");
         }
 
         return await IssueAsync(contexto.TenantId, userId, contexto.Principal?.UserId, cancellationToken);
@@ -170,6 +181,12 @@ public sealed class PasswordService
         var normalizado = User.NormalizeEmail(email) ?? throw new IdentityValidationException("Informe um e-mail válido.");
         var usuario = await _store.FindUserByEmailAsync(contexto.TenantId, normalizado, cancellationToken)
             ?? throw new IdentityResourceNotFoundException("Usuário");
+        // O operador só redefine o acesso de usuário ATIVO. Admissão pendente (inclusive vencida ou cancelada) segue exclusivamente o fluxo de primeiro acesso (habilitação, reserva e limite): o comando nunca recria uma reserva.
+        if (usuario.Status != UserStatus.Active)
+        {
+            throw new IdentityValidationException("A redefinição do operador só vale para usuário ativo. Para uma admissão pendente, o administrador da empresa emite o primeiro acesso (sujeito ao cadastro habilitado e ao limite).");
+        }
+
         return await IssueAsync(contexto.TenantId, usuario.Id, null, cancellationToken);
     }
 
@@ -221,10 +238,44 @@ public sealed class PasswordService
 
         // A consulta do token roda sempre (com um usuário "nenhum" quando não existe): o custo não revela se o e-mail existe.
         var formatoValido = ResetTokens.TryHash(token, out var hash);
-        var consumiu = tenantAtivo
-            && formatoValido
-            && await _store.TryConsumePasswordResetTokenAsync(tenant!.TenantId, usuario?.Id ?? Guid.Empty, hash, agora, cancellationToken)
-            && usuario is not null;
+        string? hashCalculado = null;
+        string NovoHash() => hashCalculado ??= _hasher.Hash(newPassword!);
+        bool consumiu;
+        if (tenantAtivo && formatoValido && usuario is { Status: UserStatus.Pending })
+        {
+            // PRIMEIRO ACESSO (admissão pendente): consumir o token, definir a senha e ativar acontecem juntos, sob a trava de admissão. A vaga já está reservada; aceitar a admissão não pode contornar a desabilitação do cadastro
+            // (a única exceção é o primeiro administrador, de escopo de tenant, provisionado pela plataforma).
+            var tenantId0 = tenant!.TenantId;
+            var pendente = usuario;
+            consumiu = await _adminStore.RunExclusiveAsync(tenantId0, async ct =>
+            {
+                // O instante de validação é o de DENTRO da seção exclusiva: a reserva pode ter vencido enquanto a requisição esperava a trava (e outra admissão ter ocupado a vaga liberada). O consumo condicional
+                // do token (não usado, não revogado, ainda não expirado nesse instante) é a confirmação atômica de que ele ainda é uma reserva válida.
+                var agoraNaTrava = _clock.GetUtcNow();
+                var concessoes = await _store.ListGrantsAsync(tenantId0, pendente.Id, ct);
+                var primeiroAdministrador = concessoes.Any(c => c.OrganizationId is null);
+                if (!primeiroAdministrador && !await _guard.IsRegistrationEnabledAsync(tenantId0, ct))
+                {
+                    return false;
+                }
+
+                if (!await _store.TryConsumePasswordResetTokenAsync(tenantId0, pendente.Id, hash, agoraNaTrava, ct))
+                {
+                    return false;
+                }
+
+                await _store.UpdatePasswordHashAsync(tenantId0, pendente.Id, NovoHash(), ct);
+                return await _store.ActivatePendingUserAsync(tenantId0, pendente.Id, agoraNaTrava, ct);
+            }, cancellationToken);
+        }
+        else
+        {
+            // Só o usuário ATIVO redefine a senha por token; inativo e cancelado são recusados sem consumir o token.
+            consumiu = tenantAtivo
+                && formatoValido
+                && usuario is { Status: UserStatus.Active }
+                && await _store.TryConsumePasswordResetTokenAsync(tenant!.TenantId, usuario.Id, hash, agora, cancellationToken);
+        }
 
         if (!consumiu)
         {
@@ -250,7 +301,7 @@ public sealed class PasswordService
         }
 
         var tenantId = tenant!.TenantId;
-        await _store.UpdatePasswordHashAsync(tenantId, usuario!.Id, _hasher.Hash(newPassword!), cancellationToken);
+        await _store.UpdatePasswordHashAsync(tenantId, usuario!.Id, NovoHash(), cancellationToken);
         await _store.RevokeSessionsAsync(tenantId, usuario.Id, null, agora, cancellationToken);
         await _store.RevokePasswordResetTokensAsync(tenantId, usuario.Id, agora, cancellationToken);
         await _store.ClearLoginThrottleAsync(tenantId, chave!, cancellationToken);
@@ -285,11 +336,7 @@ public sealed class PasswordService
             throw new IdentityResourceNotFoundException("Usuário");
         }
 
-        if (contexto.OrganizationsWithPermission(Permission.UserManage) is not null && alvo.Any(a => a.Grant.OrganizationId is null))
-        {
-            await _audit.WriteAsync(new AuditEntry("identity.session.revoke-all", "user", userId.ToString(), AuditOutcome.Denied), cancellationToken);
-            throw new AccessDeniedException(Permission.UserManage);
-        }
+        _ = await _admin.RequireAdministrableAsync(contexto, userId, Permission.UserManage, "identity.session.revoke-all", cancellationToken);
 
         var revogadas = await _store.RevokeSessionsAsync(contexto.TenantId, userId, null, _clock.GetUtcNow(), cancellationToken);
         await _audit.WriteAsync(new AuditEntry("identity.session.revoke-all", "user", userId.ToString(), AuditOutcome.Success), cancellationToken);

@@ -21,7 +21,21 @@ public class UserPreferredLocaleTests
         public RequestContextHolder Holder { get; } = new();
         public PasswordHasher Hasher { get; } = new(Senhas.Rapidas());
 
-        public UserService Servico => new(Dados, Dados, Organizacoes, Hasher, Holder, TimeProvider.System, Auditoria);
+        public TenantsEmMemoria Tenants { get; } = new();
+        public IdentityOptions Opcoes { get; } = Senhas.Rapidas();
+
+        public UserService Servico
+        {
+            get
+            {
+                if (!Tenants.Contem(Tenant))
+                {
+                    Tenants.Adicionar(Tenant, "lab-a");
+                }
+
+                return AdminFabrica.Usuarios(Dados, Tenants, Organizacoes, Hasher, Opcoes, Holder, TimeProvider.System, Auditoria);
+            }
+        }
 
         public User NovoUsuario(string email, Locale? idioma = null)
         {

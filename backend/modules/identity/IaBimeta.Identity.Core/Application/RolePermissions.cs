@@ -53,6 +53,8 @@ public static class RolePermissions
         Permission.StructureManage,
         Permission.UserRead,
         Permission.UserManage,
+        Permission.UserStatusManage,
+        Permission.UserPermissionManage,
         Permission.ConversationRead,
         Permission.ConversationManage,
         Permission.ChannelRead,

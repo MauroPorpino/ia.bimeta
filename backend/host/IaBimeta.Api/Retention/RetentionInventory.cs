@@ -75,6 +75,8 @@ internal static class RetentionInventory
         ["workflows.routing_decisions"] = (DataClass.Personal, "quem responde a cada atendimento (ADR 0038): só a referência à sessão, o dono (fluxo ou agente) e a ativação; nenhum conteúdo"),
         ["identity.users"] = (DataClass.Personal, "cadastro dos colaboradores (e-mail, nome, hash de senha)"),
         ["identity.user_organization_grants"] = (DataClass.Personal, "papéis dos colaboradores"),
+        ["identity.user_permission_overrides"] = (DataClass.Personal, "ajustes individuais de permissão dos colaboradores (Etapa 01): só a diferença sobre o perfil, sem dado de cliente"),
+        ["identity.tenant_user_policies"] = (DataClass.Configuration, "política de usuários da empresa (limite contratado e habilitação do cadastro; Etapa 01): dado da plataforma, sai com o encerramento da empresa"),
         ["identity.external_identities"] = (DataClass.Personal, "vínculo entre o usuário do ERP e o usuário interno (Embedded, ADR 0039): identificador externo e usuário"),
         ["identity.session_customer_grants"] = (DataClass.Personal, "clientes do ERP em foco numa sessão embutida (identificador opaco do cliente); morre com a sessão"),
         ["conversations.contact_external_links"] = (DataClass.Personal, "vínculo entre o cliente do sistema externo (identificador opaco) e o contato (ADR 0041): só identificadores, origem e autores; descobribilidade, nunca visibilidade; a desvinculação é lógica e a linha nunca é apagada por prazo. Retenção provisória, sem expurgo, até a avaliação jurídica e da LGPD antes da produção (D7)"),

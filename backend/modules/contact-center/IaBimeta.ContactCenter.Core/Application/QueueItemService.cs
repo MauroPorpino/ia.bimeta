@@ -4,6 +4,7 @@ using IaBimeta.ContactCenter.Domain;
 using IaBimeta.Conversations.Contracts;
 using IaBimeta.Conversations.Contracts.Commands;
 using IaBimeta.Conversations.Contracts.Queries;
+using IaBimeta.Identity.Contracts.Queries;
 using IaBimeta.SharedKernel;
 
 namespace IaBimeta.ContactCenter.Application;
@@ -39,6 +40,7 @@ public sealed class QueueItemService
     private readonly IChannelReplyPolicy _channelReply;
     private readonly IAttachmentGateway _attachments;
     private readonly IContactLinkQueries _customers;
+    private readonly IUserDirectory _users;
 
     public QueueItemService(
         IQueueItemRepository items,
@@ -51,9 +53,11 @@ public sealed class QueueItemService
         IDeferredAudit audit,
         IChannelReplyPolicy channelReply,
         IAttachmentGateway attachments,
-        IContactLinkQueries customers)
+        IContactLinkQueries customers,
+        IUserDirectory users)
     {
         _customers = customers;
+        _users = users;
         _items = items;
         _queues = queues;
         _conversations = conversations;
@@ -1837,9 +1841,10 @@ public sealed class QueueItemService
 
     private async Task RequireMemberAsync(ServiceQueue fila, Guid usuario, Guid itemId, PendingKind operacao, CancellationToken cancellationToken)
     {
-        if (await _queues.FindMembershipReadOnlyAsync(fila.Id, usuario, cancellationToken) is null)
+        // O destino precisa ser membro da fila E um usuário ATIVO: quem foi desativado (Etapa 01) mantém o histórico e a participação cadastrada, mas não recebe novos atendimentos.
+        if (await _queues.FindMembershipReadOnlyAsync(fila.Id, usuario, cancellationToken) is null || !await _users.ExistsAsync(usuario, cancellationToken))
         {
-            throw await RuleAsync(operacao, itemId, ContactCenterRule.TargetNotQueueMember, "O atendente de destino não está nesta fila.", cancellationToken, ItemResource);
+            throw await RuleAsync(operacao, itemId, ContactCenterRule.TargetNotQueueMember, "O atendente de destino não está disponível: está fora desta fila ou foi desativado.", cancellationToken, ItemResource);
         }
     }
 

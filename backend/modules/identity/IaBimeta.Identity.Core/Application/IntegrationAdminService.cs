@@ -21,6 +21,7 @@ public sealed class IntegrationAdminService
     private readonly IRequestContextAccessor _context;
     private readonly TimeProvider _clock;
     private readonly IAuditWriter _audit;
+    private readonly UserAdmissionGuard _guard;
 
     public IntegrationAdminService(
         IEmbeddedStore store,
@@ -30,7 +31,8 @@ public sealed class IntegrationAdminService
         IdentityOptions options,
         IRequestContextAccessor context,
         TimeProvider clock,
-        IAuditWriter audit)
+        IAuditWriter audit,
+        UserAdmissionGuard guard)
     {
         _store = store;
         _auth = auth;
@@ -40,6 +42,7 @@ public sealed class IntegrationAdminService
         _context = context;
         _clock = clock;
         _audit = audit;
+        _guard = guard;
     }
 
     public async Task<ConnectionView> CreateConnectionAsync(
@@ -148,6 +151,12 @@ public sealed class IntegrationAdminService
             throw new ExternalIdentityTargetNotAllowedException("Usuário federado só é vinculado pela própria criação.");
         }
 
+        if (usuario.Status != UserStatus.Active)
+        {
+            await DenyAsync("identity.embed.identity.map", userId, cancellationToken);
+            throw new ExternalIdentityTargetNotAllowedException("Só um usuário ativo pode ser vinculado.");
+        }
+
         var concessoes = await _auth.ListGrantsAsync(contexto.TenantId, userId, cancellationToken);
         if (!EmbeddedSessionPolicy.IsEligible(concessoes, conexao.OrganizationId, out var motivo))
         {
@@ -180,7 +189,12 @@ public sealed class IntegrationAdminService
 
         // Ao desativar: estado, marca de revogação e auditoria confirmam juntos; depois só a limpeza física (repetível).
         var agora = _clock.GetUtcNow();
-        await _store.SetIdentityStatusAsync(contexto.TenantId, connectionId, identityId, status, Pending(contexto, "identity.embed.identity.status", "external_identity", identityId.ToString()), agora, cancellationToken);
+        // Reativar o vínculo de um usuário federado ATIVO devolve a vaga que ele ocupa: confere o limite sob a trava de admissão (reativar quem já foi admitido não é ingresso novo, então não exige o cadastro habilitado).
+        // A decisão de exigir vaga é do STORE, sob a trava e com o estado relido dentro da transação (a leitura de antes da transação não decide nada): aqui só se informa a verificação a fazer se a transição aumentar o uso.
+        // Reativar quem já foi admitido não é ingresso novo, então não exige o cadastro habilitado (só vaga).
+        Func<CancellationToken, Task>? admitir = status == ExternalIdentityStatus.Active ? ct => _guard.RequireSeatForReactivationAsync(contexto.TenantId, agora, ct) : null;
+
+        await _store.SetIdentityStatusAsync(contexto.TenantId, connectionId, identityId, status, Pending(contexto, "identity.embed.identity.status", "external_identity", identityId.ToString()), agora, admitir, cancellationToken);
         if (status == ExternalIdentityStatus.Disabled)
         {
             await _store.RevokeEmbeddedSessionsAsync(contexto.TenantId, connectionId, vinculo.ExternalUserId, null, agora, cancellationToken);

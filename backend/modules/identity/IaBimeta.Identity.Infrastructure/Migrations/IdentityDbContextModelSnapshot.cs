@@ -570,6 +570,32 @@ namespace IaBimeta.Identity.Infrastructure.Migrations
                     b.ToTable("session_customer_grants", "identity");
                 });
 
+            modelBuilder.Entity("IaBimeta.Identity.Domain.TenantUserPolicy", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<int?>("MaxUsers")
+                        .HasColumnType("integer")
+                        .HasColumnName("max_users");
+
+                    b.Property<bool>("RegistrationEnabled")
+                        .HasColumnType("boolean")
+                        .HasColumnName("registration_enabled");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("TenantId");
+
+                    b.ToTable("tenant_user_policies", "identity", t =>
+                        {
+                            t.HasCheckConstraint("ck_tenant_user_policies_max_users", "max_users IS NULL OR max_users >= 1");
+                        });
+                });
+
             modelBuilder.Entity("IaBimeta.Identity.Domain.User", b =>
                 {
                     b.Property<Guid>("TenantId")
@@ -604,6 +630,12 @@ namespace IaBimeta.Identity.Infrastructure.Migrations
                         .HasColumnType("character varying(254)")
                         .HasColumnName("email");
 
+                    b.Property<bool>("IsInitialAdministrator")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("initial_administrator");
+
                     b.Property<string>("PasswordHash")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -614,6 +646,18 @@ namespace IaBimeta.Identity.Infrastructure.Migrations
                         .HasMaxLength(35)
                         .HasColumnType("character varying(35)")
                         .HasColumnName("preferred_locale");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasDefaultValue("Active")
+                        .HasColumnName("status");
+
+                    b.Property<DateTimeOffset?>("StatusChangedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("status_changed_at");
 
                     b.HasKey("TenantId", "Id");
 
@@ -671,6 +715,55 @@ namespace IaBimeta.Identity.Infrastructure.Migrations
                     NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("TenantId", "UserId", "OrganizationId"), false);
 
                     b.ToTable("user_organization_grants", "identity");
+                });
+
+            modelBuilder.Entity("IaBimeta.Identity.Domain.UserPermissionOverride", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by_user_id");
+
+                    b.Property<string>("Effect")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasColumnName("effect");
+
+                    b.Property<Guid?>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("Permission")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("permission");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("TenantId", "Id");
+
+                    b.HasIndex("TenantId", "UserId", "OrganizationId", "Permission")
+                        .IsUnique()
+                        .HasDatabaseName("ix_user_permission_overrides_tenant_user_scope_permission");
+
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("TenantId", "UserId", "OrganizationId", "Permission"), false);
+
+                    b.ToTable("user_permission_overrides", "identity");
                 });
 
             modelBuilder.Entity("IaBimeta.Identity.Infrastructure.Configurations.IntegrationNonce", b =>
@@ -761,6 +854,15 @@ namespace IaBimeta.Identity.Infrastructure.Migrations
                 });
 
             modelBuilder.Entity("IaBimeta.Identity.Domain.UserOrganizationGrant", b =>
+                {
+                    b.HasOne("IaBimeta.Identity.Domain.User", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("IaBimeta.Identity.Domain.UserPermissionOverride", b =>
                 {
                     b.HasOne("IaBimeta.Identity.Domain.User", null)
                         .WithMany()

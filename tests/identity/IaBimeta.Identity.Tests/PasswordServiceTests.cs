@@ -32,7 +32,7 @@ public class PasswordServiceTests
             Organizacao = Organizacoes.Adicionar();
         }
 
-        public PasswordService Servico => new(Tenants, Dados, Dados, Organizacoes, Hasher, Opcoes, Relogio, Auditoria, Holder);
+        public PasswordService Servico => AdminFabrica.Senha(Dados, Tenants, Organizacoes, Hasher, Opcoes, Holder, Relogio, Auditoria);
 
         public User NovoUsuario(string email = "ana@exemplo.com", string senha = Senhas.Valida, Role papel = Role.User, bool tenantInteiro = false, TenantInfo? tenant = null)
         {

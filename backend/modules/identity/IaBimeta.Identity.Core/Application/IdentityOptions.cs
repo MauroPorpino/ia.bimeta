@@ -26,6 +26,9 @@ public sealed class IdentityOptions
     /// <summary>Validade do token de redefinição de senha emitido pelo administrador. Curta de propósito; o piso é 1 minuto e o teto, 24 horas.</summary>
     public TimeSpan PasswordResetLifetime { get; set; } = TimeSpan.FromMinutes(30);
 
+    /// <summary>Validade do token de PRIMEIRO ACESSO (admissão). Até 24 horas: o administrador entrega o token manualmente, sem e-mail.</summary>
+    public TimeSpan FirstAccessLifetime { get; set; } = TimeSpan.FromHours(24);
+
     /// <summary>Validade do ticket de uso único do Embedded (ADR 0039). Poucos segundos: o piso é 10 s e o teto, 5 minutos.</summary>
     public TimeSpan EmbeddedTicketLifetime { get; set; } = TimeSpan.FromSeconds(60);
 

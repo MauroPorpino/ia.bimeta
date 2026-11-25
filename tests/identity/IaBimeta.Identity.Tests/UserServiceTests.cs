@@ -21,7 +21,21 @@ public class UserServiceTests
         public RequestContextHolder Holder { get; } = new();
         public PasswordHasher Hasher { get; } = new(Senhas.Rapidas());
 
-        public UserService Servico => new(Dados, Dados, Organizacoes, Hasher, Holder, TimeProvider.System, Auditoria);
+        public TenantsEmMemoria Tenants { get; } = new();
+        public IdentityOptions Opcoes { get; } = Senhas.Rapidas();
+
+        public UserService Servico
+        {
+            get
+            {
+                if (!Tenants.Contem(Tenant))
+                {
+                    Tenants.Adicionar(Tenant, "lab-a");
+                }
+
+                return AdminFabrica.Usuarios(Dados, Tenants, Organizacoes, Hasher, Opcoes, Holder, TimeProvider.System, Auditoria);
+            }
+        }
 
         public void ComoSistema() => Holder.Set(new RequestContext(Tenant, "development-seed"));
 
@@ -135,7 +149,8 @@ public class UserServiceTests
         var c = new Cenario();
         var organizacao = c.Organizacoes.Adicionar();
         var usuario = c.NovoUsuario();
-        c.ComoPapel(Role.OrganizationAdmin, organizacao);
+        // Um usuário sem nenhuma concessão só é visível a quem administra o tenant inteiro: o administrador de UMA organização não "adota" um usuário por identificador conhecido (Etapa 01).
+        c.ComoPapel(Role.OrganizationAdmin, null);
 
         await c.Servico.GrantRoleAsync(organizacao, usuario.Id, Role.User);
         await c.Servico.GrantRoleAsync(organizacao, usuario.Id, Role.Manager);
@@ -186,7 +201,7 @@ public class UserServiceTests
         var c = new Cenario();
         var organizacao = c.Organizacoes.Adicionar();
         var usuario = c.NovoUsuario();
-        c.ComoPapel(Role.OrganizationAdmin, organizacao);
+        c.ComoPapel(Role.OrganizationAdmin, null);
         await c.Servico.GrantRoleAsync(organizacao, usuario.Id, Role.User);
 
         await c.Servico.RevokeRoleAsync(organizacao, usuario.Id);

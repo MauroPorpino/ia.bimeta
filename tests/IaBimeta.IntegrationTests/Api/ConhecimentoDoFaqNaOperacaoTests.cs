@@ -40,7 +40,7 @@ public sealed class ConhecimentoDoFaqNaOperacaoTests(PostgresFixture banco, ITes
 
     private static ProvisioningSpec Especificacao(string slug) => ProvisioningSpec.Parse($$"""
         {
-          "tenant": { "slug": "{{slug}}", "name": "Laboratório {{slug}}" },
+          "tenant": { "slug": "{{slug}}", "name": "Laboratório {{slug}}", "unlimitedUsers": true },
           "administrator": { "email": "admin@{{slug}}.local", "displayName": "Administradora", "passwordEnv": "ADM_SENHA" },
           "organization": { "name": "Laboratório {{slug}}", "unitName": "Matriz" },
           "queue": { "name": "Atendimento humano" },

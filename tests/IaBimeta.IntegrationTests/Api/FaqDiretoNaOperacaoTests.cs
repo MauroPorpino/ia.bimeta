@@ -35,7 +35,7 @@ public sealed class FaqDiretoNaOperacaoTests(PostgresFixture banco, ITestOutputH
 
     private static string Arquivo(string slug, string faq, string? idioma = null) => $$"""
         {
-          "tenant": { "slug": "{{slug}}", "name": "Laboratório {{slug}}" },
+          "tenant": { "slug": "{{slug}}", "name": "Laboratório {{slug}}", "unlimitedUsers": true },
           "administrator": { "email": "admin@{{slug}}.local", "displayName": "Administradora", "passwordEnv": "ADM_SENHA" },
           "organization": { "name": "Laboratório {{slug}}", "unitName": "Matriz" },
           "queue": { "name": "Atendimento humano" },

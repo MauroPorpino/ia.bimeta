@@ -23,6 +23,9 @@ internal sealed class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(u => u.PasswordHash).HasColumnName("password_hash").HasMaxLength(User.PasswordHashMaxLength).IsRequired();
         builder.Property(u => u.CreatedAt).HasColumnName("created_at");
         builder.Property(u => u.AuthMode).HasColumnName("auth_mode").HasConversion<string>().HasMaxLength(20).IsRequired().HasDefaultValue(UserAuthMode.Password);
+        builder.Property(u => u.Status).HasColumnName("status").HasConversion<string>().HasMaxLength(20).IsRequired().HasDefaultValue(UserStatus.Active);
+        builder.Property(u => u.StatusChangedAt).HasColumnName("status_changed_at");
+        builder.Property(u => u.IsInitialAdministrator).HasColumnName("initial_administrator").HasDefaultValue(false);
         builder.Property(u => u.PreferredLocale).HasColumnName("preferred_locale").HasMaxLength(Locale.MaxLength).HasConversion(typeof(LocaleConverter));
 
         builder.HasIndex(u => new { u.TenantId, u.Email }).IsUnique().HasDatabaseName(UniqueEmailIndex);
