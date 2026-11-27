@@ -384,6 +384,39 @@ public sealed class AiGatewayConfigurationIntegrationTests(PostgresFixture banco
         Assert.Empty(await CredenciaisAsync(segundo.Admin)); // nada foi gravado
     }
 
+    [Fact]
+    public async Task Provedor_do_catalogo_sem_adaptador_registrado_nao_pode_ser_escolhido_nem_receber_credencial_e_o_registrado_pode()
+    {
+        var t = await NovoTenantAsync("aisemadap");
+        var semAdaptador = new AiProviderRegistry(new IAiProvider[] { new ProvedorFalso("outro-provedor") });
+        var comAdaptador = new AiProviderRegistry(new IAiProvider[] { new ProvedorFalso(Provedor) });
+
+        AiTenantConfigurationService Servico(IServiceProvider sp, AiProviderRegistry registro) => new(
+            sp.GetRequiredService<IRequestContextAccessor>(), sp.GetRequiredService<IAiTenantConfigurationStore>(), sp.GetRequiredService<AiModelCatalog>(), sp.GetRequiredService<IAiCredentialProtector>(),
+            sp.GetRequiredService<IaBimeta.Audit.Contracts.Commands.IAuditWriter>(), TimeProvider.System, registro);
+
+        // O catálogo lista o provedor, mas este host não tem o adaptador: nada é aceito em silêncio.
+        await ComoAsync(t.Admin, async sp =>
+        {
+            var servico = Servico(sp, semAdaptador);
+            await Assert.ThrowsAsync<AiGatewayValidationException>(() => servico.SetConfigurationAsync(Provedor, Modelo));
+            await Assert.ThrowsAsync<AiGatewayValidationException>(() => servico.SetCredentialAsync(Provedor, NovoCanario()));
+            return true;
+        });
+        Assert.False((await ComoAsync(t.Admin, sp => sp.GetRequiredService<AiTenantConfigurationService>().GetStatusAsync())).Configured);
+        Assert.Empty(await CredenciaisAsync(t.Admin));
+
+        // Com o adaptador registrado, a mesma escolha funciona.
+        await ComoAsync(t.Admin, async sp =>
+        {
+            var servico = Servico(sp, comAdaptador);
+            await servico.SetConfigurationAsync(Provedor, Modelo);
+            await servico.SetCredentialAsync(Provedor, NovoCanario());
+            return true;
+        });
+        Assert.True((await ComoAsync(t.Admin, sp => sp.GetRequiredService<AiTenantConfigurationService>().GetStatusAsync())).Configured);
+    }
+
     // O AiGatewayService de ponta a ponta sobre o banco
 
     private sealed class ProvedorFalso(string id) : IAiProvider

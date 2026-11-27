@@ -59,6 +59,7 @@ public sealed class AiTenantConfigurationService
     private readonly IAiCredentialProtector _protector;
     private readonly IAuditWriter _audit;
     private readonly TimeProvider _clock;
+    private readonly AiProviderRegistry? _providers;
 
     public AiTenantConfigurationService(
         IRequestContextAccessor context,
@@ -66,7 +67,8 @@ public sealed class AiTenantConfigurationService
         AiModelCatalog catalog,
         IAiCredentialProtector protector,
         IAuditWriter audit,
-        TimeProvider clock)
+        TimeProvider clock,
+        AiProviderRegistry? providers = null)
     {
         _context = context;
         _store = store;
@@ -74,7 +76,11 @@ public sealed class AiTenantConfigurationService
         _protector = protector;
         _audit = audit;
         _clock = clock;
+        _providers = providers;
     }
+
+    /// <summary>O provedor tem adaptador registrado neste host? Sem o registro injetado (testes antigos) não restringe; nos hosts o registro sempre existe.</summary>
+    private bool IsAvailable(string providerId) => _providers is null || _providers.Find(providerId) is not null;
 
     /// <summary>A situação da IA do tenant: configurada ou não, provedor, modelo, situação e se há credencial (com a impressão digital). Nunca o valor da credencial.</summary>
     public async Task<AiTenantStatusView> GetStatusAsync(CancellationToken cancellationToken = default)
@@ -106,6 +112,12 @@ public sealed class AiTenantConfigurationService
         if (status is not (AiTenantStatus.Enabled or AiTenantStatus.Disabled))
         {
             throw new AiGatewayValidationException("O tenant só pode habilitar ou desabilitar a IA: o bloqueio é da plataforma.");
+        }
+
+        // Só um provedor com adaptador REGISTRADO neste host pode ser escolhido: o catálogo pode listar um provedor sem adaptador, e ele nunca aparece como disponível nem é aceito em silêncio.
+        if (!IsAvailable(providerId))
+        {
+            throw new AiGatewayValidationException("O provedor não está disponível neste ambiente (nenhum adaptador registrado).");
         }
 
         var modelo = _catalog.Find(providerId, modelId);
@@ -146,7 +158,7 @@ public sealed class AiTenantConfigurationService
         var contexto = _context.GetRequired();
         contexto.Require(Permission.TenantSettingsManage);
 
-        if (!_catalog.ProviderIds.Contains(providerId, StringComparer.Ordinal))
+        if (!_catalog.ProviderIds.Contains(providerId, StringComparer.Ordinal) || !IsAvailable(providerId))
         {
             throw new AiGatewayValidationException("O provedor não faz parte do catálogo.");
         }

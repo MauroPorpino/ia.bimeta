@@ -1,4 +1,5 @@
 using IaBimeta.Adapters.Ai.Ollama;
+using IaBimeta.Adapters.Ai.Anthropic;
 using IaBimeta.Adapters.Ai.OpenAI;
 using IaBimeta.Knowledge.Infrastructure;
 using IaBimeta.Adapters.WhatsApp;
@@ -145,6 +146,7 @@ public static class ApiHost
 
         // O adaptador da OpenAI (C4): HttpClient direto na Responses API, credencial BYOK por chamada, nenhum segredo na configuração.
         builder.Services.AddOpenAiProvider(openai => builder.Configuration.GetSection("AiGateway:Providers:OpenAi").Bind(openai));
+        builder.Services.AddAnthropicProvider(anthropic => builder.Configuration.GetSection("AiGateway:Providers:Anthropic").Bind(anthropic));
 
         // O adaptador do WhatsApp Cloud API (Meta): o Receiver do webhook o usa para verificar a assinatura e normalizar o corpo. Nenhum segredo na configuração: o App Secret e o token de acesso são por conta, cifrados.
         builder.Services.AddWhatsAppAdapter(whatsapp => builder.Configuration.GetSection("Channels:Providers:WhatsApp").Bind(whatsapp));

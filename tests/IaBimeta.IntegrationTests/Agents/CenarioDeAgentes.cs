@@ -60,10 +60,10 @@ internal sealed class CenarioDeAgentes
     public RequestContext Admin { get; private set; } = null!;
 
     public static async Task<CenarioDeAgentes> CriarAsync(
-        PostgresFixture banco, string prefixo, bool configurarIA = true, bool publicarAgente = true, string? textoDeAudio = null, bool usarOpenAi = false, bool fluxos = false)
+        PostgresFixture banco, string prefixo, bool configurarIA = true, bool publicarAgente = true, string? textoDeAudio = null, bool usarOpenAi = false, bool fluxos = false, bool usarAnthropic = false)
     {
         var c = await CenarioDeConversas.CriarAsync(banco, prefixo, canaisReais: true, agentes: true, fluxos: fluxos);
-        var cenario = new CenarioDeAgentes(c, $"sk-CANARIO-{Guid.NewGuid():N}", $"CANARIO-INSTRUCOES-{Guid.NewGuid():N}", fluxos);
+        var cenario = new CenarioDeAgentes(c, $"sk-CANARIO-{Guid.NewGuid():N}", $"CANARIO-INSTRUCOES-{Guid.NewGuid():N}", fluxos) { UsaAnthropic = usarAnthropic };
         InstalarDespachante(banco.ProvedorDeIA);
         var admin = PostgresFixture.ContextoDeUsuario(c.Tenant, Guid.NewGuid(), new PermissionGrant(Permission.TenantSettingsManage, null));
         cenario.Admin = admin;
@@ -77,8 +77,8 @@ internal sealed class CenarioDeAgentes
             {
                 var configuracao = sp.GetRequiredService<AiTenantConfigurationService>();
                 // O tenant escolhe o provedor e o modelo: o dublê (provider-a) ou o adaptador REAL da OpenAI com o servidor HTTP simulado.
-                var provedor = usarOpenAi ? PostgresFixture.ProvedorOpenAiDeTeste : PostgresFixture.ProvedorDeIADeTeste;
-                await configuracao.SetConfigurationAsync(provedor, usarOpenAi ? PostgresFixture.ModeloOpenAiDeTeste : PostgresFixture.ModeloDeIADeTeste);
+                var provedor = usarAnthropic ? PostgresFixture.ProvedorAnthropicDeTeste : usarOpenAi ? PostgresFixture.ProvedorOpenAiDeTeste : PostgresFixture.ProvedorDeIADeTeste;
+                await configuracao.SetConfigurationAsync(provedor, usarAnthropic ? PostgresFixture.ModeloAnthropicDeTeste : usarOpenAi ? PostgresFixture.ModeloOpenAiDeTeste : PostgresFixture.ModeloDeIADeTeste);
                 await configuracao.SetCredentialAsync(provedor, cenario.Canario);
                 return 0;
             });
@@ -142,11 +142,14 @@ internal sealed class CenarioDeAgentes
     /// <summary>O roteiro HTTP do tenant: o que o "servidor da OpenAI" responde a cada requisição que traz a credencial DELE.</summary>
     public Func<CapturaHttp, CancellationToken, Task<HttpResponseMessage>> RoteiroHttp
     {
-        set => C.Banco.ServidorOpenAi.Definir(Canario, value);
+        set { if (UsaAnthropic) { C.Banco.ServidorAnthropic.Definir(Canario, value); } else { C.Banco.ServidorOpenAi.Definir(Canario, value); } }
     }
 
     /// <summary>As requisições HTTP que chegaram ao servidor simulado com a credencial DESTE tenant.</summary>
-    public IReadOnlyList<CapturaHttp> RequisicoesHttp => C.Banco.ServidorOpenAi.DaCredencial(Canario);
+    public IReadOnlyList<CapturaHttp> RequisicoesHttp => UsaAnthropic ? C.Banco.ServidorAnthropic.DaCredencial(Canario) : C.Banco.ServidorOpenAi.DaCredencial(Canario);
+
+    /// <summary>O tenant usa o adaptador REAL da Anthropic (HTTP simulado) em vez do da OpenAI.</summary>
+    public bool UsaAnthropic { get; private init; }
 
     // Fluxo
 

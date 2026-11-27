@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="../tests/adapters/IaBimeta.Adapters.Ai.OpenAI.Tests/IaBimeta.Adapters.Ai.OpenAI.Tests.csproj" />
+  <Project Path="../tests/adapters/IaBimeta.Adapters.Ai.Anthropic.Tests/IaBimeta.Adapters.Ai.Anthropic.Tests.csproj" />
   <Project Path="../tests/adapters/IaBimeta.Adapters.Ai.Ollama.Tests/IaBimeta.Adapters.Ai.Ollama.Tests.csproj" />
   <Project Path="../tests/adapters/IaBimeta.Adapters.WhatsApp.Tests/IaBimeta.Adapters.WhatsApp.Tests.csproj" />
   <Project Path="../tests/agents/IaBimeta.Agents.Tests/IaBimeta.Agents.Tests.csproj" />
@@ -22,6 +23,7 @@
   <Project Path="host/IaBimeta.Api/IaBimeta.Api.csproj" />
   <Project Path="host/IaBimeta.Worker/IaBimeta.Worker.csproj" />
   <Project Path="adapters/IaBimeta.Adapters.Ai.OpenAI/IaBimeta.Adapters.Ai.OpenAI.csproj" />
+  <Project Path="adapters/IaBimeta.Adapters.Ai.Anthropic/IaBimeta.Adapters.Ai.Anthropic.csproj" />
   <Project Path="adapters/IaBimeta.Adapters.Ai.Ollama/IaBimeta.Adapters.Ai.Ollama.csproj" />
   <Project Path="adapters/IaBimeta.Adapters.WhatsApp/IaBimeta.Adapters.WhatsApp.csproj" />
   <Project Path="modules/agents/IaBimeta.Agents.Core/IaBimeta.Agents.Core.csproj" />

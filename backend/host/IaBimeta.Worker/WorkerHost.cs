@@ -1,5 +1,6 @@
 using IaBimeta.Agents.Infrastructure;
 using IaBimeta.Adapters.Ai.Ollama;
+using IaBimeta.Adapters.Ai.Anthropic;
 using IaBimeta.Adapters.Ai.OpenAI;
 using IaBimeta.Knowledge.Infrastructure;
 using IaBimeta.Adapters.WhatsApp;
@@ -122,6 +123,7 @@ public static class WorkerHost
 
         // O adaptador da OpenAI (C4): o Worker é quem chama o modelo (o executor de turnos do Agents). Nenhum segredo na configuração: a credencial BYOK de cada tenant chega por chamada.
         builder.Services.AddOpenAiProvider(openai => builder.Configuration.GetSection("AiGateway:Providers:OpenAi").Bind(openai));
+        builder.Services.AddAnthropicProvider(anthropic => builder.Configuration.GetSection("AiGateway:Providers:Anthropic").Bind(anthropic));
         builder.Services.AddOutboxRelay<ConversationsDbContext>();
 
         // O Inbox do Channels (ADR 0011): o Receiver do Api grava os eventos do provedor no outbox do Channels, e este relay os entrega, em ordem por lane, aos handlers do próprio módulo (a ingestão no

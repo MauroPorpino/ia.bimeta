@@ -38,6 +38,7 @@
     <ProjectReference Include="..\..\modules\agents\IaBimeta.Agents.Core\IaBimeta.Agents.Core.csproj" />
     <ProjectReference Include="..\..\modules\agents\IaBimeta.Agents.Infrastructure\IaBimeta.Agents.Infrastructure.csproj" />
     <ProjectReference Include="..\..\adapters\IaBimeta.Adapters.Ai.OpenAI\IaBimeta.Adapters.Ai.OpenAI.csproj" />
+    <ProjectReference Include="..\..\adapters\IaBimeta.Adapters.Ai.Anthropic\IaBimeta.Adapters.Ai.Anthropic.csproj" />
     <ProjectReference Include="..\..\adapters\IaBimeta.Adapters.Ai.Ollama\IaBimeta.Adapters.Ai.Ollama.csproj" />
     <ProjectReference Include="..\..\modules\knowledge\IaBimeta.Knowledge.Infrastructure\IaBimeta.Knowledge.Infrastructure.csproj" />
     <ProjectReference Include="..\..\adapters\IaBimeta.Adapters.WhatsApp\IaBimeta.Adapters.WhatsApp.csproj" />

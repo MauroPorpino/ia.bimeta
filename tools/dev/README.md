@@ -121,3 +121,7 @@ E feche as janelas do Api e do Worker.
 ## Como isto é provado sem a OpenAI
 
 `tests/IaBimeta.IntegrationTests/Api/SimuladorDeIaTests.cs` sobe o **Api real, o Worker real**, PostgreSQL, o AiGateway com a chave cifrada e o **adaptador real da OpenAI**, trocando só o provedor por um servidor HTTP local (`127.0.0.1`) com chave canário. Cobre: a preparação do tenant (idempotente), o cadastro da chave sem exposição (resposta, log, banco, ledger), a resposta com tokens e custo no ledger, a decisão de transferir, a IA calada depois que o humano assume (inclusive no meio da chamada ao modelo) e as falhas (sem chave, chave recusada, 5xx seguido de sucesso, sem chave mestra).
+
+## Anthropic (Etapa 03)
+
+Validação do adaptador da Anthropic **sem chamada paga**: `Start-AnthropicSimulada.ps1` (porta 5200, Messages API simulada), `Novo-TenantDeAnthropicDeDemonstracao.ps1` (empresa sintética `demo-anthropic`, chave sintética) e `Set-ChaveDaAnthropic.ps1` (só para a validação real, **mediante autorização**; pede a chave sem eco). Procedimento completo em `docs/operations/ETAPA-03-ANTHROPIC.md`; roteiro da API real em `docs/operations/ETAPA-03-ANTHROPIC-API-REAL.md`.

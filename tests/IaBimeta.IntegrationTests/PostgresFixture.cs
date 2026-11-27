@@ -198,6 +198,10 @@ public sealed class PostgresFixture : IAsyncLifetime
             configurarAnexos?.Invoke(anexos);
         });
 
+        // Os provedores de IA SINTÉTICOS do catálogo de teste têm adaptador (dublês): desde a Etapa 03 o AiGateway só aceita configurar provedor com adaptador registrado.
+        colecao.AddSingleton<IAiProvider>(ProvedorDeIA);
+        colecao.AddSingleton<IAiProvider>(new FakeAiProvider(OutroProvedorDeIADeTeste));
+
         // Como no host: o ContactCenter chama o Conversations pela porta que age com o contexto de sistema do mesmo tenant.
         colecao.AddScoped<IConversationGateway, ElevatedConversationGateway>();
         colecao.AddContactCenter(_ => ConnectionString);
@@ -224,6 +228,7 @@ public sealed class PostgresFixture : IAsyncLifetime
                 if (agentes)
                 {
                     catalogo.Models.Add(ModeloDoCatalogoOpenAi());
+                    catalogo.Models.Add(ModeloDoCatalogoAnthropic());
                 }
             },
             limites =>
@@ -240,10 +245,12 @@ public sealed class PostgresFixture : IAsyncLifetime
         {
             // O Agents (C2): o ÚNICO provedor de IA é o dublê dos testes (nenhuma rede, nenhuma chave real), e as opções são as de referência, com o tempo nas mãos do teste.
             colecao.AddSingleton(ProvedorDeIA);
-            colecao.AddSingleton<IAiProvider>(provider => provider.GetRequiredService<FakeAiProvider>());
 
             // O adaptador REAL da OpenAI (C4), com o servidor HTTP simulado no lugar da rede: o pedido, o uso, os erros e o tempo limite são os do adaptador de produção.
             colecao.AddSingleton<IAiProvider>(_ => new IaBimeta.Adapters.Ai.OpenAI.OpenAiProvider(new HttpClient(ServidorOpenAi) { Timeout = Timeout.InfiniteTimeSpan }, new IaBimeta.Adapters.Ai.OpenAI.OpenAiOptions()));
+
+            // O adaptador REAL da Anthropic (Etapa 03), também com o servidor HTTP simulado no lugar da rede.
+            colecao.AddSingleton<IAiProvider>(_ => new IaBimeta.Adapters.Ai.Anthropic.AnthropicProvider(new HttpClient(ServidorAnthropic) { Timeout = Timeout.InfiniteTimeSpan }, new IaBimeta.Adapters.Ai.Anthropic.AnthropicOptions()));
             colecao.AddAgents(_ => ConnectionString, opcoes => { opcoes.KnowledgeGapHashKey = ChaveDeLacunasDeTeste; opcoes.SemanticAnswerEnabled = true; opcoes.LocalSuggestionsEnabled = true; opcoes.IntegrationLookupsEnabled = true; opcoes.ModelCallTimeout = TimeSpan.FromSeconds(30); });
             colecao.AddSingleton<IaBimeta.Knowledge.Contracts.ILocalGenerationProvider>(IaLocal);
             colecao.AddSingleton(BuscaSemantica);
@@ -322,6 +329,27 @@ public sealed class PostgresFixture : IAsyncLifetime
 
     /// <summary>O "servidor da OpenAI" (HTTP simulado) que o adaptador real da composição dos Agents chama: responde pelo roteiro do tenant cuja credencial chegou.</summary>
     internal IaBimeta.IntegrationTests.Agents.ServidorOpenAiSimulado ServidorOpenAi { get; } = new();
+
+    /// <summary>O "servidor da Anthropic" (HTTP simulado) que o adaptador real da composição dos Agents chama: responde pelo roteiro do tenant cuja credencial chegou.</summary>
+    internal IaBimeta.IntegrationTests.Agents.ServidorAnthropicSimulado ServidorAnthropic { get; } = new();
+
+    public const string ProvedorAnthropicDeTeste = IaBimeta.Adapters.Ai.Anthropic.AnthropicOptions.ProviderId;
+    public const string ModeloAnthropicDeTeste = "claude-haiku-5-5";
+
+    private static AiCatalogModelSettings ModeloDoCatalogoAnthropic() => new()
+    {
+        ProviderId = ProvedorAnthropicDeTeste,
+        ModelId = ModeloAnthropicDeTeste,
+        Profile = "atendimento-rapido",
+        ContextWindowTokens = 200_000,
+        MaxOutputTokens = 4_000,
+        Currency = "USD",
+        InputPerMillion = 0.10m,
+        CachedInputPerMillion = 0.01m,
+        CacheWritePerMillion = 0.125m,
+        OutputPerMillion = 0.50m,
+        Status = "Active",
+    };
 
     public const string ProvedorOpenAiDeTeste = IaBimeta.Adapters.Ai.OpenAI.OpenAiOptions.ProviderId;
     public const string ModeloOpenAiDeTeste = "gpt-6-luna";

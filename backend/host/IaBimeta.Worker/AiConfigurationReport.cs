@@ -31,7 +31,7 @@ internal sealed class AiConfigurationReport : IHostedService
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        var modelos = string.Join(", ", _catalog.Models.Select(m => $"{m.ProviderId}/{m.ModelId}"));
+        var modelos = string.Join(", ", _catalog.Models.Select(m => _providers.Find(m.ProviderId) is null ? $"{m.ProviderId}/{m.ModelId} (SEM ADAPTADOR: indisponivel)" : $"{m.ProviderId}/{m.ModelId}"));
         var adaptadores = string.Join(", ", _providers.ProviderIds.Order(StringComparer.Ordinal));
         var chaveAtiva = !string.IsNullOrWhiteSpace(_secrets.ActiveKeyId) && _secrets.Keys.ContainsKey(_secrets.ActiveKeyId);
         var limitesCompletos = _limits.Merge(AiTenantLimitOverrides.None).IsValid;

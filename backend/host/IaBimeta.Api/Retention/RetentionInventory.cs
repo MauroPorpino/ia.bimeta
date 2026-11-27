@@ -87,6 +87,7 @@ internal static class RetentionInventory
         ["conversations.optout_reviews"] = (DataClass.LegalRecord, "ocorrência de possível saída do cliente e a decisão da pessoa autorizada sobre o consentimento (ADR 0041, E2.4): resolvida uma única vez (o banco recusa a segunda atualização e qualquer exclusão); guarda só o motivo, a palavra normalizada e o responsável, nunca o texto livre. Mesma retenção provisória do consentimento: sem prazo definido, sem expurgo, a política depende da avaliação jurídica e da LGPD (D7)"),
         ["contact_center.audit_outbox"] = (DataClass.LegalRecord, "auditoria pendente de entrega ao Audit"),
         ["identity.audit_outbox"] = (DataClass.LegalRecord, "auditoria do Embedded pendente de entrega ao Audit (E1-R): guardada na transação do consumo do ticket, entregue pelo Worker e apagada só depois da entrega"),
+        ["tenancy.tenant_status_changes"] = (DataClass.LegalRecord, "histórico de situação da empresa (Etapa 02, ADR 0043): SOMENTE INCLUSÃO, com situação anterior e nova, motivo informado pelo operador da plataforma, operador e instante. Evidência de suspensão e reativação. Não se apaga por prazo; sem prazo de retenção definido: a ausência de prazo NÃO autoriza exclusão. Qualquer prazo ou pseudonimização do operador depende de decisão jurídica e de negócio. Sai só com o encerramento da empresa, por procedimento próprio"),
         ["ai_gateway.ai_requests"] = (DataClass.LegalRecord, "ledger de consumo de IA (a correlação com o atendimento é a parte a pseudonimizar)"),
 
         // Cadastro e configuração
