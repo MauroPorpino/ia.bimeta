@@ -31,6 +31,8 @@ public sealed class TenantRegistrationService
     /// <exception cref="DuplicateTenantSlugException">O slug já está em uso.</exception>
     public async Task<TenantInfo> RegisterAsync(string slug, string name, Locale? defaultLocale, CancellationToken cancellationToken = default)
     {
+        // O cadastro comercial por QUALQUER caminho recusa os identificadores reservados (P2): o tenant técnico só nasce pelo platform-init (EnsurePlatformTenantAsync).
+        Tenant.EnsureNotReserved(slug);
         var tenant = Tenant.Register(new TenantId(Guid.CreateVersion7()), slug, name, _clock.GetUtcNow(), defaultLocale);
 
         if (await _tenants.FindBySlugAsync(tenant.Slug, cancellationToken) is not null)

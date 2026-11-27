@@ -19,6 +19,11 @@ if (args.Length > 0 && string.Equals(args[0], IaBimeta.Api.Provisioning.FirstAdm
     return await IaBimeta.Api.Provisioning.FirstAdminCommand.RunAsync(args[1..], Console.Out);
 }
 
+if (args.Length > 0 && string.Equals(args[0], IaBimeta.Api.Provisioning.PlatformInitCommand.Verb, StringComparison.Ordinal))
+{
+    return await IaBimeta.Api.Provisioning.PlatformInitCommand.RunAsync(args[1..], Console.Out);
+}
+
 if (args.Length > 0 && string.Equals(args[0], IaBimeta.Api.Provisioning.MigrateCommand.Verb, StringComparison.Ordinal))
 {
     return await IaBimeta.Api.Provisioning.MigrateCommand.RunAsync(args[1..], Console.Out);

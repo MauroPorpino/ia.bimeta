@@ -1,9 +1,10 @@
 using IaBimeta.Knowledge.Contracts;
 using IaBimeta.Knowledge.Domain;
+using IaBimeta.SharedKernel;
 
 namespace IaBimeta.Knowledge.Application;
 
-public sealed record SemanticIndexerRun(int Claimed, int Embedded, int Retried, int Failed);
+public sealed record SemanticIndexerRun(int Claimed, int Embedded, int Retried, int Failed, int Deferred = 0);
 
 /// <summary>
 /// Um passo da vetorização assíncrona (roda no Worker, em laço): reserva textos pendentes, pede os vetores em lote ao provedor e grava. Idempotente e recuperável: se o Worker cair, a reserva vence e outro retoma; se o
@@ -16,13 +17,15 @@ public sealed class SemanticIndexer
     private readonly IEmbeddingProvider _embeddings;
     private readonly KnowledgeSemanticOptions _options;
     private readonly TimeProvider _clock;
+    private readonly IIndexingTenantGate? _gate;
 
-    public SemanticIndexer(ISemanticStore store, IEmbeddingProvider embeddings, KnowledgeSemanticOptions options, TimeProvider clock)
+    public SemanticIndexer(ISemanticStore store, IEmbeddingProvider embeddings, KnowledgeSemanticOptions options, TimeProvider clock, IIndexingTenantGate? gate = null)
     {
         _store = store;
         _embeddings = embeddings;
         _options = options;
         _clock = clock;
+        _gate = gate;
     }
 
     public async Task<SemanticIndexerRun> RunOnceAsync(CancellationToken cancellationToken = default)
@@ -40,6 +43,51 @@ public sealed class SemanticIndexer
         if (lote.Count == 0)
         {
             return new SemanticIndexerRun(0, 0, 0, 0);
+        }
+
+        // Empresa suspensa (ou com a situação ilegível: falha fechada) não vai ao provedor de vetores. Os textos dela voltam à fila adiados, sem gastar tentativa e sem perder nada; as outras empresas seguem.
+        var adiados = 0;
+        if (_gate is not null)
+        {
+            var liberados = new List<PendingSemanticText>(lote.Count);
+            var decisao = new Dictionary<TenantId, bool>();
+            foreach (var item in lote)
+            {
+                if (!decisao.TryGetValue(item.Tenant, out var pode))
+                {
+                    try
+                    {
+                        pode = await _gate.CanIndexAsync(item.Tenant, cancellationToken);
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (Exception)
+                    {
+                        pode = false;
+                    }
+
+                    decisao[item.Tenant] = pode;
+                }
+
+                if (pode)
+                {
+                    liberados.Add(item);
+                }
+                else
+                {
+                    await _store.DeferAsync(item, agora + _options.SuspendedDeferral, agora, cancellationToken);
+                    adiados++;
+                }
+            }
+
+            if (liberados.Count == 0)
+            {
+                return new SemanticIndexerRun(lote.Count, 0, 0, 0, adiados);
+            }
+
+            lote = liberados;
         }
 
         IReadOnlyList<float[]> vetores;
@@ -68,7 +116,7 @@ public sealed class SemanticIndexer
                 }
             }
 
-            return new SemanticIndexerRun(lote.Count, 0, tentativas, falhas);
+            return new SemanticIndexerRun(lote.Count + adiados, 0, tentativas, falhas, adiados);
         }
 
         var gravados = 0;
@@ -80,7 +128,7 @@ public sealed class SemanticIndexer
             }
         }
 
-        return new SemanticIndexerRun(lote.Count, gravados, 0, 0);
+        return new SemanticIndexerRun(lote.Count + adiados, gravados, 0, 0, adiados);
     }
 
     internal TimeSpan BackoffAfter(int attempts)

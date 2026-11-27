@@ -165,6 +165,17 @@ internal sealed class FakeStore : ISemanticStore
         return Task.FromResult(true);
     }
 
+    public Task DeferAsync(PendingSemanticText item, DateTimeOffset nextAttempt, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var r = Find(item);
+        if (r is not null && r.Status == 1 && r.Hash == item.TextHash)
+        {
+            (r.Claimed, r.Next) = (null, nextAttempt);
+        }
+
+        return Task.CompletedTask;
+    }
+
     public Task FailAsync(PendingSemanticText item, string code, DateTimeOffset? nextAttempt, DateTimeOffset now, CancellationToken cancellationToken)
     {
         var r = Find(item);

@@ -1,4 +1,4 @@
-using IaBimeta.Capabilities.Contracts;
+﻿using IaBimeta.Capabilities.Contracts;
 using IaBimeta.Conversations.Contracts;
 using IaBimeta.Conversations.Contracts.Commands;
 using IaBimeta.Conversations.Contracts.Queries;
@@ -66,11 +66,11 @@ public static class WorkflowsInfrastructureExtensions
 
         services.AddScoped<IAutomationRouter>(p => new FlowRouter(
             p.GetRequiredService<IFlowRuntimeStore>(), p.GetRequiredService<IWorkflowStore>(), p.GetRequiredService<IConversationQueries>(), p.GetRequiredService<IFlowCipher>(),
-            p.GetRequiredService<IRequestContextAccessor>(), p.GetRequiredService<WorkflowsOptions>(), p.GetRequiredService<TimeProvider>()));
+            p.GetRequiredService<IRequestContextAccessor>(), p.GetRequiredService<WorkflowsOptions>(), p.GetRequiredService<TimeProvider>(), p.GetService<ITenantOperationGate>()));
         services.AddScoped(p => new FlowRuntime(
             p.GetRequiredService<IFlowRuntimeStore>(), p.GetRequiredService<IWorkflowStore>(), p.GetRequiredService<IFlowCipher>(), p.GetRequiredService<ITurnCommands>(), p.GetRequiredService<IFlowCommands>(),
             p.GetRequiredService<IConversationQueries>(), p.GetService<ICapabilityExecutor>(), p.GetService<ICapabilityCatalog>(), p.GetService<IFlowKnowledgeLookup>(), p.GetService<IFlowHandoffPort>(),
-            p.GetRequiredService<IRequestContextAccessor>(), p.GetRequiredService<WorkflowsOptions>(), p.GetRequiredService<TimeProvider>()));
+            p.GetRequiredService<IRequestContextAccessor>(), p.GetRequiredService<WorkflowsOptions>(), p.GetRequiredService<TimeProvider>(), p.GetService<ITenantOperationGate>()));
 
         // Os consumidores dos eventos do Conversations (o relay os entrega pelo Inbox do módulo).
         services.AddInboxGate<WorkflowsDbContext>();
@@ -87,5 +87,5 @@ internal sealed class DisabledAutomationRouter : IAutomationRouter
 {
     public Task<AutomationOwner> GetOwnerAsync(Guid sessionId, CancellationToken cancellationToken = default) => Task.FromResult(AutomationOwner.Agent);
 
-    public Task<AutomationOwner> ResolveOnInboundAsync(Guid sessionId, long inboundSeq, CancellationToken cancellationToken = default) => Task.FromResult(AutomationOwner.Agent);
+    public Task<AutomationOwner> ResolveOnInboundAsync(Guid sessionId, long inboundSeq, CancellationToken cancellationToken = default, DateTimeOffset? eventOccurredAt = null) => Task.FromResult(AutomationOwner.Agent);
 }

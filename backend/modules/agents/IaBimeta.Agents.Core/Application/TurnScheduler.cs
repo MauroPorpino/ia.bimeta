@@ -1,4 +1,4 @@
-using IaBimeta.Agents.Domain;
+﻿using IaBimeta.Agents.Domain;
 using IaBimeta.SharedKernel;
 
 namespace IaBimeta.Agents.Application;
@@ -14,9 +14,11 @@ public sealed class TurnScheduler
     private readonly IRequestContextAccessor _context;
     private readonly AgentsOptions _options;
     private readonly TimeProvider _clock;
+    private readonly ITenantOperationGate? _gate;
 
-    public TurnScheduler(IAiTurnStore store, IRequestContextAccessor context, AgentsOptions options, TimeProvider clock)
+    public TurnScheduler(IAiTurnStore store, IRequestContextAccessor context, AgentsOptions options, TimeProvider clock, ITenantOperationGate? operationGate = null)
     {
+        _gate = operationGate;
         _store = store;
         _context = context;
         _options = options;
@@ -33,6 +35,17 @@ public sealed class TurnScheduler
         var tenant = _context.GetRequired().TenantId;
         var agora = _clock.GetUtcNow();
         var recebida = receivedAt > agora ? agora : receivedAt;
+
+        // Empresa suspensa: a mensagem do cliente já está preservada no Conversations; nenhum turno de IA nasce (e a reativação não a reprocessa: ela é anterior à reativação).
+        // P1-03: e o estímulo ANTERIOR à última reativação (a entrega atrasada de um evento da suspensão) também não abre turno: só uma mensagem NOVA, recebida depois da reativação, aciona a IA.
+        if (_gate is not null)
+        {
+            var estado = await _gate.GetAsync(tenant, cancellationToken);
+            if (!estado.IsOperational || (estado.OperationalSince is { } corte && receivedAt < corte))
+            {
+                return;
+            }
+        }
 
         var aberto = await _store.FindOpenBySessionAsync(sessionId, cancellationToken);
         if (aberto is null)

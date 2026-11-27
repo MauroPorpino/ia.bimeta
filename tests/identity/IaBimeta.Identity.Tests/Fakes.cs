@@ -1,4 +1,4 @@
-using IaBimeta.Audit.Contracts;
+﻿using IaBimeta.Audit.Contracts;
 using IaBimeta.Audit.Contracts.Commands;
 using IaBimeta.Identity.Application;
 using IaBimeta.Identity.Domain;
@@ -59,6 +59,13 @@ internal sealed class TenantsEmMemoria : ITenantDirectory
         var info = new TenantInfo(id, slug, $"Tenant {slug}", TenantStatus.Active);
         _tenants.Add(info);
         return info;
+    }
+
+    /// <summary>Marca a reativação da empresa no instante dado (a empresa continua ativa): o que nasceu antes dele deixou de valer.</summary>
+    public void Reativar(TenantId tenantId, DateTimeOffset reativadaEm)
+    {
+        var indice = _tenants.FindIndex(t => t.TenantId == tenantId);
+        _tenants[indice] = _tenants[indice] with { ReactivatedAt = reativadaEm };
     }
 
     public bool Contem(TenantId tenantId) => _tenants.Any(t => t.TenantId == tenantId);
@@ -242,6 +249,24 @@ internal sealed class IdentidadeEmMemoria : IUserRepository, IGrantRepository, I
         return Task.CompletedTask;
     }
 
+    public Task<bool> RevokeSessionAsync(TenantId tenantId, Guid sessionId, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var sessao = Sessoes.FirstOrDefault(s => s.TenantId == tenantId && s.Id == sessionId && s.RevokedAt is null);
+        return Task.FromResult(sessao is not null && sessao.Revoke(now));
+    }
+
+    public Task<int> RevokeAllSessionsAsync(TenantId tenantId, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var revogadas = 0;
+        foreach (var sessao in Sessoes.Where(s => s.TenantId == tenantId && s.IsActiveAt(now)))
+        {
+            sessao.Revoke(now);
+            revogadas++;
+        }
+
+        return Task.FromResult(revogadas);
+    }
+
     public Task<int> RevokeSessionsAsync(TenantId tenantId, Guid userId, Guid? exceptSessionId, DateTimeOffset now, CancellationToken cancellationToken)
     {
         var revogadas = 0;
@@ -356,6 +381,9 @@ internal sealed class AdminEmMemoria : IUserAdminStore
         _dados.Ajustes.Where(o => o.UserId == u.Id).ToList(),
         _dados.TokensDeRedefinicao.Any(t => t.UserId == u.Id && !_dados.TokensUsados.ContainsKey(t.Id) && !_dados.TokensRevogados.ContainsKey(t.Id) && t.ExpiresAt > now),
         Vinculos?.Invoke().Any(i => i.UserId == u.Id && i.IsActive) == true);
+
+    public Task<IReadOnlyDictionary<Guid, SeatSummary>> GetSeatSummariesAsync(DateTimeOffset now, CancellationToken cancellationToken) =>
+        Task.FromResult((IReadOnlyDictionary<Guid, SeatSummary>)new Dictionary<Guid, SeatSummary>());
 
     public Task<UserPolicy> GetPolicyAsync(TenantId tenantId, CancellationToken cancellationToken) =>
         Task.FromResult(_dados.Politicas.TryGetValue(tenantId, out var politica) ? politica : UserPolicy.Legacy);

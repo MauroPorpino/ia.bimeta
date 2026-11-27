@@ -48,7 +48,7 @@ internal sealed class SessionTenantContextSource : ITenantContextSource
         // A sessão embutida (ADR 0039) tem origem própria: é a marca que a lista fechada de rotas do host (EmbeddedRouteGuard) usa.
         return new RequestContext(
             principal.TenantId,
-            principal.Kind == Identity.Domain.SessionKind.Embedded ? EmbeddedOrigin : Origin,
+            principal.IsPlatform ? Platform.PlatformRouteGuardMiddleware.PlatformOrigin : principal.Kind == Identity.Domain.SessionKind.Embedded ? EmbeddedOrigin : Origin,
             new ActorPrincipal(principal.UserId, principal.SessionId, principal.Permissions, principal.Embedded));
     }
 }

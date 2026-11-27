@@ -480,7 +480,7 @@ internal sealed class EnsaioDeWhatsApp : IAsyncDisposable
     public Guid InstanciaId { get; private set; }
 
     /// <param name="configuracao">Configuração a mais para o Api e o Worker (por exemplo, a vazão e o endereço público do webhook).</param>
-    public static async Task<EnsaioDeWhatsApp> IniciarAsync(PostgresFixture banco, string prefixo, IReadOnlyDictionary<string, string?>? configuracao = null)
+    public static async Task<EnsaioDeWhatsApp> IniciarAsync(PostgresFixture banco, string prefixo, IReadOnlyDictionary<string, string?>? configuracao = null, Action<IServiceCollection>? servicosDoWorker = null)
     {
         var graph = await ServidorGraphLoopback.IniciarAsync();
         var adicionais = new Dictionary<string, string?>
@@ -499,7 +499,7 @@ internal sealed class EnsaioDeWhatsApp : IAsyncDisposable
             adicionais[chave] = valor;
         }
 
-        var ia = await EnsaioDeIa.IniciarAsync(banco, prefixo, adicionais: adicionais);
+        var ia = await EnsaioDeIa.IniciarAsync(banco, prefixo, adicionais: adicionais, servicosDoWorker: servicosDoWorker);
         var ensaio = new EnsaioDeWhatsApp(banco, ia, graph);
         await ensaio.CadastrarCanalAsync();
         return ensaio;

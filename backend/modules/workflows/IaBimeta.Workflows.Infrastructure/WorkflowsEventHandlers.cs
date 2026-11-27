@@ -1,4 +1,4 @@
-using IaBimeta.Conversations.Contracts;
+﻿using IaBimeta.Conversations.Contracts;
 using IaBimeta.Conversations.Contracts.Events;
 using IaBimeta.Messaging;
 using IaBimeta.SharedKernel;
@@ -18,11 +18,22 @@ internal static class FlowEventHandling
 {
     public const string Consumer = "workflows.sessions";
 
-    public static async Task<HandlerResult> RunAsync(InboxGate<WorkflowsDbContext> inbox, EventEnvelope envelope, Guid sessionId, Func<CancellationToken, Task> apply, CancellationToken cancellationToken)
+    public static async Task<HandlerResult> RunAsync(InboxGate<WorkflowsDbContext> inbox, EventEnvelope envelope, Guid sessionId, Func<CancellationToken, Task> apply, CancellationToken cancellationToken, ITenantOperationGate? gate = null)
     {
         if (sessionId == Guid.Empty)
         {
             return HandlerResult.Dead("invalid-session");
+        }
+
+        // Empresa suspensa (Etapa 02): a mensagem do cliente continua preservada no Conversations, mas nenhum fluxo é escolhido nem acordado. O evento é consumido: não há reprocessamento depois da reativação.
+        // Entrega atrasada (P1-03): o estímulo ANTERIOR à última reativação nunca acorda nem cria nada depois dela, mesmo que o relay o entregue tarde.
+        if (gate is not null)
+        {
+            var estado = await gate.GetAsync(envelope.TenantId, cancellationToken);
+            if (!estado.IsOperational || (estado.OperationalSince is { } reativadaEm && envelope.OccurredAt < reativadaEm))
+            {
+                return HandlerResult.Success;
+            }
         }
 
         try
@@ -57,9 +68,11 @@ internal sealed class InboundForFlowHandler : EventHandlerBase<InboundMessageReg
     private readonly IAutomationRouter _router;
     private readonly IFlowRuntimeStore _store;
     private readonly TimeProvider _clock;
+    private readonly ITenantOperationGate? _gate;
 
-    public InboundForFlowHandler(InboxGate<WorkflowsDbContext> inbox, IAutomationRouter router, IFlowRuntimeStore store, TimeProvider clock)
+    public InboundForFlowHandler(InboxGate<WorkflowsDbContext> inbox, IAutomationRouter router, IFlowRuntimeStore store, TimeProvider clock, ITenantOperationGate? gate = null)
     {
+        _gate = gate;
         _inbox = inbox;
         _router = router;
         _store = store;
@@ -83,7 +96,7 @@ internal sealed class InboundForFlowHandler : EventHandlerBase<InboundMessageReg
                     return;
                 }
 
-                if (await _router.ResolveOnInboundAsync(payload.SessionId, payload.InboundSeq, token) != AutomationOwner.Flow)
+                if (await _router.ResolveOnInboundAsync(payload.SessionId, payload.InboundSeq, token, envelope.OccurredAt) != AutomationOwner.Flow)
                 {
                     return;
                 }
@@ -95,7 +108,8 @@ internal sealed class InboundForFlowHandler : EventHandlerBase<InboundMessageReg
                     await _store.SaveAsync(token);
                 }
             },
-            cancellationToken);
+            cancellationToken,
+            _gate);
 }
 
 /// <summary>O conteúdo de uma mídia ficou pronto: a instância é reavaliada já (a mensagem pendente deixa de ser só "tipo de mídia").</summary>
@@ -104,9 +118,11 @@ internal sealed class ContentReadyForFlowHandler : EventHandlerBase<MessageConte
     private readonly InboxGate<WorkflowsDbContext> _inbox;
     private readonly IFlowRuntimeStore _store;
     private readonly TimeProvider _clock;
+    private readonly ITenantOperationGate? _gate;
 
-    public ContentReadyForFlowHandler(InboxGate<WorkflowsDbContext> inbox, IFlowRuntimeStore store, TimeProvider clock)
+    public ContentReadyForFlowHandler(InboxGate<WorkflowsDbContext> inbox, IFlowRuntimeStore store, TimeProvider clock, ITenantOperationGate? gate = null)
     {
+        _gate = gate;
         _inbox = inbox;
         _store = store;
         _clock = clock;
@@ -130,7 +146,8 @@ internal sealed class ContentReadyForFlowHandler : EventHandlerBase<MessageConte
                     await _store.SaveAsync(token);
                 }
             },
-            cancellationToken);
+            cancellationToken,
+            _gate);
 }
 
 /// <summary>

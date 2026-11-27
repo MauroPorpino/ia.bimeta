@@ -1,4 +1,4 @@
-using IaBimeta.Channels.Contracts;
+﻿using IaBimeta.Channels.Contracts;
 using IaBimeta.SharedKernel;
 
 namespace IaBimeta.Channels.Domain;
@@ -85,6 +85,22 @@ public sealed class OutboundMessage : ITenantOwned
     {
         State = OutboundState.Dispatching;
         Attempts++;
+        UpdatedAt = now;
+    }
+
+    /// <summary>
+    /// A chamada que ia começar foi RECUSADA antes de sair (a verificação final de admissão, P1-04 da 2.ª revisão): desfaz a contagem da tentativa, que não aconteceu. Sem tentativas anteriores volta à intenção (zero tentativas,
+    /// que não "pode ter chegado ao provedor"); com tentativas anteriores provadamente recusadas volta a <see cref="OutboundState.Retry"/>. Só vale para um despacho em <see cref="OutboundState.Dispatching"/> com tentativa aberta.
+    /// </summary>
+    public void RevertAttempt(DateTimeOffset now)
+    {
+        if (State != OutboundState.Dispatching || Attempts == 0)
+        {
+            return;
+        }
+
+        Attempts--;
+        State = Attempts == 0 ? OutboundState.Dispatching : OutboundState.Retry;
         UpdatedAt = now;
     }
 

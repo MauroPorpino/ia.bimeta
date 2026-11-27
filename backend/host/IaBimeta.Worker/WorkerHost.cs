@@ -58,7 +58,8 @@ public sealed class WorkerOptions
 /// </summary>
 public static class WorkerHost
 {
-    public static IHost Build(string[] args, Action<HostApplicationBuilder>? configure = null)
+    /// <param name="overrideServices">Registros aplicados DEPOIS de todos os do host e ANTES de construir (vencem os padrões dos módulos), como no <c>ApiHost</c>: só os testes de integração os usam (por exemplo, um decorador que segura o Sender num ponto controlado).</param>
+    public static IHost Build(string[] args, Action<HostApplicationBuilder>? configure = null, Action<IServiceCollection>? overrideServices = null)
     {
         // A raiz de conteúdo é a pasta do binário, não a pasta de onde o processo foi iniciado: o appsettings.json do Worker (catálogo de modelos e limites padrão de IA) é lido de lá, qualquer que seja o
         // diretório corrente. Sem isto, um Worker iniciado de outra pasta subia SEM o catálogo e sem os limites, e toda chamada de IA terminava em "não configurada".
@@ -199,6 +200,7 @@ public static class WorkerHost
             builder.Services.AddInboxRetention<WorkflowsDbContext>("workflows");
         }
 
+        overrideServices?.Invoke(builder.Services);
         return builder.Build();
     }
 

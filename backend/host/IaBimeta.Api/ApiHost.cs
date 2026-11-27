@@ -6,6 +6,7 @@ using IaBimeta.Agents.Presentation;
 using IaBimeta.Agents.Infrastructure;
 using IaBimeta.AiGateway.Application;
 using IaBimeta.AiGateway.Infrastructure;
+using IaBimeta.Api.Platform;
 using IaBimeta.Api.Channels;
 using IaBimeta.Api.ContactCenter;
 using IaBimeta.Api.Development;
@@ -179,6 +180,7 @@ public static class ApiHost
         // desenvolvimento só é registrada no ambiente Development e com habilitação explícita. Em produção só existe
         // a sessão: sem token válido, toda operação que exige tenant é rejeitada.
         builder.Services.AddScoped<ITenantContextSource, SessionTenantContextSource>();
+        builder.Services.AddScoped<Platform.PlatformCompanyService>();
         if (desenvolvimento.HeaderEnabled)
         {
             builder.Services.AddScoped<ITenantContextSource, DevelopmentTenantHeaderSource>();
@@ -270,6 +272,11 @@ public static class ApiHost
         // O ingresso PÚBLICO (túnel HTTPS) só alcança o webhook do provedor: nada de login, simulador nem cabeçalho de desenvolvimento pela internet. Primeiro da fila, antes de qualquer outra coisa.
         app.UseMiddleware<PublicIngressGuard>(ingressoPublico);
 
+        // A administração da plataforma só existe onde a configuração a liga (padrão: só Development; ADR 0043, seção 7). Desligada: 404 em tudo sob /platform, antes de autenticar. Vem DEPOIS do guarda do
+        // ingresso público (que continua primeiro) e não o afrouxa.
+        var plataformaOpcoes = PlatformOptions.From(builder.Configuration, builder.Environment);
+        app.UseMiddleware<Platform.PlatformAvailabilityMiddleware>(plataformaOpcoes);
+
         // Saturação do PostgreSQL em QUALQUER ponto da requisição (inclusive a autenticação da sessão, anterior aos endpoints) vira 503 com Retry-After, só quando o banco comprovadamente não executou o comando.
         app.UseMiddleware<TransientDatabaseMiddleware>();
         app.UseRateLimiter();
@@ -278,8 +285,15 @@ public static class ApiHost
         // A sessão embutida (Embedded, ADR 0039) só alcança a lista fechada de rotas; o resto responde 403, existindo ou não.
         app.UseMiddleware<Embedded.EmbeddedRouteGuard>();
 
+        // A administração da plataforma BImeta (Etapa 02, ADR 0043): a sessão da plataforma só alcança /platform/*, e a de uma empresa nunca alcança /platform/*.
+        app.UseMiddleware<Platform.PlatformRouteGuardMiddleware>(plataformaOpcoes);
+
         app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
         app.MapIdentityEndpoints();
+        if (plataformaOpcoes.Enabled)
+        {
+            app.MapPlatformEndpoints();
+        }
         app.MapTenancyEndpoints();
         app.MapAuditEndpoints();
         app.MapConversationsEndpoints();

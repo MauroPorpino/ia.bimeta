@@ -1,3 +1,4 @@
+using IaBimeta.Tenancy.Contracts;
 using IaBimeta.Audit.Contracts;
 using IaBimeta.SharedKernel;
 using IaBimeta.Tenancy.Application;
@@ -25,6 +26,29 @@ public class TenantSettingsTests
             Task.FromResult(Tenants.FirstOrDefault(t => t.Id == tenantId));
 
         public Task SaveChangesAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task<(IReadOnlyList<Tenant> Items, int Total)> ListCommercialAsync(string? search, TenantStatus? status, int skip, int take, CancellationToken cancellationToken)
+        {
+            var itens = Tenants.Where(t => t.Kind == TenantKind.Commercial && (status is null || t.Status == status)).ToList();
+            return Task.FromResult(((IReadOnlyList<Tenant>)itens.Skip(skip).Take(take).ToList(), itens.Count));
+        }
+
+        public Task<IReadOnlyList<Tenant>> ListAllCommercialAsync(CancellationToken cancellationToken) =>
+            Task.FromResult((IReadOnlyList<Tenant>)Tenants.Where(t => t.Kind == TenantKind.Commercial).ToList());
+
+        public Task<Tenant?> FindPlatformAsync(CancellationToken cancellationToken) =>
+            Task.FromResult(Tenants.FirstOrDefault(t => t.Kind == TenantKind.Platform));
+
+        public List<TenantStatusChange> StatusChanges { get; } = new();
+
+        public Task SaveStatusChangeAsync(TenantStatusChange change, CancellationToken cancellationToken)
+        {
+            StatusChanges.Add(change);
+            return Task.CompletedTask;
+        }
+
+        public Task<IReadOnlyList<TenantStatusChange>> ListStatusChangesAsync(TenantId tenantId, int take, CancellationToken cancellationToken) =>
+            Task.FromResult((IReadOnlyList<TenantStatusChange>)StatusChanges.Where(c => c.TenantId == tenantId).Take(take).ToList());
     }
 
     private sealed class Cenario

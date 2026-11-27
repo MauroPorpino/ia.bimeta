@@ -60,6 +60,11 @@ internal sealed class AgentsTurnExecutor
             {
                 await using var escopo = _scopes.CreateAsyncScope();
                 _initializer.Initialize(escopo, new TenantId(tenant), "agents-executor");
+                if (!(await escopo.ServiceProvider.GetRequiredService<ITenantOperationGate>().GetAsync(new TenantId(tenant), cancellationToken)).IsOperational)
+                {
+                    continue; // empresa suspensa: nenhum turno de IA é reivindicado (Etapa 02)
+                }
+
                 var reivindicados = await escopo.ServiceProvider.GetRequiredService<IAiTurnStore>().ClaimDueAsync(_owner, restante, cancellationToken);
                 trabalho.AddRange(reivindicados.Select(t => (tenant, t.Id)));
             }
@@ -141,7 +146,13 @@ internal sealed class AgentsReconciler
             {
                 await using var escopo = _scopes.CreateAsyncScope();
                 _initializer.Initialize(escopo, new TenantId(tenant), "agents-reconciler");
-                criados += await ReconcileTenantAsync(escopo.ServiceProvider, cancellationToken);
+                var estado = await escopo.ServiceProvider.GetRequiredService<ITenantOperationGate>().GetAsync(new TenantId(tenant), cancellationToken);
+                if (!estado.IsOperational)
+                {
+                    continue; // empresa suspensa: o reconciliador não cria turnos
+                }
+
+                criados += await ReconcileTenantAsync(escopo.ServiceProvider, estado.OperationalSince, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -157,7 +168,7 @@ internal sealed class AgentsReconciler
         return criados;
     }
 
-    private async Task<int> ReconcileTenantAsync(IServiceProvider servicos, CancellationToken cancellationToken)
+    private async Task<int> ReconcileTenantAsync(IServiceProvider servicos, DateTimeOffset? operationalSince, CancellationToken cancellationToken)
     {
         var limite = _clock.GetUtcNow() - _options.ReconcileMinimumAge;
         var sessoes = await servicos.GetRequiredService<IConversationQueries>()
@@ -165,7 +176,7 @@ internal sealed class AgentsReconciler
         var agendador = servicos.GetRequiredService<TurnScheduler>();
 
         var criados = 0;
-        foreach (var sessao in sessoes.Items.Where(s => s.HandlingMode == HandlingMode.AiAutonomous && s.LastInboundSeq > s.AnsweredThroughSeq && s.LastMessageAt <= limite))
+        foreach (var sessao in sessoes.Items.Where(s => s.HandlingMode == HandlingMode.AiAutonomous && s.LastInboundSeq > s.AnsweredThroughSeq && s.LastMessageAt <= limite && (operationalSince is not { } desde || s.LastMessageAt >= desde))) // mensagem anterior à reativação (suspensão ou antes) não é reprocessada
         {
             try
             {

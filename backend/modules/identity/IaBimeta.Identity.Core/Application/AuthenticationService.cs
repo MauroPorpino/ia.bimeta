@@ -1,4 +1,4 @@
-using IaBimeta.Audit.Contracts;
+﻿using IaBimeta.Audit.Contracts;
 using IaBimeta.Audit.Contracts.Commands;
 using IaBimeta.Identity.Domain;
 using IaBimeta.SharedKernel;
@@ -24,6 +24,7 @@ public sealed class AuthenticationService
     private readonly TimeProvider _clock;
     private readonly IAuditWriter _audit;
     private readonly IRequestContextAccessor _context;
+    private readonly ITenantOperationGate? _gate;
 
     public AuthenticationService(
         ITenantDirectory tenants,
@@ -33,8 +34,10 @@ public sealed class AuthenticationService
         IdentityOptions options,
         TimeProvider clock,
         IAuditWriter audit,
-        IRequestContextAccessor context)
+        IRequestContextAccessor context,
+        ITenantOperationGate? operationGate = null)
     {
+        _gate = operationGate;
         _tenants = tenants;
         _store = store;
         _sessions = sessions;
@@ -49,9 +52,23 @@ public sealed class AuthenticationService
 
     /// <exception cref="InvalidCredentialsException">Tenant, usuário ou senha não conferem (a mesma resposta para todos os casos).</exception>
     /// <exception cref="LoginThrottledException">Falhas demais para este e-mail: o login está bloqueado por um tempo.</exception>
-    public async Task<LoginResult> LoginAsync(string? tenantSlug, string? email, string? password, CancellationToken cancellationToken = default)
+    public Task<LoginResult> LoginAsync(string? tenantSlug, string? email, string? password, CancellationToken cancellationToken = default) =>
+        LoginCoreAsync(tenantSlug, platform: false, email, password, cancellationToken);
+
+    /// <summary>Login da administração da plataforma BImeta (ADR 0043): o tenant é SEMPRE o técnico da plataforma; sessão e permissões separadas das de qualquer empresa.</summary>
+    public Task<LoginResult> PlatformLoginAsync(string? email, string? password, CancellationToken cancellationToken = default) =>
+        LoginCoreAsync(PlatformTenant.Slug, platform: true, email, password, cancellationToken);
+
+    private async Task<LoginResult> LoginCoreAsync(string? tenantSlug, bool platform, string? email, string? password, CancellationToken cancellationToken)
     {
         var tenant = await _tenants.FindBySlugAsync(tenantSlug ?? string.Empty, cancellationToken);
+
+        // O login de empresa nunca autentica no tenant da plataforma, e o da plataforma nunca em uma empresa: a mesma recusa de tenant desconhecido.
+        if (tenant is not null && (tenant.Kind == TenantKind.Platform) != platform)
+        {
+            tenant = null;
+        }
+
         var tenantAtivo = tenant is { Status: TenantStatus.Active };
         var emailNormalizado = User.NormalizeEmail(email);
 
@@ -111,11 +128,27 @@ public sealed class AuthenticationService
             throw new InvalidCredentialsException();
         }
 
+        // P1-05: a autenticação começou em "agora" (instante gravado na sessão). Antes de gravar, reconfere o estado PERSISTIDO da empresa (a leitura do início pode estar velha: o hash da senha leva tempo): suspensa ou
+        // reativada depois do início da autenticação, a mesma recusa de credencial.
+        if (!await TenantStillValidAsync(tenant!.TenantId, agora, cancellationToken))
+        {
+            throw new InvalidCredentialsException();
+        }
+
         var (token, hash) = SessionTokens.Generate();
-        var sessao = Session.Create(tenant!.TenantId, usuario.Id, hash, agora, _options.SessionLifetime);
+        var sessao = Session.Create(tenant.TenantId, usuario.Id, hash, agora, _options.SessionLifetime);
         if (!await _store.AddSessionAsync(sessao, cancellationToken))
         {
             // O usuário foi desativado entre a verificação da senha e a gravação da sessão: a mesma recusa de credencial.
+            throw new InvalidCredentialsException();
+        }
+
+        // Depois da gravação, a conferência final: uma suspensão (com as revogações em lote) e a reativação podem ter acontecido entre a primeira conferência e a gravação, e a sessão nova não estaria entre as revogadas.
+        // Ela é revogada na hora e o login recusado (a validação a cada requisição também a recusa: sessão iniciada antes da reativação nunca vale).
+        if (!await TenantStillValidAsync(tenant.TenantId, agora, cancellationToken))
+        {
+            await _store.RevokeSessionAsync(tenant.TenantId, sessao.Id, _clock.GetUtcNow(), cancellationToken);
+
             throw new InvalidCredentialsException();
         }
 
@@ -137,6 +170,18 @@ public sealed class AuthenticationService
             cancellationToken);
 
         return new LoginResult(token, sessao.ExpiresAt);
+    }
+
+    /// <summary>A empresa continua operacional e NÃO foi reativada depois do início desta autenticação (estado persistido, sem rastreamento). Sem a porta registrada (host sem o Tenancy) vale o estado lido no início.</summary>
+    private async Task<bool> TenantStillValidAsync(TenantId tenantId, DateTimeOffset authenticationStartedAt, CancellationToken cancellationToken)
+    {
+        if (_gate is null)
+        {
+            return true;
+        }
+
+        var estado = await _gate.GetAsync(tenantId, cancellationToken);
+        return estado.IsOperational && (estado.OperationalSince is not { } reativadaEm || reativadaEm <= authenticationStartedAt);
     }
 
     /// <summary>Revoga a sessão do contexto atual. Depois disso o token é recusado.</summary>

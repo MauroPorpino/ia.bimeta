@@ -8,6 +8,7 @@ public static class AiFailureCodes
 {
     // Seleção (NotConfigured)
     public const string NotConfigured = "not-configured";
+    public const string TenantSuspended = "tenant-suspended";
     public const string ConfigurationTenantMismatch = "configuration-tenant-mismatch";
     public const string LimitsInvalid = "limits-invalid";
     public const string CredentialSourceNotSupported = "credential-source-not-supported";

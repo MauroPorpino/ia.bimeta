@@ -155,7 +155,7 @@ internal sealed class EnsaioDeIa : IAsyncDisposable
     public CapturaDeLogs Logs { get; }
 
     /// <summary>Sobe o ensaio. Sem <paramref name="modelo"/>, o tenant fica sem modelo (a preparação não inventa um).</summary>
-    public static async Task<EnsaioDeIa> IniciarAsync(PostgresFixture banco, string prefixo, string? modelo = ModeloDoEnsaio, bool comChaveMestra = true, IReadOnlyDictionary<string, string?>? adicionais = null)
+    public static async Task<EnsaioDeIa> IniciarAsync(PostgresFixture banco, string prefixo, string? modelo = ModeloDoEnsaio, bool comChaveMestra = true, IReadOnlyDictionary<string, string?>? adicionais = null, Action<IServiceCollection>? servicosDoWorker = null)
     {
         await LimparPendenciasAsync(banco);
 
@@ -240,7 +240,8 @@ internal sealed class EnsaioDeIa : IAsyncDisposable
             {
                 builder.Configuration.AddInMemoryCollection(configuracaoDoWorker);
                 builder.Logging.AddProvider(logs);
-            });
+            },
+            servicosDoWorker);
 
         var worker = ConstruirWorker();
         await worker.StartAsync();

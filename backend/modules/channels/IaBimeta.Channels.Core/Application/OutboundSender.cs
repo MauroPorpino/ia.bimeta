@@ -1,4 +1,4 @@
-using IaBimeta.Audit.Contracts;
+﻿using IaBimeta.Audit.Contracts;
 using IaBimeta.Audit.Contracts.Commands;
 using IaBimeta.Channels.Contracts;
 using IaBimeta.Channels.Contracts.Providers;
@@ -48,6 +48,7 @@ public sealed class OutboundMessageRequestedHandler : EventHandlerBase<OutboundM
     public const int MaxSendAttempts = 3;
 
     private readonly IOutboundDispatchQueries _dispatch;
+    private readonly ITenantOperationGate? _gate;
     private readonly IOutboundAttachmentReader _files;
     private readonly IConversationIngestion _ingestion;
     private readonly IChannelRepository _repository;
@@ -70,8 +71,10 @@ public sealed class OutboundMessageRequestedHandler : EventHandlerBase<OutboundM
         IAccountSendStateStore sendState,
         ChannelSendingOptions sending,
         IAuditWriter audit,
-        TimeProvider clock)
+        TimeProvider clock,
+        ITenantOperationGate? operationGate = null)
     {
+        _gate = operationGate;
         _audit = audit;
         _dispatch = dispatch;
         _files = files;
@@ -106,6 +109,17 @@ public sealed class OutboundMessageRequestedHandler : EventHandlerBase<OutboundM
 
     private async Task<HandlerResult> SendAsync(EventEnvelope envelope, OutboundMessageRequestedV1 payload, CancellationToken cancellationToken)
     {
+        // Suspensão da empresa (Etapa 02): nenhuma mensagem sai e nenhuma intenção é gravada. A entrega é ADIADA sem gastar tentativa (Defer, ADR 0020); a mensagem já aceita no Conversations continua guardada.
+        TenantOperationState? estadoDaEmpresa = null;
+        if (_gate is not null)
+        {
+            estadoDaEmpresa = await _gate.GetAsync(envelope.TenantId, cancellationToken);
+            if (!estadoDaEmpresa.IsOperational)
+            {
+                return HandlerResult.Defer(TimeSpan.FromMinutes(2), "tenant-suspended");
+            }
+        }
+
         var agora = _clock.GetUtcNow();
         OutboundMessage mensagem;
 
@@ -135,6 +149,12 @@ public sealed class OutboundMessageRequestedHandler : EventHandlerBase<OutboundM
         else
         {
             mensagem = existente; // Retry: a recusa anterior provou que nada saiu.
+        }
+
+        // Pedida ANTES da última reativação (durante a suspensão ou antes): não é liberada em bloco. Falha visível e definitiva; o atendente a reenvia por ação autorizada (RequestResend), sem nenhuma chamada ao provedor.
+        if (estadoDaEmpresa?.OperationalSince is { } desde && envelope.OccurredAt < desde)
+        {
+            return await FailAsync(mensagem, "tenant-suspended", cancellationToken);
         }
 
         var visao = await _dispatch.GetAsync(payload.MessageId, cancellationToken);
@@ -234,10 +254,54 @@ public sealed class OutboundMessageRequestedHandler : EventHandlerBase<OutboundM
             await Task.Delay(ficha.Wait, _clock, cancellationToken);
         }
 
+        // Verificação FINAL da empresa (P1-04): as esperas acima (vazão, SND-2) podem ter atravessado uma suspensão. Reconsulta o estado PERSISTIDO e confere de novo o corte da reativação, ANTES de registrar a tentativa
+        // e de iniciar a chamada externa. Suspensa: adia sem gastar tentativa (a ficha de vazão já tomada é só um token de balde, sem efeito externo). Reativada depois do pedido: falha visível e definitiva, nunca envio automático.
+        // Janela residual (declarada no ADR 0043): entre esta leitura e o início da chamada ficam apenas as duas gravações curtas abaixo; uma suspensão que caia exatamente aí não cancela a chamada, igual a uma chamada já iniciada.
+        // Fechá-la por inteiro exigiria segurar uma trava durante a chamada externa, o que não se faz (transação aberta em chamada de rede).
+        if (_gate is not null)
+        {
+            var estadoFinal = await _gate.GetAsync(envelope.TenantId, cancellationToken);
+            if (!estadoFinal.IsOperational)
+            {
+                return HandlerResult.Defer(TimeSpan.FromMinutes(2), "tenant-suspended");
+            }
+
+            if (estadoFinal.OperationalSince is { } reativadaEm && envelope.OccurredAt < reativadaEm)
+            {
+                return await FailAsync(mensagem, "tenant-suspended", cancellationToken);
+            }
+        }
+
         // O Conversations passa a mostrar "Enviando" (e só a partir daí um resultado ambíguo pode virar SendUnknown); o despacho registra a tentativa ANTES da chamada.
         await _ingestion.RecordDeliveryStatusAsync(new RecordDeliveryStatusCommand(payload.MessageId, DeliveryState.Sending, null), cancellationToken);
         mensagem.BeginAttempt(_clock.GetUtcNow());
         await _store.SaveAsync(cancellationToken);
+
+        // ADMISSÃO (decisão ratificada, ADR 0043): a verificação FINAL, depois de TODAS as gravações e imediatamente antes de invocar o adaptador, é o ponto em que a operação é admitida. Reconsulta o estado persistido (falha
+        // fechada) e o corte da reativação. Recusada: a tentativa que não aconteceu NÃO é contabilizada (desfeita e gravada), nada é marcado como enviado e a mensagem é adiada (suspensa) ou falha de forma visível (anterior à
+        // reativação). Entre esta verificação e a invocação do adaptador não há espera de banco, de vazão nem preparação (os dados do pedido já foram lidos acima). Admitida antes da suspensão, a operação pode concluir.
+        // Limite declarado: a intercalação entre esta leitura e a chamada imediata ao adaptador NÃO é eliminada (uma suspensão exatamente aí não cancela uma chamada já admitida).
+        if (_gate is not null)
+        {
+            TenantOperationState admissao;
+            try
+            {
+                admissao = await _gate.GetAsync(envelope.TenantId, cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                admissao = new TenantOperationState(false, null); // falha fechada: sem leitura do estado não há admissão (e a tentativa que não aconteceu é desfeita abaixo)
+            }
+
+            var suspensa = !admissao.IsOperational;
+            var anteriorAReativacao = admissao.OperationalSince is { } reativadaEm && envelope.OccurredAt < reativadaEm;
+            if (suspensa || anteriorAReativacao)
+            {
+                mensagem.RevertAttempt(_clock.GetUtcNow());
+                await _store.SaveAsync(cancellationToken);
+                return suspensa ? HandlerResult.Defer(TimeSpan.FromMinutes(2), "tenant-suspended") : await FailAsync(mensagem, "tenant-suspended", cancellationToken);
+            }
+        }
 
         // (2) A chamada ao provedor, sem transação aberta. O identificador da nossa mensagem vai como dado opaco: o provedor o devolve nos status.
         var resultado = arquivo is not null

@@ -1,4 +1,4 @@
-using IaBimeta.Agents.Domain;
+﻿using IaBimeta.Agents.Domain;
 using IaBimeta.Api.Operations;
 using IaBimeta.Capabilities.Application;
 using IaBimeta.Capabilities.Contracts;
@@ -768,5 +768,268 @@ public sealed class FluxoPontaAPontaTests(PostgresFixture banco)
         Assert.Equal(chamadasNormais, banco.Erp.De(host).Count); // nenhuma chamada nova: o resultado ambíguo nunca é reenviado
         Assert.Contains(await EfeitosAsync(a), e => e.Kind == EffectKind.CallCapability && e.State == EffectState.Unknown);
         Assert.Contains("Não consegui consultar o preço agora.", (await BotAsync(a, r.SessionId)).Select(m => m.Text));
+    }
+
+    // ------------------------------------------------------------ suspensão da empresa (Etapa 02, ADR 0043; P1-03 da revisão do Codex)
+
+    private static Task MudarSituacaoAsync(CenarioDeAgentes a, bool suspender, string motivo) =>
+        a.C.ComoAsync(a.C.ContextoDeSistema, async sp =>
+        {
+            var repo = sp.GetRequiredService<IaBimeta.Tenancy.Application.ITenantRepository>();
+            var tenant = (await repo.FindByIdAsync(a.Tenant.TenantId, default))!;
+            var agora = a.Relogio.GetUtcNow();
+            await repo.SaveStatusChangeAsync(suspender ? tenant.SuspendWithReason(motivo, null, agora) : tenant.ReactivateWithReason(motivo, null, agora), default);
+            return 0;
+        });
+
+    private static Task SuspenderAsync(CenarioDeAgentes a) => MudarSituacaoAsync(a, true, "suspensao de teste");
+
+    private static Task ReativarAsync(CenarioDeAgentes a) => MudarSituacaoAsync(a, false, "reativacao de teste");
+
+    private static async Task AssertNadaAutomaticoAsync(CenarioDeAgentes a, Guid sessao)
+    {
+        Assert.Empty(await InstanciasAsync(a));
+        Assert.Null(await DecisaoAsync(a, sessao));
+        Assert.Empty(await EfeitosAsync(a));
+        Assert.Empty(await BotAsync(a, sessao));
+        Assert.Empty(await a.TurnosAsync(sessao));
+        Assert.Empty(a.PedidosAoModelo);
+    }
+
+    [Fact]
+    public async Task Mensagem_recebida_na_suspensao_nao_cria_instancia_e_a_reativacao_sem_nova_mensagem_nao_executa_nada_mas_a_mensagem_fica_preservada()
+    {
+        var a = await CenarioAsync("fluxo-susp-a", Menu());
+        await SuspenderAsync(a);
+        var r = await a.EntrarAsync("5511999990301", "oi");
+        await ProcessarAsync(a); // o relay entrega o evento DURANTE a suspensão (Agents e Workflows o recebem)
+
+        await AssertNadaAutomaticoAsync(a, r.SessionId);
+
+        // Reativada, sem nenhuma mensagem nova: nada acontece sozinho, nem com ciclos repetidos e com o tempo passando.
+        a.Avancar(TimeSpan.FromMinutes(10));
+        await ReativarAsync(a);
+        a.Avancar(TimeSpan.FromMinutes(1));
+        await ProcessarAsync(a, 4);
+        a.Avancar(TimeSpan.FromSeconds(30));
+        await a.RelayAsync();
+        await a.ExecutarAsync();
+
+        await AssertNadaAutomaticoAsync(a, r.SessionId);
+        Assert.Contains((await a.C.HistoricoAsync(r.SessionId))!.Items, m => m.Text == "oi"); // a mensagem recebida na suspensão continua preservada
+    }
+
+    [Fact]
+    public async Task Evento_antigo_entregue_com_atraso_depois_da_reativacao_nao_cria_instancia_nem_aciona_a_IA()
+    {
+        var a = await CenarioAsync("fluxo-susp-b", Menu());
+        await SuspenderAsync(a);
+        var r = await a.EntrarAsync("5511999990302", "oi"); // o evento fica no outbox: o relay NÃO o entregou durante a suspensão
+        a.Avancar(TimeSpan.FromMinutes(5));
+        await ReativarAsync(a);
+        a.Avancar(TimeSpan.FromMinutes(1));
+
+        await ProcessarAsync(a, 4); // entrega ATRASADA do evento anterior à reativação
+        a.Avancar(TimeSpan.FromSeconds(30));
+        await a.RelayAsync();
+        await a.ExecutarAsync();
+
+        await AssertNadaAutomaticoAsync(a, r.SessionId);
+    }
+
+    [Fact]
+    public async Task Instancia_criada_antes_da_suspensao_e_ainda_pendente_na_reativacao_e_cancelada_sem_enviar_nada_e_a_conversa_volta_ao_agente()
+    {
+        var a = await CenarioAsync("fluxo-susp-c", Menu());
+        var r = await a.EntrarAsync("5511999990303", "oi");
+        await a.RelayAsync(); // o roteador cria a instância; o executor AINDA não rodou (o menu está por enviar)
+        var criada = Assert.Single(await InstanciasAsync(a));
+        Assert.Equal(FlowStatus.Created, criada.Status);
+
+        await SuspenderAsync(a);
+        await ProcessarAsync(a, 3); // suspensa: o executor não a reivindica
+        Assert.Empty(await BotAsync(a, r.SessionId));
+        Assert.Equal(FlowStatus.Created, Assert.Single(await InstanciasAsync(a)).Status);
+
+        a.Avancar(TimeSpan.FromMinutes(5));
+        await ReativarAsync(a);
+        a.Avancar(TimeSpan.FromMinutes(1));
+        await ProcessarAsync(a, 4);
+
+        // O gatilho antigo não executa sozinho: a instância é cancelada com segurança (dados preservados), nenhuma mensagem de fluxo sai, e a conversa volta ao agente.
+        Assert.Empty(await BotAsync(a, r.SessionId));
+        var depois = Assert.Single(await InstanciasAsync(a));
+        Assert.Equal((FlowStatus.Cancelled, "tenant-suspended"), (depois.Status, depois.FailureCode));
+        Assert.Equal(AutomationOwner.Agent, (await DecisaoAsync(a, r.SessionId))!.Owner);
+        Assert.All(await EfeitosAsync(a), e => Assert.NotEqual(EffectState.Pending, e.State));
+        Assert.Empty(await a.TurnosAsync(r.SessionId));
+
+        // Uma mensagem NOVA depois da reativação é atendida normalmente, com o histórico anterior como contexto (a IA responde uma vez).
+        await a.EntrarAsync("5511999990303", "Qual o horario de atendimento?");
+        await ProcessarAsync(a);
+        a.Avancar(TimeSpan.FromSeconds(5));
+        await a.RelayAsync();
+        await a.ExecutarAsync();
+        Assert.Single(await a.RespostasDaIAAsync(r.SessionId));
+    }
+
+    [Fact]
+    public async Task Suspensao_entre_a_reivindicacao_e_o_inicio_da_execucao_nao_roda_a_instancia_e_a_reativacao_a_trata_como_gatilho_antigo()
+    {
+        var a = await CenarioAsync("fluxo-susp-d", Menu());
+        var r = await a.EntrarAsync("5511999990304", "oi");
+        await a.RelayAsync();
+        var instancia = Assert.Single(await InstanciasAsync(a));
+
+        // A instância é REIVINDICADA (lease) pelo executor; antes de iniciar a execução, a empresa é suspensa.
+        var reivindicadas = await a.C.ComoAsync(a.C.ContextoDeSistema, sp => sp.GetRequiredService<IFlowRuntimeStore>().ClaimDueAsync("teste-reivindicacao", TimeSpan.FromMinutes(1), a.Relogio.GetUtcNow(), 5, default));
+        Assert.Equal(new[] { instancia.Id }, reivindicadas);
+        await SuspenderAsync(a);
+
+        var resultado = await a.C.ComoAsync(a.C.ContextoDeSistema, sp => sp.GetRequiredService<FlowRuntime>().RunAsync(instancia.Id));
+
+        Assert.Equal(FlowRunOutcome.Waiting, resultado);
+        Assert.Empty(await EfeitosAsync(a)); // nada foi preparado nem realizado
+        Assert.Empty(await BotAsync(a, r.SessionId));
+        var devolvida = Assert.Single(await InstanciasAsync(a));
+        Assert.Equal(FlowStatus.Created, devolvida.Status);
+        Assert.Null(devolvida.LeaseOwner); // o lease foi solto
+        Assert.Equal(instancia.NextRunAt, devolvida.NextRunAt); // o gatilho antigo continua "devido desde antes"
+
+        // Reativada, a instância NÃO roda sozinha.
+        a.Avancar(TimeSpan.FromMinutes(3));
+        await ReativarAsync(a);
+        a.Avancar(TimeSpan.FromMinutes(1));
+        await ProcessarAsync(a, 4);
+        Assert.Empty(await BotAsync(a, r.SessionId));
+        Assert.Equal(FlowStatus.Cancelled, Assert.Single(await InstanciasAsync(a)).Status);
+    }
+
+    [Fact]
+    public async Task Nova_sessao_depois_da_reativacao_usa_o_fluxo_normalmente()
+    {
+        var a = await CenarioAsync("fluxo-susp-e", Menu());
+        await SuspenderAsync(a);
+        var antiga = await a.EntrarAsync("5511999990305", "oi");
+        await ProcessarAsync(a);
+        a.Avancar(TimeSpan.FromMinutes(5));
+        await ReativarAsync(a);
+        a.Avancar(TimeSpan.FromMinutes(1));
+
+        var nova = await a.EntrarAsync("5511999990399", "oi"); // sessão NOVA, depois da reativação
+        await ProcessarAsync(a);
+
+        var bot = Assert.Single(await BotAsync(a, nova.SessionId));
+        Assert.StartsWith("Olá! Sou o assistente.", bot.Text);
+        Assert.Equal(AutomationOwner.Flow, (await DecisaoAsync(a, nova.SessionId))!.Owner);
+        Assert.Empty(await BotAsync(a, antiga.SessionId)); // a da suspensão continua sem resposta automática
+        Assert.Null(await DecisaoAsync(a, antiga.SessionId));
+    }
+
+    // ------------------------------------------------------------ 2.ª revisão do Codex (P1-03): a anterioridade é a DATA DE CRIAÇÃO da instância, nunca o próximo olhar
+
+    /// <summary>Pergunta com prazo futuro (10 min): vencido o prazo, o fluxo mandaria "Tempo esgotado." (um efeito de envio).</summary>
+    private static FlowGraph Prazo() => new(
+        1,
+        "pergunta",
+        [
+            new("pergunta", NodeType.Question, new NodeConfig(Prompt: "Qual o seu nome?", Variable: "nome", TimeoutSeconds: 600, MaxAttempts: 2)),
+            Msg("tempo", "Tempo esgotado."),
+            new("fim", NodeType.End),
+        ],
+        [E("pergunta", "answered", "fim"), E("pergunta", "invalid", "fim"), E("pergunta", "timeout", "tempo"), E("tempo", "next", "fim")],
+        [new FlowVariable("nome", VariableClass.Personal)]);
+
+    [Fact]
+    public async Task Pergunta_com_prazo_futuro_vencido_depois_da_reativacao_nao_envia_nada_e_a_instancia_antiga_e_cancelada()
+    {
+        var a = await CenarioAsync("fluxo-prazo", Prazo());
+        var r = await a.EntrarAsync("5511999990401", "oi");
+        await ProcessarAsync(a);
+        Assert.Single(await BotAsync(a, r.SessionId)); // a pergunta
+        var antes = Assert.Single(await InstanciasAsync(a));
+        Assert.Equal(FlowStatus.WaitingInput, antes.Status);
+        Assert.True(antes.NextRunAt > a.Relogio.GetUtcNow()); // o próximo olhar é um prazo FUTURO
+        var efeitosAntes = (await EfeitosAsync(a)).Count;
+
+        // Suspensa e reativada ANTES do vencimento; nenhuma mensagem nova chega.
+        a.Avancar(TimeSpan.FromMinutes(1));
+        await SuspenderAsync(a);
+        a.Avancar(TimeSpan.FromMinutes(1));
+        await ReativarAsync(a);
+
+        // O prazo vence.
+        a.Avancar(TimeSpan.FromMinutes(15));
+        await ProcessarAsync(a, 4);
+
+        Assert.Single(await BotAsync(a, r.SessionId)); // nenhuma mensagem de "Tempo esgotado."
+        var depois = Assert.Single(await InstanciasAsync(a));
+        Assert.Equal((FlowStatus.Cancelled, "tenant-suspended"), (depois.Status, depois.FailureCode));
+        Assert.Equal(efeitosAntes, (await EfeitosAsync(a)).Count); // nenhum efeito novo (mensagem, transferência ou integração)
+        Assert.All(await EfeitosAsync(a), e => Assert.NotEqual(EffectState.Pending, e.State));
+        Assert.Empty(await a.TurnosAsync(r.SessionId));
+        Assert.Empty(a.PedidosAoModelo);
+        Assert.Contains((await a.C.HistoricoAsync(r.SessionId))!.Items, m => m.Text == "oi"); // o histórico continua
+    }
+
+    [Fact]
+    public async Task Mensagem_nova_em_sessao_antiga_acorda_a_instancia_antiga_para_nada_e_e_atendida_pela_IA_com_o_historico()
+    {
+        var a = await CenarioAsync("fluxo-wake", Prazo());
+        var r = await a.EntrarAsync("5511999990402", "oi");
+        await ProcessarAsync(a);
+        Assert.Single(await BotAsync(a, r.SessionId));
+        var criada = Assert.Single(await InstanciasAsync(a)).CreatedAt;
+
+        a.Avancar(TimeSpan.FromMinutes(1));
+        await SuspenderAsync(a);
+        a.Avancar(TimeSpan.FromMinutes(1));
+        await ReativarAsync(a);
+        a.Avancar(TimeSpan.FromMinutes(1));
+
+        // Uma mensagem NOVA na sessão antiga: o Wake renovaria o horário da instância antiga, mas ela é anterior à reativação.
+        await a.EntrarAsync("5511999990402", "Qual o horario de atendimento?");
+        await ProcessarAsync(a, 4);
+        a.Avancar(TimeSpan.FromSeconds(5));
+        await a.RelayAsync();
+        await a.ExecutarAsync();
+
+        var instancia = Assert.Single(await InstanciasAsync(a));
+        Assert.Equal(criada, instancia.CreatedAt);
+        Assert.Equal((FlowStatus.Cancelled, "tenant-suspended"), (instancia.Status, instancia.FailureCode));
+        Assert.Single(await BotAsync(a, r.SessionId)); // o fluxo antigo não disse mais nada (nem "Tempo esgotado.")
+        Assert.Equal(AutomationOwner.Agent, (await DecisaoAsync(a, r.SessionId))!.Owner);
+        Assert.Single(await a.RespostasDaIAAsync(r.SessionId)); // a mensagem NOVA é atendida pela IA
+        Assert.All(await EfeitosAsync(a), e => Assert.NotEqual(EffectState.Pending, e.State));
+    }
+
+    [Fact]
+    public async Task Cancelar_o_fluxo_antigo_nao_devolve_a_IA_uma_conversa_que_esta_com_atendente_humano()
+    {
+        var a = await CenarioAsync("fluxo-humano", Prazo());
+        var r = await a.EntrarAsync("5511999990403", "oi");
+        await ProcessarAsync(a);
+        var botAntes = (await BotAsync(a, r.SessionId)).Count;
+
+        await SuspenderAsync(a);
+        var sessao = (await a.C.SessaoAsync(r.SessionId))!;
+        await a.C.TransicionarAsync(r.SessionId, HandlingMode.HumanAssisted, Guid.NewGuid(), sessao.StateVersion); // o atendente assume durante a suspensão
+        a.Avancar(TimeSpan.FromMinutes(2));
+        await ReativarAsync(a);
+        a.Avancar(TimeSpan.FromMinutes(1));
+
+        await a.EntrarAsync("5511999990403", "Preciso de ajuda");
+        await ProcessarAsync(a, 4);
+        a.Avancar(TimeSpan.FromMinutes(15));
+        await ProcessarAsync(a, 3);
+        await a.ExecutarAsync();
+
+        Assert.Equal(HandlingMode.HumanAssisted, (await a.C.SessaoAsync(r.SessionId))!.HandlingMode); // continua com o humano
+        // A IA NÃO responde: qualquer turno que o Agents tenha agendado para a mensagem nova é encerrado sem chamar o modelo ("not-ai-responder": a conversa não é da IA).
+        Assert.All(await a.TurnosAsync(r.SessionId), t => Assert.Equal("not-ai-responder", t.EndReason));
+        Assert.Empty(await a.RespostasDaIAAsync(r.SessionId));
+        Assert.Empty(a.PedidosAoModelo);
+        Assert.Equal(botAntes, (await BotAsync(a, r.SessionId)).Count); // nenhuma mensagem automática
+        Assert.Equal(FlowStatus.Cancelled, Assert.Single(await InstanciasAsync(a)).Status);
     }
 }

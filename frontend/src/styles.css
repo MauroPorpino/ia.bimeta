@@ -1736,3 +1736,170 @@ label {
 .dialogo h2 {
   font-size: 1.1rem;
 }
+
+/* ---- Painel da Plataforma BImeta (/plataforma) ---- */
+.pl-shell {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.pl-topo {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.55rem 1rem;
+  background: var(--superficie);
+  border-bottom: 1px solid var(--borda);
+}
+
+.pl-topo .discreto {
+  margin-left: auto;
+}
+
+.pl-marca {
+  color: var(--primaria);
+  font-weight: 700;
+}
+
+.pl-corpo {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 12rem minmax(0, 1fr);
+}
+
+.pl-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.8rem 0.6rem;
+  background: var(--superficie);
+  border-right: 1px solid var(--borda);
+}
+
+.pl-menu-item {
+  text-align: left;
+  padding: 0.5rem 0.7rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--texto);
+  cursor: pointer;
+}
+
+.pl-menu-item:hover {
+  background: var(--superficie-2);
+}
+
+.pl-menu-item.ativo {
+  background: var(--primaria);
+  color: var(--primaria-texto);
+}
+
+.pl-conteudo {
+  padding: 1rem 1.2rem;
+  min-width: 0;
+}
+
+.pl-pagina {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  max-width: 70rem;
+}
+
+.pl-titulo-linha {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.pl-cartoes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0.7rem;
+}
+
+.pl-cartao {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.8rem;
+  background: var(--superficie);
+  border: 1px solid var(--borda);
+  border-radius: 8px;
+}
+
+.pl-cartao-titulo {
+  font-size: 0.85em;
+  color: var(--texto-suave);
+}
+
+.pl-cartao-valor {
+  font-size: 1.6rem;
+}
+
+.pl-bloco-separado {
+  padding: 0.8rem;
+  border: 1px dashed var(--borda);
+  border-radius: 8px;
+}
+
+.pl-dl {
+  display: grid;
+  grid-template-columns: minmax(10rem, 16rem) minmax(0, 1fr);
+  gap: 0.3rem 1rem;
+  margin: 0;
+}
+
+.pl-dl dt {
+  color: var(--texto-suave);
+}
+
+.pl-dl dd {
+  margin: 0;
+}
+
+.pl-historico {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.pl-tabela-rolagem {
+  overflow-x: auto;
+}
+
+.pl-filtros label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.pl-linha-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.pl-form-estreito {
+  max-width: 24rem;
+}
+
+@media (max-width: 760px) {
+  .pl-corpo {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .pl-menu {
+    flex-direction: row;
+    flex-wrap: wrap;
+    border-right: 0;
+    border-bottom: 1px solid var(--borda);
+  }
+
+  .pl-dl {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

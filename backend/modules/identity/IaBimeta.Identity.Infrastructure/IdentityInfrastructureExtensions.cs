@@ -46,6 +46,8 @@ public static class IdentityInfrastructureExtensions
         services.AddScoped<UserAdmissionGuard>();
         services.AddScoped<UserAdminService>();
         services.AddScoped<TenantUserPolicyService>();
+        services.AddScoped<PlatformOperatorService>();
+        services.AddScoped<TenantSessionRevocationService>();
         services.AddScoped<IAuthenticationStore, AuthenticationStore>();
         services.AddScoped<IEmbeddedStore, EmbeddedStore>();
         services.AddScoped<IIdentityAuditOutbox, IdentityAuditOutbox>();

@@ -1,3 +1,4 @@
+using IaBimeta.SharedKernel;
 using IaBimeta.Tenancy.Application;
 using IaBimeta.Tenancy.Contracts.Queries;
 using Microsoft.EntityFrameworkCore;
@@ -27,6 +28,8 @@ public static class TenancyInfrastructureExtensions
         services.AddScoped<ITenantRepository, TenantRepository>();
         services.AddScoped<IOrganizationRepository, OrganizationRepository>();
         services.AddScoped<TenantRegistrationService>();
+        services.AddScoped<TenantAdministrationService>();
+        services.AddScoped<ITenantOperationGate, TenantOperationGate>();
         services.AddScoped<ITenantDirectory, TenantDirectory>();
         services.AddScoped<TenantSettingsService>();
         services.AddScoped<ITenantSettings>(provider => provider.GetRequiredService<TenantSettingsService>());

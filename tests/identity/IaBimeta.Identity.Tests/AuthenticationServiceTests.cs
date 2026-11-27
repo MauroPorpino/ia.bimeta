@@ -382,6 +382,58 @@ public class AuthenticationServiceTests
     }
 
     [Fact]
+    public async Task Sessao_iniciada_antes_da_ultima_reativacao_nunca_vale_e_a_iniciada_depois_vale()
+    {
+        // P1-05: a marca é o instante em que a autenticação COMEÇOU (CreatedAt da sessão), comparada com a reativação da empresa.
+        var c = new Cenario();
+        var tenant = c.Tenants.Adicionar("lab-r");
+        c.NovoUsuario("ana@exemplo.com", tenant: tenant);
+        var antes = await c.Autenticacao.LoginAsync("lab-r", "ana@exemplo.com", Senhas.Valida);
+        var reativadaEm = c.Relogio.GetUtcNow().AddMinutes(10);
+
+        var depoisDaReativacao = new SessionAuthenticator(c.Dados, c.Embedded, new TenantReativadoDiretorio(tenant.TenantId, reativadaEm), c.Relogio);
+        Assert.Null(await depoisDaReativacao.AuthenticateAsync(antes.Token)); // iniciada ANTES da reativação: nunca volta a valer
+
+        var marcaAntiga = new SessionAuthenticator(c.Dados, c.Embedded, new TenantReativadoDiretorio(tenant.TenantId, c.Relogio.GetUtcNow().AddMinutes(-10)), c.Relogio);
+        Assert.NotNull(await marcaAntiga.AuthenticateAsync(antes.Token)); // a reativação anterior ao início da sessão não a atinge
+    }
+
+    [Fact]
+    public async Task Login_recusa_quando_a_empresa_foi_suspensa_ou_reativada_depois_do_inicio_da_autenticacao_e_nao_deixa_sessao_valida()
+    {
+        var c = new Cenario();
+        var tenant = c.Tenants.Adicionar("lab-g");
+        c.NovoUsuario("ana@exemplo.com", tenant: tenant);
+        var inicio = c.Relogio.GetUtcNow();
+
+        foreach (var estado in new[] { new TenantOperationState(false, null), new TenantOperationState(true, inicio.AddSeconds(1)) })
+        {
+            var porta = new PortaFalsa(estado);
+            var servico = new AuthenticationService(c.Tenants, c.Dados, c.Dados, c.Hasher, c.Opcoes, c.Relogio, c.Auditoria, c.Holder, porta);
+
+            await Assert.ThrowsAsync<InvalidCredentialsException>(() => servico.LoginAsync("lab-g", "ana@exemplo.com", Senhas.Valida));
+            Assert.Equal(0, c.Dados.Sessoes.Count(s => s.RevokedAt is null)); // nenhuma sessão válida resulta
+        }
+
+        // Empresa operacional e reativada ANTES do início: o login legítimo funciona.
+        var normal = new AuthenticationService(c.Tenants, c.Dados, c.Dados, c.Hasher, c.Opcoes, c.Relogio, c.Auditoria, c.Holder, new PortaFalsa(new TenantOperationState(true, inicio.AddMinutes(-5))));
+        Assert.NotNull((await normal.LoginAsync("lab-g", "ana@exemplo.com", Senhas.Valida)).Token);
+    }
+
+    private sealed class PortaFalsa(TenantOperationState estado) : ITenantOperationGate
+    {
+        public Task<TenantOperationState> GetAsync(TenantId tenantId, CancellationToken cancellationToken = default) => Task.FromResult(estado);
+    }
+
+    private sealed class TenantReativadoDiretorio(TenantId tenantId, DateTimeOffset reativadaEm) : IaBimeta.Tenancy.Contracts.Queries.ITenantDirectory
+    {
+        public Task<TenantInfo?> FindBySlugAsync(string slug, CancellationToken cancellationToken = default) => Task.FromResult<TenantInfo?>(null);
+
+        public Task<TenantInfo?> FindByIdAsync(TenantId id, CancellationToken cancellationToken = default) =>
+            Task.FromResult<TenantInfo?>(new TenantInfo(tenantId, "lab-r", "Lab R", TenantStatus.Active, TenantKind.Commercial, reativadaEm));
+    }
+
+    [Fact]
     public async Task Usuario_removido_invalida_a_sessao()
     {
         var c = new Cenario();

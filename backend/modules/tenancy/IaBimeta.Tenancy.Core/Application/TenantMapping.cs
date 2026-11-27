@@ -5,5 +5,5 @@ namespace IaBimeta.Tenancy.Application;
 
 internal static class TenantMapping
 {
-    public static TenantInfo ToInfo(this Tenant tenant) => new(tenant.Id, tenant.Slug, tenant.Name, tenant.Status);
+    public static TenantInfo ToInfo(this Tenant tenant) => new(tenant.Id, tenant.Slug, tenant.Name, tenant.Status, tenant.Kind, tenant.ReactivatedAt);
 }

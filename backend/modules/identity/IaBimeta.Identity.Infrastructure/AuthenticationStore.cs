@@ -1,4 +1,4 @@
-using IaBimeta.Identity.Application;
+﻿using IaBimeta.Identity.Application;
 using IaBimeta.Identity.Domain;
 using IaBimeta.SharedKernel;
 using Microsoft.EntityFrameworkCore;
@@ -128,6 +128,23 @@ internal sealed class AuthenticationStore : IAuthenticationStore
         // Só as sessões ATIVAS do usuário NESTE tenant (predicado explícito): as já revogadas ou expiradas ficam como estão.
         return await _db.Sessions.IgnoreQueryFilters()
             .Where(s => s.TenantId == tenantId && s.UserId == userId && s.RevokedAt == null && s.ExpiresAt > now && (exceptSessionId == null || s.Id != exceptSessionId))
+            .ExecuteUpdateAsync(set => set.SetProperty(s => s.RevokedAt, now), cancellationToken);
+    }
+
+    public async Task<bool> RevokeSessionAsync(TenantId tenantId, Guid sessionId, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        using var escopo = _db.UseAuthenticationTenant(tenantId);
+
+        // Só ESTA sessão e só NESTE tenant (predicado explícito): o login é anônimo e não há RequestContext, então o repositório de sessões comum (filtro global por tenant) não enxerga a linha.
+        return await _db.Sessions.IgnoreQueryFilters()
+            .Where(s => s.TenantId == tenantId && s.Id == sessionId && s.RevokedAt == null)
+            .ExecuteUpdateAsync(set => set.SetProperty(s => s.RevokedAt, now), cancellationToken) == 1;
+    }
+
+    public async Task<int> RevokeAllSessionsAsync(TenantId tenantId, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        return await _db.Sessions.IgnoreQueryFilters()
+            .Where(s => s.TenantId == tenantId && s.RevokedAt == null && s.ExpiresAt > now)
             .ExecuteUpdateAsync(set => set.SetProperty(s => s.RevokedAt, now), cancellationToken);
     }
 

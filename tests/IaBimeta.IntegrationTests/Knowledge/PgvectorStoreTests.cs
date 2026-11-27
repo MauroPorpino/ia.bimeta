@@ -217,6 +217,23 @@ public sealed class PgvectorStoreTests : IAsyncLifetime
     }
 
     [PgvectorFact]
+    public async Task Adiar_libera_a_reserva_sem_gastar_tentativa_e_o_texto_volta_depois_do_adiamento()
+    {
+        await _store!.ReplaceAsync(_a, Fonte(1, "pt-BR", true, "texto"), Model, Dim, Hash, CancellationToken.None);
+        var item = await ClaimOneAsync(_a);
+        var agora = DateTimeOffset.UtcNow;
+
+        await _store.DeferAsync(item, agora.AddMinutes(2), agora, CancellationToken.None);
+
+        Assert.DoesNotContain(await _store.ClaimPendingAsync(1000, Model, Dim, TimeSpan.FromMinutes(1), agora, CancellationToken.None), l => l.Tenant == _a);
+        var depois = (await _store.ClaimPendingAsync(1000, Model, Dim, TimeSpan.FromMinutes(1), agora.AddMinutes(3), CancellationToken.None)).Where(l => l.Tenant == _a).ToList();
+        Assert.Single(depois);
+        Assert.Equal(item.Attempts, depois[0].Attempts);
+        var status = await _store.StatusAsync(_a, Model, Dim, CancellationToken.None);
+        Assert.Equal(0, status.Failed);
+    }
+
+    [PgvectorFact]
     public async Task Gravar_vetor_de_texto_que_mudou_e_rejeitado()
     {
         await _store!.ReplaceAsync(_a, Fonte(1, "pt-BR", true, "antigo"), Model, Dim, Hash, CancellationToken.None);

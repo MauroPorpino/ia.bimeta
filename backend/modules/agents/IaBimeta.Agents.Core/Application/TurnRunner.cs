@@ -1,3 +1,4 @@
+using IaBimeta.SharedKernel;
 using IaBimeta.Agents.Domain;
 using IaBimeta.AiGateway.Contracts;
 using IaBimeta.Capabilities.Contracts;
@@ -72,6 +73,7 @@ public sealed class TurnRunner
     private readonly ISemanticAnswerSettingsStore? _semanticSettings;
     private readonly ISemanticDecisionRecorder? _semanticDecisions;
     private readonly IntegrationLookupService? _lookups;
+    private readonly ITenantOperationGate? _gate;
 
     public TurnRunner(
         IAiTurnStore store,
@@ -85,8 +87,10 @@ public sealed class TurnRunner
         IKnowledgeSearch? search = null,
         ISemanticAnswerSettingsStore? semanticSettings = null,
         ISemanticDecisionRecorder? semanticDecisions = null,
-        IntegrationLookupService? lookups = null)
+        IntegrationLookupService? lookups = null,
+        ITenantOperationGate? operationGate = null)
     {
+        _gate = operationGate;
         _lookups = lookups;
         _search = search;
         _semanticSettings = semanticSettings;
@@ -129,6 +133,22 @@ public sealed class TurnRunner
 
     private async Task<TurnRunResult> RunClaimedAsync(AiTurn turno, long lane, CancellationToken ct)
     {
+        // Suspensão da empresa (Etapa 02): nada automático avança. O turno volta a esperar (sem gastar tentativa) enquanto a empresa está suspensa; e um turno que nasceu ANTES da última reativação
+        // (da suspensão ou anterior) é cancelado, nunca executado: não há reprocessamento automático de mensagens antigas. Nenhuma chamada ao modelo acontece antes desta decisão.
+        if (_gate is not null)
+        {
+            var estado = await _gate.GetAsync(turno.TenantId, ct);
+            if (!estado.IsOperational)
+            {
+                return await RetryAsync(turno, lane, TimeSpan.FromMinutes(1), countAttempt: false, "tenant-suspended");
+            }
+
+            if (estado.OperationalSince is { } desde && turno.LastReceivedAt < desde)
+            {
+                return await CancelAsync(turno, lane, "tenant-reactivated-stale");
+            }
+        }
+
         // Handoff já decidido por uma execução anterior: só se repete o pedido (idempotente pelo TurnId), sem nova chamada ao modelo.
         if (turno.HandoffReason is not null)
         {

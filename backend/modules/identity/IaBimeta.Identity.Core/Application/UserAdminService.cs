@@ -568,6 +568,13 @@ public sealed class UserAdminService
     {
         UserOrganizationGrant.ValidateRole(role);
 
+        // ADR 0043: os papéis da plataforma não existem em uma empresa contratante (nem para o administrador dela): só o tenant técnico os tem.
+        if (role.IsPlatform())
+        {
+            await _audit.WriteAsync(new AuditEntry(operation, "user", targetUserId?.ToString(), AuditOutcome.Denied), cancellationToken);
+            throw new AccessDeniedException(Permission.UserPermissionManage);
+        }
+
         var tudoCoberto = RolePermissions.Expand(role, organizationId).All(p => contexto.IsAllowed(p.Permission, p.OrganizationId));
         var basico = role is Role.User or Role.Attendant;
         if (tudoCoberto && (basico || contexto.IsAllowed(Permission.UserPermissionManage, organizationId)))

@@ -57,6 +57,48 @@ internal sealed class UserAdminStore : IUserAdminStore
         return new SeatUsage(ativos, inativos, reservadas, pendentes - reservadas, canceladas);
     }
 
+    public async Task<IReadOnlyDictionary<Guid, SeatSummary>> GetSeatSummariesAsync(DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        // Agregados de TODAS as empresas em poucas consultas agrupadas (nenhum dado de usuário sai daqui, só contagens): é o que sustenta a visão geral da plataforma sem uma consulta por empresa.
+        var usuarios = _db.Users.IgnoreQueryFilters().AsNoTracking();
+        var ativosExternos = _db.ExternalIdentities.IgnoreQueryFilters().AsNoTracking().Where(i => i.Status == ExternalIdentityStatus.Active);
+
+        var ativos = await usuarios
+            .Where(u => u.Status == UserStatus.Active && (u.AuthMode != UserAuthMode.Federated || ativosExternos.Any(i => i.TenantId == u.TenantId && i.UserId == u.Id)))
+            .GroupBy(u => u.TenantId).Select(g => new { g.Key, N = g.Count() }).ToListAsync(cancellationToken);
+        var inativos = await usuarios
+            .Where(u => u.Status == UserStatus.Inactive || (u.Status == UserStatus.Active && u.AuthMode == UserAuthMode.Federated && !ativosExternos.Any(i => i.TenantId == u.TenantId && i.UserId == u.Id)))
+            .GroupBy(u => u.TenantId).Select(g => new { g.Key, N = g.Count() }).ToListAsync(cancellationToken);
+        var reservadas = await usuarios
+            .Where(u => u.Status == UserStatus.Pending && _db.PasswordResetTokens.IgnoreQueryFilters().Any(t => t.TenantId == u.TenantId && t.UserId == u.Id && t.UsedAt == null && t.RevokedAt == null && t.ExpiresAt > now))
+            .GroupBy(u => u.TenantId).Select(g => new { g.Key, N = g.Count() }).ToListAsync(cancellationToken);
+        var pendentes = await usuarios.Where(u => u.Status == UserStatus.Pending).GroupBy(u => u.TenantId).Select(g => new { g.Key, N = g.Count() }).ToListAsync(cancellationToken);
+        var canceladas = await usuarios.Where(u => u.Status == UserStatus.Cancelled).GroupBy(u => u.TenantId).Select(g => new { g.Key, N = g.Count() }).ToListAsync(cancellationToken);
+        var politicas = await _db.TenantUserPolicies.AsNoTracking().ToListAsync(cancellationToken);
+
+        static Dictionary<Guid, int> Mapa<T>(IEnumerable<T> itens, Func<T, (TenantId Id, int N)> f) => itens.Select(f).ToDictionary(x => x.Id.Value, x => x.N);
+        var mAtivos = Mapa(ativos, x => (x.Key, x.N));
+        var mInativos = Mapa(inativos, x => (x.Key, x.N));
+        var mReservadas = Mapa(reservadas, x => (x.Key, x.N));
+        var mPendentes = Mapa(pendentes, x => (x.Key, x.N));
+        var mCanceladas = Mapa(canceladas, x => (x.Key, x.N));
+        var mPoliticas = politicas.ToDictionary(p => p.TenantId.Value);
+
+        var resultado = new Dictionary<Guid, SeatSummary>();
+        foreach (var id in mAtivos.Keys.Concat(mInativos.Keys).Concat(mReservadas.Keys).Concat(mPendentes.Keys).Concat(mCanceladas.Keys).Concat(mPoliticas.Keys).Distinct())
+        {
+            mAtivos.TryGetValue(id, out var a);
+            mInativos.TryGetValue(id, out var i);
+            mReservadas.TryGetValue(id, out var r);
+            mPendentes.TryGetValue(id, out var p);
+            mCanceladas.TryGetValue(id, out var c);
+            var politica = mPoliticas.TryGetValue(id, out var linha) ? new UserPolicy(linha.MaxUsers, linha.RegistrationEnabled, true) : UserPolicy.Legacy;
+            resultado[id] = new SeatSummary(politica, new SeatUsage(a, i, r, p - r, c));
+        }
+
+        return resultado;
+    }
+
     public async Task<UserPolicy> GetPolicyAsync(TenantId tenantId, CancellationToken cancellationToken)
     {
         // Sempre o valor confirmado no banco (sem rastreamento), na conexão e transação do chamador.

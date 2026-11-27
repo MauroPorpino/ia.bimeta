@@ -1,4 +1,4 @@
-using IaBimeta.SharedKernel;
+﻿using IaBimeta.SharedKernel;
 using IaBimeta.Tenancy.Application;
 using IaBimeta.Tenancy.Contracts;
 using IaBimeta.Tenancy.Domain;
@@ -24,6 +24,61 @@ public class TenantRegistrationServiceTests
             Task.FromResult(Tenants.FirstOrDefault(t => t.Id == tenantId));
 
         public Task SaveChangesAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task<(IReadOnlyList<Tenant> Items, int Total)> ListCommercialAsync(string? search, TenantStatus? status, int skip, int take, CancellationToken cancellationToken)
+        {
+            var itens = Tenants.Where(t => t.Kind == TenantKind.Commercial && (status is null || t.Status == status)).ToList();
+            return Task.FromResult(((IReadOnlyList<Tenant>)itens.Skip(skip).Take(take).ToList(), itens.Count));
+        }
+
+        public Task<IReadOnlyList<Tenant>> ListAllCommercialAsync(CancellationToken cancellationToken) =>
+            Task.FromResult((IReadOnlyList<Tenant>)Tenants.Where(t => t.Kind == TenantKind.Commercial).ToList());
+
+        public Task<Tenant?> FindPlatformAsync(CancellationToken cancellationToken) =>
+            Task.FromResult(Tenants.FirstOrDefault(t => t.Kind == TenantKind.Platform));
+
+        public List<TenantStatusChange> StatusChanges { get; } = new();
+
+        public Task SaveStatusChangeAsync(TenantStatusChange change, CancellationToken cancellationToken)
+        {
+            StatusChanges.Add(change);
+            return Task.CompletedTask;
+        }
+
+        public Task<IReadOnlyList<TenantStatusChange>> ListStatusChangesAsync(TenantId tenantId, int take, CancellationToken cancellationToken) =>
+            Task.FromResult((IReadOnlyList<TenantStatusChange>)StatusChanges.Where(c => c.TenantId == tenantId).Take(take).ToList());
+    }
+
+    [Theory]
+    [InlineData("bimeta-platform")]
+    [InlineData("platform")]
+    [InlineData("admin")]
+    [InlineData("  Bimeta-Platform  ")]
+    public async Task Cadastro_comercial_antigo_recusa_identificadores_reservados_e_nao_grava_nada(string slug)
+    {
+        var repositorio = new RepositorioEmMemoria();
+        var servico = new TenantRegistrationService(repositorio, TimeProvider.System);
+
+        await Assert.ThrowsAsync<TenancyValidationException>(() => servico.RegisterAsync(slug, "Nome qualquer"));
+
+        Assert.Empty(repositorio.Tenants);
+    }
+
+    [Fact]
+    public async Task O_tenant_tecnico_continua_nascendo_pelo_mecanismo_proprio_da_plataforma()
+    {
+        var repositorio = new RepositorioEmMemoria();
+        var admin = new TenantAdministrationService(repositorio, new RequestContextAccessorNulo(), new AuditoriaEmMemoria(), TimeProvider.System);
+
+        var info = await admin.EnsurePlatformTenantAsync("Plataforma BImeta");
+
+        Assert.Equal(Tenant.PlatformSlug, info.Slug);
+        Assert.Equal(TenantKind.Platform, Assert.Single(repositorio.Tenants).Kind);
+    }
+
+    private sealed class RequestContextAccessorNulo : IRequestContextAccessor
+    {
+        public RequestContext? Current => null;
     }
 
     [Fact]

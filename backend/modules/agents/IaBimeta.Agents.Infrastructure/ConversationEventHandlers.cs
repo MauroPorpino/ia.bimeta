@@ -1,4 +1,4 @@
-using IaBimeta.Agents.Application;
+﻿using IaBimeta.Agents.Application;
 using IaBimeta.Conversations.Contracts;
 using IaBimeta.Conversations.Contracts.Events;
 using IaBimeta.Messaging;
@@ -20,14 +20,14 @@ internal static class TurnHandling
     /// A sessão é de um FLUXO do chatbot visual (ADR 0038)? Então o Agents não abre turno: Workflows e Agents nunca respondem à mesma sessão. Com o chatbot visual desligado (ou não composto) a resposta é sempre
     /// "não": o caminho é idêntico ao anterior. Numa mensagem do cliente (<paramref name="inboundSeq"/>) o roteador também DECIDE (só a primeira mensagem da sessão pode escolher um fluxo).
     /// </summary>
-    public static async Task<bool> OwnedByFlowAsync(IAutomationRouter? router, Guid sessionId, long? inboundSeq, CancellationToken cancellationToken)
+    public static async Task<bool> OwnedByFlowAsync(IAutomationRouter? router, Guid sessionId, long? inboundSeq, CancellationToken cancellationToken, DateTimeOffset? eventOccurredAt = null)
     {
         if (router is null)
         {
             return false;
         }
 
-        var dono = inboundSeq is { } seq ? await router.ResolveOnInboundAsync(sessionId, seq, cancellationToken) : await router.GetOwnerAsync(sessionId, cancellationToken);
+        var dono = inboundSeq is { } seq ? await router.ResolveOnInboundAsync(sessionId, seq, cancellationToken, eventOccurredAt) : await router.GetOwnerAsync(sessionId, cancellationToken);
         return dono == AutomationOwner.Flow;
     }
 
@@ -99,7 +99,7 @@ internal sealed class InboundMessageRegisteredHandler : EventHandlerBase<Inbound
                 }
 
                 // ADR 0038: a sessão que é de um FLUXO não ganha turno de IA (e a primeira mensagem de uma sessão pode escolher o fluxo).
-                if (!await TurnHandling.OwnedByFlowAsync(_router, payload.SessionId, payload.InboundSeq, token))
+                if (!await TurnHandling.OwnedByFlowAsync(_router, payload.SessionId, payload.InboundSeq, token, envelope.OccurredAt))
                 {
                     await _scheduler.OnInboundMessageAsync(payload.SessionId, envelope.OccurredAt, token);
                 }

@@ -1,4 +1,4 @@
-using IaBimeta.Identity.Domain;
+﻿using IaBimeta.Identity.Domain;
 using IaBimeta.SharedKernel;
 
 namespace IaBimeta.Identity.Application;
@@ -94,6 +94,12 @@ public interface IAuthenticationStore
 
     /// <summary>Revoga as sessões ATIVAS do usuário (menos <paramref name="exceptSessionId"/>, se informada). Devolve quantas revogou.</summary>
     Task<int> RevokeSessionsAsync(TenantId tenantId, Guid userId, Guid? exceptSessionId, DateTimeOffset now, CancellationToken cancellationToken);
+
+    /// <summary>Revoga TODAS as sessões ativas (interativas e embutidas) do tenant: a suspensão e a reativação da empresa (Etapa 02). Devolve quantas revogou.</summary>
+    Task<int> RevokeAllSessionsAsync(TenantId tenantId, DateTimeOffset now, CancellationToken cancellationToken);
+
+    /// <summary>Revoga UMA sessão ativa, delimitada por tenant e identificador (predicado explícito, sem depender de RequestContext): usada pelo login anônimo que recusa a sessão que acabou de gravar (P2 da 2.ª revisão). Falso: não havia sessão ativa com esse par.</summary>
+    Task<bool> RevokeSessionAsync(TenantId tenantId, Guid sessionId, DateTimeOffset now, CancellationToken cancellationToken);
 
     /// <summary>Grava o token de redefinição e revoga, na mesma operação, os anteriores ainda não usados do mesmo usuário.</summary>
     Task AddPasswordResetTokenAsync(PasswordResetToken token, DateTimeOffset now, CancellationToken cancellationToken);

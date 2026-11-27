@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using IaBimeta.Capabilities.Contracts;
@@ -48,6 +48,7 @@ public sealed class FlowRuntime
     private readonly WorkflowsOptions _options;
     private readonly TimeProvider _clock;
     private readonly FlowInterpreter _interpreter;
+    private readonly ITenantOperationGate? _gate;
 
     public FlowRuntime(
         IFlowRuntimeStore store,
@@ -62,8 +63,10 @@ public sealed class FlowRuntime
         IFlowHandoffPort? handoff,
         IRequestContextAccessor context,
         WorkflowsOptions options,
-        TimeProvider clock)
+        TimeProvider clock,
+        ITenantOperationGate? operationGate = null)
     {
+        _gate = operationGate;
         _store = store;
         _versions = versions;
         _cipher = cipher;
@@ -129,6 +132,23 @@ public sealed class FlowRuntime
             return FlowRunOutcome.Finished;
         }
 
+        // P1-03: o INÍCIO efetivo da execução de cada instância confere a empresa de novo (a suspensão pode ter vindo entre a reivindicação e aqui). Suspensa: devolve a instância adiada, sem rodar nada e sem gastar tentativa.
+        // Instância CRIADA antes da última reativação (a referência é a data de criação, estável: NextRunAt pode ser um prazo futuro ou renovado por Wake e NUNCA decide anterioridade): é um fluxo ANTIGO e não roda sozinho, nem por Wake, timeout ou novo agendamento: cancela com segurança (nenhuma mensagem sai; nada é apagado) e a decisão volta ao agente SEM acionar a IA agora (sem o comando de devolução ao Conversations, que dispararia um turno sobre a mensagem antiga): o agente só responde a uma mensagem NOVA.
+        if (_gate is not null)
+        {
+            var estado = await _gate.GetAsync(Tenant, cancellationToken);
+            if (!estado.IsOperational)
+            {
+                return await DeferForSuspensionAsync(inst, cancellationToken);
+            }
+
+            if (estado.OperationalSince is { } reativadaEm && !inst.IsTerminal && inst.CreatedAt < reativadaEm)
+            {
+                await CancelAsync(inst, "tenant-suspended", release: false, cancellationToken);
+                return FlowRunOutcome.Finished;
+            }
+        }
+
         var graph = await LoadGraphAsync(inst, cancellationToken);
         if (graph is null)
         {
@@ -147,6 +167,32 @@ public sealed class FlowRuntime
             var abertos = await _store.ListOpenEffectsAsync(inst.Id, cancellationToken);
             if (abertos.Count > 0)
             {
+                // Antes de realizar QUALQUER efeito (é aqui que sai mensagem, transferência e consulta externa): a empresa continua operacional? E o efeito é de DEPOIS da última reativação? Um efeito preparado antes dela
+                // nunca é realizado (viraria um pedido novo de envio só por receber uma data posterior): fica "substituído", sem nada enviado.
+                if (_gate is not null)
+                {
+                    var agoraDaEmpresa = await _gate.GetAsync(Tenant, cancellationToken);
+                    if (!agoraDaEmpresa.IsOperational)
+                    {
+                        return await DeferForSuspensionAsync(inst, cancellationToken);
+                    }
+
+                    if (agoraDaEmpresa.OperationalSince is { } corte)
+                    {
+                        var antigos = abertos.Where(e => e.CreatedAt < corte).ToList();
+                        if (antigos.Count > 0)
+                        {
+                            foreach (var antigo in antigos)
+                            {
+                                Complete(antigo, EffectState.Superseded, "tenant-suspended");
+                            }
+
+                            await _store.SaveAsync(cancellationToken);
+                            continue;
+                        }
+                    }
+                }
+
                 if (!await ExecuteEffectsAsync(inst, graph, abertos, cancellationToken))
                 {
                     if (inst.IsTerminal)
@@ -180,6 +226,17 @@ public sealed class FlowRuntime
         inst.Defer(Now, Now);
         await _store.SaveAsync(cancellationToken);
         return FlowRunOutcome.Yielded;
+    }
+
+    /// <summary>
+    /// A empresa deixou de estar operacional: só o lease é solto. O instante do próximo olhar NÃO muda (não é empurrado para depois da reativação): a instância continua "devida desde antes" e, reativada a empresa, é reconhecida
+    /// como gatilho antigo e cancelada com segurança, nunca executada sozinha. Sem rodar, sem gastar tentativa e sem apagar nada (o executor do Worker nem reivindica empresa suspensa, então não há laço de reivindicação).
+    /// </summary>
+    private async Task<FlowRunOutcome> DeferForSuspensionAsync(FlowInstance inst, CancellationToken ct)
+    {
+        inst.ReleaseLease(Now);
+        await _store.SaveAsync(ct);
+        return FlowRunOutcome.Waiting;
     }
 
     // ------------------------------------------------------------------ entrada

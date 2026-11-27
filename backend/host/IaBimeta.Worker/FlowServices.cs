@@ -93,6 +93,11 @@ internal sealed class FlowExecutor
             {
                 await using var escopo = _scopes.CreateAsyncScope();
                 _initializer.Initialize(escopo, new TenantId(tenant), "workflows-executor");
+                if (!(await escopo.ServiceProvider.GetRequiredService<ITenantOperationGate>().GetAsync(new TenantId(tenant), cancellationToken)).IsOperational)
+                {
+                    continue; // empresa suspensa: nenhuma instância de fluxo avança (Etapa 02)
+                }
+
                 var reivindicadas = await escopo.ServiceProvider.GetRequiredService<IFlowRuntimeStore>()
                     .ClaimDueAsync(_owner, _options.LeaseDuration, _clock.GetUtcNow(), Math.Min(restante, _options.ExecutorPerTenantBatch), cancellationToken);
                 trabalho.AddRange(reivindicadas.Select(i => (tenant, i)));

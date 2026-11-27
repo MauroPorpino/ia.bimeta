@@ -1,6 +1,7 @@
 using IaBimeta.Knowledge.Application;
 using IaBimeta.Knowledge.Contracts;
 using IaBimeta.Knowledge.Domain;
+using IaBimeta.SharedKernel;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -40,8 +41,30 @@ public static class KnowledgeInfrastructureExtensions
         services.AddScoped<SemanticIndexService>();
         services.AddScoped<IKnowledgeIndexing>(provider => provider.GetRequiredService<SemanticIndexService>());
         services.AddScoped<IKnowledgeSearch>(provider => provider.GetRequiredService<SemanticIndexService>());
+        services.TryAddSingleton<IIndexingTenantGate, ScopedIndexingTenantGate>();
         services.AddSingleton<SemanticIndexer>();
         return services;
+    }
+
+    /// <summary>
+    /// O indexador é singleton e a porta de suspensão do SharedKernel é escopada: cada consulta abre um escopo curto. Sem a porta registrada (host sem o Tenancy) a empresa é considerada operacional, como nos demais
+    /// consumidores; com ela, qualquer falha na consulta é tratada pelo indexador como "não pode" (falha fechada).
+    /// </summary>
+    private sealed class ScopedIndexingTenantGate : IIndexingTenantGate
+    {
+        private readonly IServiceScopeFactory _scopes;
+
+        public ScopedIndexingTenantGate(IServiceScopeFactory scopes)
+        {
+            _scopes = scopes;
+        }
+
+        public async Task<bool> CanIndexAsync(TenantId tenant, CancellationToken cancellationToken)
+        {
+            await using var escopo = _scopes.CreateAsyncScope();
+            var porta = escopo.ServiceProvider.GetService<ITenantOperationGate>();
+            return porta is null || (await porta.GetAsync(tenant, cancellationToken)).IsOperational;
+        }
     }
 
     /// <summary>O provedor "ninguém configurado": toda chamada vira indisponibilidade segura.</summary>

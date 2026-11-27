@@ -27,6 +27,8 @@ public sealed class TenancyDbContext : DbContext
 
     public DbSet<Tenant> Tenants => Set<Tenant>();
 
+    public DbSet<TenantStatusChange> StatusChanges => Set<TenantStatusChange>();
+
     public DbSet<Organization> Organizations => Set<Organization>();
 
     public DbSet<BusinessUnit> BusinessUnits => Set<BusinessUnit>();
@@ -41,6 +43,7 @@ public sealed class TenancyDbContext : DbContext
         modelBuilder.HasDefaultSchema(Schema);
 
         modelBuilder.ApplyConfiguration(new TenantConfiguration());
+        modelBuilder.ApplyConfiguration(new TenantStatusChangeConfiguration());
         modelBuilder.ApplyConfiguration(new OrganizationConfiguration());
         modelBuilder.ApplyConfiguration(new BusinessUnitConfiguration());
         modelBuilder.ApplyConfiguration(new DepartmentConfiguration());

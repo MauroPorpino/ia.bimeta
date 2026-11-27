@@ -77,6 +77,13 @@ public sealed class EmbeddedExchangeService
                 throw new EmbeddedAuthenticationException();
             }
 
+            // P1-05: um ticket emitido ANTES da última reativação da empresa não abre sessão (o ERP pediu o ticket no contexto anterior à suspensão). A sessão criada guarda o instante em que a troca começou, e a validação
+            // a cada requisição recusa a sessão iniciada antes da reativação: fecha também a troca em andamento que atravesse a suspensão.
+            if (tenant.ReactivatedAt is { } reativadaEm && consumido.CreatedAt < reativadaEm)
+            {
+                throw new EmbeddedAuthenticationException();
+            }
+
             var vinculo = await _store.FindIdentityAsync(tenantId, conexao.Id, consumido.ExternalUserId, cancellationToken);
             var usuario = await _auth.FindUserByIdAsync(tenantId, consumido.UserId, cancellationToken);
             // Usuário inativo (ou reativado DEPOIS de o ticket ser emitido) não abre sessão: um ticket anterior à última mudança de situação nunca é reaproveitado.

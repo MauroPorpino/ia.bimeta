@@ -96,4 +96,36 @@ public enum Permission
 
     /// <summary>Atribuir papéis acima de Atendente e personalizar as permissões individuais de um usuário (Etapa 01). Distinta de <see cref="UserManage"/> de propósito: quem cadastra atendentes não altera permissões administrativas.</summary>
     UserPermissionManage = 28,
+
+    // ---- Plataforma BImeta (Etapa 02, ADR 0043). SÓ existem no tenant técnico da plataforma: nunca são concedidas nem calculadas em uma empresa contratante. ----
+
+    /// <summary>Consultar as empresas contratantes, a situação operacional e a ocupação de vagas (agregados, nunca usuários nem conversas).</summary>
+    PlatformTenantRead = 30,
+
+    /// <summary>Cadastrar empresas e provisionar o primeiro administrador.</summary>
+    PlatformTenantCreate = 31,
+
+    /// <summary>Alterar os dados cadastrais permitidos de uma empresa.</summary>
+    PlatformTenantUpdate = 32,
+
+    /// <summary>Alterar o limite contratado de usuários e a habilitação de novos cadastros.</summary>
+    PlatformTenantQuotaManage = 33,
+
+    /// <summary>Reemitir o token de primeiro acesso do administrador inicial que ainda não concluiu a admissão.</summary>
+    PlatformFirstAdminManage = 34,
+
+    /// <summary>Suspender e reativar empresas.</summary>
+    PlatformTenantSuspend = 35,
+
+    /// <summary>Cadastrar, alterar, ativar e desativar operadores da plataforma, emitir primeiro acesso e revogar sessões deles.</summary>
+    PlatformOperatorManage = 36,
+
+    /// <summary>Atribuir o perfil de administrador da plataforma e personalizar as permissões individuais dos operadores.</summary>
+    PlatformPermissionManage = 37,
+
+    /// <summary>Consultar a auditoria administrativa da plataforma.</summary>
+    PlatformAuditRead = 38,
+
+    /// <summary>Consultar a visão geral (indicadores agregados).</summary>
+    PlatformOverviewRead = 39,
 }

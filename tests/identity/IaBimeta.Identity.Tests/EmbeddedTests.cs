@@ -1017,6 +1017,29 @@ public class EmbeddedServicesTests
     }
 
     [Fact]
+    public async Task Ticket_e_sessao_embutida_anteriores_a_reativacao_da_empresa_nao_valem_e_os_posteriores_valem()
+    {
+        // P1-05: o ticket emitido antes da última reativação da empresa não abre sessão; a sessão aberta antes dela não volta a valer; o que nasce depois funciona.
+        var c = new Cenario();
+        var ticketAntes = await c.Tickets.IssueLaunchTicketAsync(c.Integracao, c.Pedido("u-1", Verifier));
+        c.Relogio.Avancar(TimeSpan.FromSeconds(1));
+        var ticketDaSessao = await c.Tickets.IssueLaunchTicketAsync(c.Integracao, c.Pedido("u-1", Verifier));
+        var sessaoAberta = await c.Troca.ExchangeAsync(ticketDaSessao.Ticket, Verifier, "https://erp.exemplo.com.br");
+        Assert.NotNull(await c.Autenticador.AuthenticateAsync(sessaoAberta.Token));
+
+        c.Relogio.Avancar(TimeSpan.FromSeconds(5));
+        c.Tenants.Reativar(c.Tenant.TenantId, c.Relogio.GetUtcNow());
+
+        await Assert.ThrowsAsync<EmbeddedAuthenticationException>(() => c.Troca.ExchangeAsync(ticketAntes.Ticket, Verifier, "https://erp.exemplo.com.br"));
+        Assert.Null(await c.Autenticador.AuthenticateAsync(sessaoAberta.Token));
+
+        c.Relogio.Avancar(TimeSpan.FromSeconds(1));
+        var ticketNovo = await c.Tickets.IssueLaunchTicketAsync(c.Integracao, c.Pedido("u-1", Verifier));
+        var troca = await c.Troca.ExchangeAsync(ticketNovo.Ticket, Verifier, "https://erp.exemplo.com.br");
+        Assert.NotNull(await c.Autenticador.AuthenticateAsync(troca.Token));
+    }
+
+    [Fact]
     public async Task Sessao_embutida_aberta_antes_da_desativacao_nao_volta_a_valer_com_a_reativacao()
     {
         var c = new Cenario();

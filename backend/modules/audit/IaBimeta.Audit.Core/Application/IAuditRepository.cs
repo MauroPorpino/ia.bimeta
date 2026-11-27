@@ -15,6 +15,11 @@ public interface IAuditRepository
     Task AddForAuthenticationAsync(AuditEvent auditEvent, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<AuditEvent>> ListAsync(AuditQuery query, CancellationToken cancellationToken);
+
+    /// <summary>Consulta paginada com filtros (auditoria administrativa da plataforma), sempre dentro do tenant do contexto. Devolve a página e o total.</summary>
+    Task<(IReadOnlyList<AuditEvent> Items, int Total)> ListPageAsync(AuditPageQuery query, CancellationToken cancellationToken);
 }
 
 public sealed record AuditQuery(int Take, string? Operation, string? ResourceId);
+
+public sealed record AuditPageQuery(int Skip, int Take, string? OperationContains, string? ResourceContains, string? Outcome, DateTimeOffset? From, DateTimeOffset? To);

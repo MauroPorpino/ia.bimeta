@@ -1,3 +1,4 @@
+using IaBimeta.Audit.Contracts;
 using IaBimeta.Audit.Application;
 using IaBimeta.Audit.Domain;
 using Microsoft.EntityFrameworkCore;
@@ -71,5 +72,41 @@ internal sealed class AuditRepository : IAuditRepository
             .ThenByDescending(e => e.Id)
             .Take(query.Take)
             .ToListAsync(cancellationToken);
+    }
+
+    public async Task<(IReadOnlyList<AuditEvent> Items, int Total)> ListPageAsync(AuditPageQuery query, CancellationToken cancellationToken)
+    {
+        var eventos = _db.Events.AsNoTracking();
+
+        if (!string.IsNullOrWhiteSpace(query.OperationContains))
+        {
+            var operacao = query.OperationContains.Trim().ToLowerInvariant();
+            eventos = eventos.Where(e => e.Operation.Contains(operacao));
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.ResourceContains))
+        {
+            var recurso = query.ResourceContains.Trim().ToLowerInvariant();
+            eventos = eventos.Where(e => e.ResourceId != null && e.ResourceId.ToLower().Contains(recurso));
+        }
+
+        if (Enum.TryParse<AuditOutcome>(query.Outcome, ignoreCase: true, out var desfecho))
+        {
+            eventos = eventos.Where(e => e.Outcome == desfecho);
+        }
+
+        if (query.From is { } de)
+        {
+            eventos = eventos.Where(e => e.OccurredAt >= de);
+        }
+
+        if (query.To is { } ate)
+        {
+            eventos = eventos.Where(e => e.OccurredAt < ate);
+        }
+
+        var total = await eventos.CountAsync(cancellationToken);
+        var itens = await eventos.OrderByDescending(e => e.OccurredAt).ThenByDescending(e => e.Id).Skip(query.Skip).Take(query.Take).ToListAsync(cancellationToken);
+        return (itens, total);
     }
 }

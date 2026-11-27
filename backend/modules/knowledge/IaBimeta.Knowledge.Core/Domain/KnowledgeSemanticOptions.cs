@@ -29,6 +29,9 @@ public sealed class KnowledgeSemanticOptions
 
     public TimeSpan MaxRetryBackoff { get; set; } = TimeSpan.FromMinutes(10);
 
+    /// <summary>O adiamento dos textos de uma empresa que não pode operar (suspensa ou situação ilegível): não gasta tentativa; evita reconsultar a cada ciclo.</summary>
+    public TimeSpan SuspendedDeferral { get; set; } = TimeSpan.FromMinutes(2);
+
     /// <summary>Por quanto tempo um lote reservado pertence a um Worker (se ele cair, outro retoma).</summary>
     public TimeSpan LeaseDuration { get; set; } = TimeSpan.FromMinutes(2);
 
@@ -44,7 +47,7 @@ public sealed class KnowledgeSemanticOptions
     public void Validate()
     {
         if (string.IsNullOrWhiteSpace(ModelId) || ModelId.Length > 100 || Dimension is < 8 or > 4096 || BatchSize is < 1 or > 128 || ReconcileInterval < TimeSpan.FromMilliseconds(200)
-            || MaxAttempts is < 1 or > 50 || RetryBackoff <= TimeSpan.Zero || MaxRetryBackoff < RetryBackoff || LeaseDuration < TimeSpan.FromSeconds(10)
+            || MaxAttempts is < 1 or > 50 || RetryBackoff <= TimeSpan.Zero || MaxRetryBackoff < RetryBackoff || LeaseDuration < TimeSpan.FromSeconds(10) || SuspendedDeferral < TimeSpan.FromSeconds(1)
             || MaxTextLength is < 50 or > 4000 || MinCandidateScore is < 0 or > 1 || MaxSearchLimit is < 1 or > 50)
         {
             throw new InvalidOperationException("Knowledge:Semantic é inválido (modelo, dimensão, lote, intervalos, tentativas, tamanhos ou piso de similaridade).");

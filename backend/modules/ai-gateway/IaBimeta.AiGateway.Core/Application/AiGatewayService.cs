@@ -30,6 +30,7 @@ public sealed class AiGatewayService : IAiGateway
     private readonly IAiUsageLedger _ledger;
     private readonly TimeProvider _clock;
     private readonly AiGatewayOptions _options;
+    private readonly ITenantOperationGate? _gate;
 
     public AiGatewayService(
         IRequestContextAccessor context,
@@ -38,7 +39,8 @@ public sealed class AiGatewayService : IAiGateway
         IAiCredentialResolver credentials,
         IAiUsageLedger ledger,
         TimeProvider clock,
-        AiGatewayOptions? options = null)
+        AiGatewayOptions? options = null,
+        ITenantOperationGate? gate = null)
     {
         _context = context;
         _configurations = configurations;
@@ -48,6 +50,7 @@ public sealed class AiGatewayService : IAiGateway
         _clock = clock;
         _options = options ?? new AiGatewayOptions();
         _options.EnsureValid();
+        _gate = gate;
     }
 
     public async Task<AiGenerationResult> GenerateAsync(AiGenerationRequest request, CancellationToken cancellationToken = default)
@@ -59,6 +62,12 @@ public sealed class AiGatewayService : IAiGateway
 
         var tenant = contexto.TenantId;
         var aiRequestId = Guid.CreateVersion7();
+
+        // Empresa suspensa (ou em provisionamento): nenhuma operação com custo de IA começa. Falha fechada e SEM tocar o provedor, a credencial nem o ledger.
+        if (_gate is not null && !(await _gate.GetAsync(tenant, cancellationToken)).IsOperational)
+        {
+            return Fail(aiRequestId, null, AiErrorKind.NotConfigured, AiFailureCodes.TenantSuspended);
+        }
 
         // A escolha depende só da configuração do TENANT do contexto: a de outro tenant, ou nenhuma, nunca é usada.
         var configuracao = await _configurations.GetAsync(tenant, cancellationToken);

@@ -1,6 +1,6 @@
 # ADR 0042 — Etapa 01 de prontidão: usuários, status, vagas, habilitação de cadastro, permissões individuais e primeiro acesso
 
-- **Status:** **Proposto (25/11/2026), Etapa 01 concluída e aprovada tecnicamente (25/11/2026)** — ver "Encerramento da Etapa 01". A ratificação do ADR como Aceito segue com o decisor; não é autorização de implantação em produção.
+- **Status:** **Aceito (25/11/2026)** — ratificado pelo decisor ao autorizar a Etapa 02, após a conclusão técnica da Etapa 01 (ver "Encerramento da Etapa 01"). Não é autorização de implantação em produção.
 - **Data:** 25/11/2026
 - **Decisor:** Mauro Porpino
 - **Referências:** ADR 0005 e `BOUNDARIES.md`, ADR 0039 e 0041 (Embedded), `docs/architecture/EMBEDDED-PLANO.md`.

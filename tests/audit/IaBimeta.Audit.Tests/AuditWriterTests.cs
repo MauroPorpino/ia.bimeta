@@ -32,6 +32,9 @@ public class AuditWriterTests
             return Task.CompletedTask;
         }
 
+        public Task<(IReadOnlyList<AuditEvent> Items, int Total)> ListPageAsync(AuditPageQuery query, CancellationToken cancellationToken) =>
+            Task.FromResult(((IReadOnlyList<AuditEvent>)new List<AuditEvent>(), 0));
+
         public Task<IReadOnlyList<AuditEvent>> ListAsync(AuditQuery query, CancellationToken cancellationToken)
         {
             UltimaConsulta = query;

@@ -10,6 +10,8 @@ public sealed record UserPolicy(int? MaxUsers, bool RegistrationEnabled, bool Is
 }
 
 /// <summary>As vagas do tenant agora. <see cref="SeatsUsed"/> = ativos + admissões pendentes com reserva viva: é o que o limite contratado limita.</summary>
+public sealed record SeatSummary(UserPolicy Policy, SeatUsage Usage);
+
 public sealed record SeatUsage(int Active, int Inactive, int PendingReserved, int PendingExpired, int Cancelled)
 {
     public int SeatsUsed => Active + PendingReserved;
@@ -67,6 +69,9 @@ public interface IUserAdminStore
 
     /// <summary>A política de usuários do tenant, lida na MESMA conexão e transação do chamador (quando há trava aberta, sob ela). Sem linha: <see cref="UserPolicy.Legacy"/>.</summary>
     Task<UserPolicy> GetPolicyAsync(TenantId tenantId, CancellationToken cancellationToken);
+
+    /// <summary>A política e a ocupação de vagas de TODAS as empresas que têm usuário ou política, só em contagens (visão geral da plataforma). Empresa ausente do resultado: sem usuários e sem política (legada).</summary>
+    Task<IReadOnlyDictionary<Guid, SeatSummary>> GetSeatSummariesAsync(DateTimeOffset now, CancellationToken cancellationToken);
 
     /// <summary>Grava a política sob a trava de admissão do tenant (na transação do chamador, se já houver uma). Devolve a anterior e a atual.</summary>
     Task<(UserPolicy Previous, UserPolicy Current)> SetPolicyAsync(TenantId tenantId, int? maxUsers, bool registrationEnabled, DateTimeOffset now, CancellationToken cancellationToken);

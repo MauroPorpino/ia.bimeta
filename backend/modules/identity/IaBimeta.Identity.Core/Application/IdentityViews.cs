@@ -10,7 +10,7 @@ public sealed record LoginResult(string Token, DateTimeOffset ExpiresAt);
 /// A identidade autenticada, devolvida ao host para ele criar o <see cref="RequestContext"/>. O tenant vem da sessão
 /// no banco, nunca da requisição.
 /// </summary>
-public sealed record AuthenticatedPrincipal(TenantId TenantId, Guid UserId, Guid SessionId, IReadOnlyList<PermissionGrant> Permissions, SessionKind Kind = SessionKind.Interactive, Guid? IntegrationId = null, EmbeddedScope? Embedded = null);
+public sealed record AuthenticatedPrincipal(TenantId TenantId, Guid UserId, Guid SessionId, IReadOnlyList<PermissionGrant> Permissions, SessionKind Kind = SessionKind.Interactive, Guid? IntegrationId = null, EmbeddedScope? Embedded = null, bool IsPlatform = false);
 
 public sealed record UserView(Guid Id, string Email, string DisplayName, DateTimeOffset CreatedAt, Locale? PreferredLocale = null)
 {

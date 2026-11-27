@@ -81,6 +81,37 @@ public static class RolePermissions
         Permission.EmbedManage,
     };
 
+    // Papéis da plataforma BImeta (ADR 0043): só existem no escopo do tenant técnico e só dão permissões de plataforma. Nenhum dá acesso a dado privado de cliente.
+    private static readonly Permission[] PlatformAdministratorPermissions =
+    {
+        Permission.PlatformTenantRead,
+        Permission.PlatformTenantCreate,
+        Permission.PlatformTenantUpdate,
+        Permission.PlatformTenantQuotaManage,
+        Permission.PlatformFirstAdminManage,
+        Permission.PlatformTenantSuspend,
+        Permission.PlatformOperatorManage,
+        Permission.PlatformPermissionManage,
+        Permission.PlatformAuditRead,
+        Permission.PlatformOverviewRead,
+    };
+
+    private static readonly Permission[] PlatformCommercialPermissions =
+    {
+        Permission.PlatformTenantRead,
+        Permission.PlatformTenantCreate,
+        Permission.PlatformTenantUpdate,
+        Permission.PlatformTenantQuotaManage,
+        Permission.PlatformFirstAdminManage,
+        Permission.PlatformOverviewRead,
+    };
+
+    private static readonly Permission[] PlatformViewerPermissions =
+    {
+        Permission.PlatformTenantRead,
+        Permission.PlatformOverviewRead,
+    };
+
     /// <param name="organizationId">A organização da concessão, ou nulo para a concessão de escopo do tenant.</param>
     public static IReadOnlyList<PermissionGrant> Expand(Role role, Guid? organizationId)
     {
@@ -90,6 +121,9 @@ public static class RolePermissions
             Role.Manager => ManagerPermissions,
             Role.Attendant => AttendantPermissions,
             Role.OrganizationAdmin => AdminPermissions,
+            Role.PlatformAdministrator when organizationId is null => PlatformAdministratorPermissions,
+            Role.PlatformCommercial when organizationId is null => PlatformCommercialPermissions,
+            Role.PlatformViewer when organizationId is null => PlatformViewerPermissions,
             _ => Array.Empty<Permission>(),
         };
 

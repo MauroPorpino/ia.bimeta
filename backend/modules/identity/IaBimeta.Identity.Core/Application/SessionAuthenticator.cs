@@ -1,4 +1,4 @@
-using IaBimeta.Identity.Contracts.Queries;
+﻿using IaBimeta.Identity.Contracts.Queries;
 using IaBimeta.Identity.Domain;
 using IaBimeta.SharedKernel;
 using IaBimeta.Tenancy.Contracts;
@@ -49,6 +49,13 @@ public sealed class SessionAuthenticator
             return null;
         }
 
+        // P1-05: uma sessão cuja autenticação COMEÇOU antes da última reativação da empresa nunca vale (a marca é o instante em que a autenticação foi iniciada, não o da gravação). Fecha a corrida em que um login iniciado
+        // antes da suspensão grava a sessão depois das revogações em lote: a reativação não a ressuscita. Novas sessões, iniciadas depois, valem normalmente.
+        if (tenant.ReactivatedAt is { } reativadaEm && sessao.CreatedAt < reativadaEm)
+        {
+            return null;
+        }
+
         var usuario = await _store.FindUserByIdAsync(sessao.TenantId, sessao.UserId, cancellationToken);
         if (usuario is null)
         {
@@ -65,6 +72,11 @@ public sealed class SessionAuthenticator
         var concessoes = await _store.ListGrantsAsync(sessao.TenantId, usuario.Id, cancellationToken);
         var ajustes = await _store.ListOverridesAsync(sessao.TenantId, usuario.Id, cancellationToken);
 
+        if (sessao.Kind == SessionKind.Embedded && tenant.Kind == TenantKind.Platform)
+        {
+            return null; // o tenant técnico da plataforma não tem sessão embutida
+        }
+
         if (sessao.Kind == SessionKind.Embedded)
         {
             return await AuthenticateEmbeddedAsync(sessao, usuario, concessoes, ajustes, cancellationToken);
@@ -76,9 +88,11 @@ public sealed class SessionAuthenticator
             return null;
         }
 
-        var permissoes = EffectivePermissions.Compute(concessoes, ajustes).ToList();
+        // ADR 0043: as permissões da plataforma só existem no tenant técnico e, nele, só elas; em uma empresa contratante são descartadas, mesmo que apareçam por qualquer caminho.
+        var plataforma = tenant.Kind == TenantKind.Platform;
+        var permissoes = EffectivePermissions.Compute(concessoes, ajustes).Where(g => PlatformPermissions.IsPlatform(g.Permission) == plataforma).ToList();
 
-        return new AuthenticatedPrincipal(sessao.TenantId, usuario.Id, sessao.Id, permissoes);
+        return new AuthenticatedPrincipal(sessao.TenantId, usuario.Id, sessao.Id, permissoes, IsPlatform: plataforma);
     }
 
     private async Task<AuthenticatedPrincipal?> AuthenticateEmbeddedAsync(Session sessao, User usuario, IReadOnlyList<UserOrganizationGrant> concessoes, IReadOnlyList<UserPermissionOverride> ajustes, CancellationToken cancellationToken)

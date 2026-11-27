@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using IaBimeta.Conversations.Contracts.Queries;
 using IaBimeta.SharedKernel;
 using IaBimeta.Workflows.Contracts;
@@ -20,9 +20,11 @@ public sealed class FlowRouter : IAutomationRouter
     private readonly IRequestContextAccessor _context;
     private readonly WorkflowsOptions _options;
     private readonly TimeProvider _clock;
+    private readonly ITenantOperationGate? _gate;
 
-    public FlowRouter(IFlowRuntimeStore store, IWorkflowStore versions, IConversationQueries sessions, IFlowCipher cipher, IRequestContextAccessor context, WorkflowsOptions options, TimeProvider clock)
+    public FlowRouter(IFlowRuntimeStore store, IWorkflowStore versions, IConversationQueries sessions, IFlowCipher cipher, IRequestContextAccessor context, WorkflowsOptions options, TimeProvider clock, ITenantOperationGate? operationGate = null)
     {
+        _gate = operationGate;
         _store = store;
         _versions = versions;
         _sessions = sessions;
@@ -40,10 +42,47 @@ public sealed class FlowRouter : IAutomationRouter
         }
 
         var decisao = await _store.GetDecisionAsync(sessionId, cancellationToken);
+        if (decisao?.Owner == AutomationOwner.Flow && await IsStaleFlowAsync(sessionId, cancel: false, cancellationToken))
+        {
+            return AutomationOwner.Agent; // o fluxo é de ANTES da última reativação: já não é o dono da sessão (somente leitura)
+        }
+
         return decisao?.Owner ?? AutomationOwner.Agent;
     }
 
-    public async Task<AutomationOwner> ResolveOnInboundAsync(Guid sessionId, long inboundSeq, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// O fluxo ativo da sessão foi CRIADO antes da última reativação da empresa (P1-03 da 2.ª revisão)? A referência é a data de criação, estável. Se sim, ele não responde mais: a sessão volta ao agente para a mensagem
+    /// NOVA (sem tocar o Conversations: o modo de atendimento atual, inclusive humano, continua valendo) e, com <paramref name="cancel"/>, o cancelamento seguro é pedido (o executor o conclui sem enviar nada).
+    /// </summary>
+    private async Task<bool> IsStaleFlowAsync(Guid sessionId, bool cancel, CancellationToken cancellationToken)
+    {
+        if (_gate is null)
+        {
+            return false;
+        }
+
+        var estado = await _gate.GetAsync(_context.GetRequired().TenantId, cancellationToken);
+        if (!estado.IsOperational || estado.OperationalSince is not { } corte)
+        {
+            return false;
+        }
+
+        var instancia = await _store.FindActiveBySessionAsync(sessionId, cancellationToken);
+        if (instancia is null || instancia.CreatedAt >= corte)
+        {
+            return false;
+        }
+
+        if (cancel)
+        {
+            instancia.RequestCancel("tenant-suspended", _clock.GetUtcNow());
+            await _store.SaveAsync(cancellationToken);
+        }
+
+        return true;
+    }
+
+    public async Task<AutomationOwner> ResolveOnInboundAsync(Guid sessionId, long inboundSeq, CancellationToken cancellationToken = default, DateTimeOffset? eventOccurredAt = null)
     {
         if (!_options.Enabled)
         {
@@ -53,6 +92,11 @@ public sealed class FlowRouter : IAutomationRouter
         var existente = await _store.GetDecisionAsync(sessionId, cancellationToken);
         if (existente is not null)
         {
+            if (existente.Owner == AutomationOwner.Flow && await IsStaleFlowAsync(sessionId, cancel: true, cancellationToken))
+            {
+                return AutomationOwner.Agent; // fluxo antigo: a mensagem NOVA é do agente (que respeita o modo de atendimento atual)
+            }
+
             return existente.Owner;
         }
 
@@ -60,6 +104,16 @@ public sealed class FlowRouter : IAutomationRouter
         {
             // Uma sessão em andamento não muda de dono: só a primeira mensagem pode escolher um fluxo.
             return AutomationOwner.Agent;
+        }
+
+        // P1-03: empresa suspensa não cria instância nem grava decisão; e um estímulo ANTERIOR à última reativação (entrega atrasada de um evento da suspensão) também não: a sessão fica com o agente e nada é criado.
+        if (_gate is not null)
+        {
+            var estado = await _gate.GetAsync(_context.GetRequired().TenantId, cancellationToken);
+            if (!estado.IsOperational || (eventOccurredAt is { } ocorridoEm && estado.OperationalSince is { } reativadaEm && ocorridoEm < reativadaEm))
+            {
+                return AutomationOwner.Agent;
+            }
         }
 
         if (!_cipher.IsConfigured)

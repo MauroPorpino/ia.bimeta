@@ -243,6 +243,19 @@ internal sealed class PostgresSemanticStore : ISemanticStore
         return await comando.ExecuteNonQueryAsync(cancellationToken) > 0;
     }
 
+    public async Task DeferAsync(PendingSemanticText item, DateTimeOffset nextAttempt, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        await using var conexao = await OpenAsync(cancellationToken);
+        await using var comando = new NpgsqlCommand(
+            "UPDATE knowledge.semantic_texts SET claimed_until = NULL, next_attempt_at = @p " +
+            "WHERE tenant_id = @t AND entry_ordinal = @e AND kind = @k AND alias_ordinal = @a AND text_hash = @h AND status = 1",
+            conexao);
+        AddKey(comando, item);
+        comando.Parameters.AddWithValue("h", item.TextHash);
+        comando.Parameters.Add(new NpgsqlParameter("p", NpgsqlDbType.TimestampTz) { Value = nextAttempt });
+        await comando.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     public async Task FailAsync(PendingSemanticText item, string code, DateTimeOffset? nextAttempt, DateTimeOffset now, CancellationToken cancellationToken)
     {
         await using var conexao = await OpenAsync(cancellationToken);

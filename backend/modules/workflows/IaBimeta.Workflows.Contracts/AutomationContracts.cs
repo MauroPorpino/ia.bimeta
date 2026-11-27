@@ -1,4 +1,4 @@
-namespace IaBimeta.Workflows.Contracts;
+﻿namespace IaBimeta.Workflows.Contracts;
 
 /// <summary>Quem responde a uma sessão (ADR 0038, §1): o agente de IA (o padrão) ou um fluxo do chatbot visual. Nunca os dois ao mesmo tempo.</summary>
 public enum AutomationOwner
@@ -19,8 +19,10 @@ public interface IAutomationRouter
     /// <summary>
     /// Chamado a cada mensagem do cliente. Só a PRIMEIRA mensagem de uma sessão (<paramref name="inboundSeq"/> = 1) pode escolher um fluxo, por uma ativação que case com a organização, a unidade e o canal da
     /// sessão: uma sessão em andamento nunca muda de dono por uma ativação criada depois. A decisão é gravada uma vez (índice único): disputas devolvem a mesma resposta.
+    /// Empresa suspensa, ou evento ANTERIOR à última reativação (<paramref name="eventOccurredAt"/>): nenhuma instância é criada nem decisão gravada (a sessão fica com o agente), para que um estímulo da suspensão, entregue
+    /// com atraso, nunca dispare um fluxo depois da reativação (P1-03).
     /// </summary>
-    Task<AutomationOwner> ResolveOnInboundAsync(Guid sessionId, long inboundSeq, CancellationToken cancellationToken = default);
+    Task<AutomationOwner> ResolveOnInboundAsync(Guid sessionId, long inboundSeq, CancellationToken cancellationToken = default, DateTimeOffset? eventOccurredAt = null);
 }
 
 /// <param name="OrganizationId">O escopo de organização da sessão: o conhecimento consultado é o desta organização.</param>
