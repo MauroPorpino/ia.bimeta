@@ -229,6 +229,7 @@ public sealed class PostgresFixture : IAsyncLifetime
                 {
                     catalogo.Models.Add(ModeloDoCatalogoOpenAi());
                     catalogo.Models.Add(ModeloDoCatalogoAnthropic());
+                    catalogo.Models.Add(ModeloDoCatalogoOllama());
                 }
             },
             limites =>
@@ -251,6 +252,9 @@ public sealed class PostgresFixture : IAsyncLifetime
 
             // O adaptador REAL da Anthropic (Etapa 03), também com o servidor HTTP simulado no lugar da rede.
             colecao.AddSingleton<IAiProvider>(_ => new IaBimeta.Adapters.Ai.Anthropic.AnthropicProvider(new HttpClient(ServidorAnthropic) { Timeout = Timeout.InfiniteTimeSpan }, new IaBimeta.Adapters.Ai.Anthropic.AnthropicOptions()));
+
+            // O adaptador REAL conversacional do Ollama (Etapa 04), sem credencial, com o servidor HTTP simulado no lugar da rede.
+            colecao.AddSingleton<IAiProvider>(_ => new IaBimeta.Adapters.Ai.Ollama.OllamaChatProvider(new HttpClient(ServidorOllama) { Timeout = Timeout.InfiniteTimeSpan }, new IaBimeta.Adapters.Ai.Ollama.OllamaChatOptions()));
             colecao.AddAgents(_ => ConnectionString, opcoes => { opcoes.KnowledgeGapHashKey = ChaveDeLacunasDeTeste; opcoes.SemanticAnswerEnabled = true; opcoes.LocalSuggestionsEnabled = true; opcoes.IntegrationLookupsEnabled = true; opcoes.ModelCallTimeout = TimeSpan.FromSeconds(30); });
             colecao.AddSingleton<IaBimeta.Knowledge.Contracts.ILocalGenerationProvider>(IaLocal);
             colecao.AddSingleton(BuscaSemantica);
@@ -333,7 +337,28 @@ public sealed class PostgresFixture : IAsyncLifetime
     /// <summary>O "servidor da Anthropic" (HTTP simulado) que o adaptador real da composição dos Agents chama: responde pelo roteiro do tenant cuja credencial chegou.</summary>
     internal IaBimeta.IntegrationTests.Agents.ServidorAnthropicSimulado ServidorAnthropic { get; } = new();
 
-    public const string ProvedorAnthropicDeTeste = IaBimeta.Adapters.Ai.Anthropic.AnthropicOptions.ProviderId;
+    /// <summary>O "servidor Ollama" (HTTP simulado) que o adaptador real da composição dos Agents chama: sem credencial, o roteiro é escolhido pelo canário das instruções do tenant.</summary>
+    internal IaBimeta.IntegrationTests.Agents.ServidorOllamaSimulado ServidorOllama { get; } = new();
+
+    public const string ProvedorOllamaDeTeste = IaBimeta.Adapters.Ai.Ollama.OllamaChatOptions.ProviderId;
+    public const string ModeloOllamaDeTeste = "qwen3:4b";
+
+    private static AiCatalogModelSettings ModeloDoCatalogoOllama() => new()
+    {
+        ProviderId = ProvedorOllamaDeTeste,
+        ModelId = ModeloOllamaDeTeste,
+        Profile = "atendimento-local",
+        ContextWindowTokens = 8192,
+        MaxOutputTokens = 1024,
+        Currency = "USD",
+        InputPerMillion = 0m,
+        CachedInputPerMillion = 0m,
+        CacheWritePerMillion = 0m,
+        OutputPerMillion = 0m,
+        Status = "Active",
+    };
+
+    public const string ProvedorAnthropicDeTeste =IaBimeta.Adapters.Ai.Anthropic.AnthropicOptions.ProviderId;
     public const string ModeloAnthropicDeTeste = "claude-haiku-5-5";
 
     private static AiCatalogModelSettings ModeloDoCatalogoAnthropic() => new()

@@ -39,7 +39,8 @@ public sealed record AiTenantStatusView(
     AiTenantStatus? Status,
     bool CredentialPresent,
     string? CredentialFingerprint,
-    DateTimeOffset? UpdatedAt);
+    DateTimeOffset? UpdatedAt,
+    bool CredentialRequired = true);
 
 /// <summary>
 /// Os casos de uso da configuração de IA do tenant (ADR 0017, seção D e E): escolher o provedor e o modelo, definir e revogar a credencial BYOK e consultar a situação. O tenant e o ator
@@ -95,7 +96,8 @@ public sealed class AiTenantConfigurationService
         }
 
         var credencial = await _store.FindActiveCredentialAsync(configuracao.ProviderId, cancellationToken);
-        return new AiTenantStatusView(true, configuracao.ProviderId, configuracao.ModelId, configuracao.Status, credencial is not null, credencial?.Fingerprint, configuracao.UpdatedAt);
+        var exigida = _providers?.Find(configuracao.ProviderId)?.RequiresCredential ?? true;
+        return new AiTenantStatusView(true, configuracao.ProviderId, configuracao.ModelId, configuracao.Status, credencial is not null, credencial?.Fingerprint, configuracao.UpdatedAt, exigida);
     }
 
     /// <summary>
@@ -161,6 +163,12 @@ public sealed class AiTenantConfigurationService
         if (!_catalog.ProviderIds.Contains(providerId, StringComparer.Ordinal) || !IsAvailable(providerId))
         {
             throw new AiGatewayValidationException("O provedor não faz parte do catálogo.");
+        }
+
+        // Um provedor sem chave comercial (servidor local) não guarda credencial: nenhum valor "de enfeite" é aceito nem cifrado.
+        if (_providers?.Find(providerId)?.RequiresCredential == false)
+        {
+            throw new AiGatewayValidationException("Este provedor não usa credencial do tenant.");
         }
 
         if (string.IsNullOrWhiteSpace(secret) || secret.Length > MaxSecretLength || secret.Any(char.IsControl))

@@ -125,3 +125,7 @@ E feche as janelas do Api e do Worker.
 ## Anthropic (Etapa 03)
 
 Validação do adaptador da Anthropic **sem chamada paga**: `Start-AnthropicSimulada.ps1` (porta 5200, Messages API simulada), `Novo-TenantDeAnthropicDeDemonstracao.ps1` (empresa sintética `demo-anthropic`, chave sintética) e `Set-ChaveDaAnthropic.ps1` (só para a validação real, **mediante autorização**; pede a chave sem eco). Procedimento completo em `docs/operations/ETAPA-03-ANTHROPIC.md`; roteiro da API real em `docs/operations/ETAPA-03-ANTHROPIC-API-REAL.md`.
+
+## Ollama (Etapa 04)
+
+Validação do adaptador conversacional **sem instalar o Ollama nem baixar modelo**: `Start-OllamaSimulado.ps1` (porta 5201: `/api/version`, `/api/tags`, `/api/show`, `/api/chat` simulados), `Novo-TenantDeOllamaDeDemonstracao.ps1` (empresa sintética `demo-ollama`, **sem chave**) e `Test-ServidorOllama.ps1` (sondagem somente leitura de um servidor real ou simulado). O Api, o Worker e o `provision` precisam de `AiGateway__Providers__Ollama__BaseAddress=http://127.0.0.1:5201/` e `AiGateway__Catalog__Models__3__Status=Active` (o modelo vem desativado no catálogo). Procedimento completo e limites em `docs/operations/ETAPA-04-OLLAMA.md`.

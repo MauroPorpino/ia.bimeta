@@ -147,6 +147,8 @@ public static class ApiHost
         // O adaptador da OpenAI (C4): HttpClient direto na Responses API, credencial BYOK por chamada, nenhum segredo na configuração.
         builder.Services.AddOpenAiProvider(openai => builder.Configuration.GetSection("AiGateway:Providers:OpenAi").Bind(openai));
         builder.Services.AddAnthropicProvider(anthropic => builder.Configuration.GetSection("AiGateway:Providers:Anthropic").Bind(anthropic));
+        // O adaptador conversacional do Ollama (Etapa 04): sem chave comercial; o endereço é só da infraestrutura (seção AiGateway:Providers:Ollama), nunca do tenant.
+        builder.Services.AddOllamaChatProvider(ollama => builder.Configuration.GetSection("AiGateway:Providers:Ollama").Bind(ollama));
 
         // O adaptador do WhatsApp Cloud API (Meta): o Receiver do webhook o usa para verificar a assinatura e normalizar o corpo. Nenhum segredo na configuração: o App Secret e o token de acesso são por conta, cifrados.
         builder.Services.AddWhatsAppAdapter(whatsapp => builder.Configuration.GetSection("Channels:Providers:WhatsApp").Bind(whatsapp));
@@ -264,6 +266,12 @@ public static class ApiHost
         }
 
         var app = builder.Build();
+
+        // Etapa 04: modelo ATIVO do Ollama com janela do catálogo diferente da que o perfil aloca (ou perfil inexistente) é configuração incoerente: o Api não sobe.
+        var catalogoDeIa = app.Services.GetRequiredService<IaBimeta.AiGateway.Domain.AiModelCatalog>();
+        OllamaCatalogCoherence.EnsureCoherent(
+            app.Services.GetRequiredService<OllamaChatOptions>(),
+            catalogoDeIa.Models.Select(m => new OllamaCatalogEntry(m.ProviderId, m.ModelId, m.Profile, m.ContextWindowTokens, m.MaxOutputTokens, m.Status == IaBimeta.AiGateway.Contracts.AiModelStatus.Active)));
 
         // Primeiro da fila: o guarda do ingresso, o limite de login e o resto já veem o endereço REAL do cliente (e o esquema https do proxy).
         if (encaminhamento.Enabled)

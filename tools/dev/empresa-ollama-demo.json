@@ -1,0 +1,25 @@
+// Empresa SINTETICA para validar a Etapa 04 (adaptador conversacional do Ollama). Usada por tools\dev\Novo-TenantDeOllamaDeDemonstracao.ps1.
+// Nenhum segredo aqui: o Ollama nao tem chave (sem "apiKeyEnv"); o campo "passwordEnv" e o NOME de uma variavel que o script define so para o processo dele.
+{
+  "tenant": {
+    "slug": "demo-ollama",
+    "name": "Empresa Demo Ollama",
+    "maxUsers": 5,
+    "userRegistrationEnabled": true
+  },
+  "administrator": {
+    "email": "admin@demo-ollama.local",
+    "displayName": "Marina Administradora",
+    "passwordEnv": "DEMO_OLLAMA_SENHA_ADMIN"
+  },
+  "organization": { "name": "Empresa Demo Ollama", "unitName": "Matriz" },
+  "queue": { "name": "Atendimento humano" },
+  "ai": {
+    "providerId": "ollama",
+    "modelId": "qwen3:4b",
+    "instructions": "Voce e uma assistente de demonstracao. Responda de forma curta e cordial.",
+    "handoffNotice": "Vou chamar uma pessoa da equipe. Um instante!",
+    "faq": []
+  },
+  "whatsApp": { "mode": "simulated" }
+}

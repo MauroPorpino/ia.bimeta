@@ -15,9 +15,10 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
-  <!-- DEP-2: um adaptador referencia só o Contracts do módulo dono (Knowledge). -->
+  <!-- DEP-2: um adaptador referencia só o Contracts do módulo dono da porta: Knowledge (embeddings e geração local, ADR 0034) e AiGateway (conversa, Etapa 04). -->
   <ItemGroup>
     <ProjectReference Include="..\..\modules\knowledge\IaBimeta.Knowledge.Contracts\IaBimeta.Knowledge.Contracts.csproj" />
+    <ProjectReference Include="..\..\modules\ai-gateway\IaBimeta.AiGateway.Contracts\IaBimeta.AiGateway.Contracts.csproj" />
   </ItemGroup>
 
 </Project>

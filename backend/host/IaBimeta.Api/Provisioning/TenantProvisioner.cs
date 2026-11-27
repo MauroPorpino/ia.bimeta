@@ -448,7 +448,9 @@ internal sealed class TenantProvisioner
         else
         {
             situacao = await ia.GetStatusAsync(ct);
-            credencial = situacao.CredentialPresent
+            credencial = !situacao.CredentialRequired
+                ? "este provedor não usa chave (servidor local ou de rede privada)"
+                : situacao.CredentialPresent
                 ? "chave do provedor já cadastrada"
                 : "SEM chave do provedor: a IA transfere tudo ao atendente até ela ser cadastrada (defina a variável indicada em ai.apiKeyEnv e repita)";
         }

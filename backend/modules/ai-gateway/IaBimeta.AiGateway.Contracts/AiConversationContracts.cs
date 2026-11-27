@@ -35,6 +35,12 @@ public sealed record AiStructuredOutput(string Name, string JsonSchema);
 /// </summary>
 public sealed record AiCredential(string Secret)
 {
+    /// <summary>
+    /// A ausência de credencial, para o provedor que declara <see cref="Ports.IAiProvider.RequiresCredential"/> falso (um servidor de IA local, Etapa 04). NÃO é uma chave fictícia: é vazia, e um adaptador
+    /// que exige credencial nunca a recebe (o AiGateway falha fechado sem a credencial do tenant).
+    /// </summary>
+    public static AiCredential None { get; } = new(string.Empty);
+
     public override string ToString() => "AiCredential { Secret = [oculto] }";
 }
 

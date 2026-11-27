@@ -1,4 +1,6 @@
+using IaBimeta.Adapters.Ai.Ollama;
 using IaBimeta.Agents.Domain;
+using IaBimeta.AiGateway.Contracts;
 using IaBimeta.AiGateway.Application;
 using IaBimeta.AiGateway.Domain;
 using IaBimeta.AiGateway.Infrastructure;
@@ -18,9 +20,11 @@ internal sealed class AiConfigurationReport : IHostedService
     private readonly AiDefaultLimits _limits;
     private readonly AgentsOptions _agents;
     private readonly ILogger<AiConfigurationReport> _logger;
+    private readonly OllamaServerProbe? _ollama;
 
-    public AiConfigurationReport(AiModelCatalog catalog, AiProviderRegistry providers, AiSecretOptions secrets, AiDefaultLimits limits, AgentsOptions agents, ILogger<AiConfigurationReport> logger)
+    public AiConfigurationReport(AiModelCatalog catalog, AiProviderRegistry providers, AiSecretOptions secrets, AiDefaultLimits limits, AgentsOptions agents, ILogger<AiConfigurationReport> logger, OllamaServerProbe? ollama = null)
     {
+        _ollama = ollama;
         _catalog = catalog;
         _providers = providers;
         _secrets = secrets;
@@ -29,7 +33,7 @@ internal sealed class AiConfigurationReport : IHostedService
         _logger = logger;
     }
 
-    public Task StartAsync(CancellationToken cancellationToken)
+    public async Task StartAsync(CancellationToken cancellationToken)
     {
         var modelos = string.Join(", ", _catalog.Models.Select(m => _providers.Find(m.ProviderId) is null ? $"{m.ProviderId}/{m.ModelId} (SEM ADAPTADOR: indisponivel)" : $"{m.ProviderId}/{m.ModelId}"));
         var adaptadores = string.Join(", ", _providers.ProviderIds.Order(StringComparer.Ordinal));
@@ -52,7 +56,45 @@ internal sealed class AiConfigurationReport : IHostedService
             "Registro de lacunas do FAQ deste Worker: {Gaps} (chave do hash configurada: {Key}; Agents:Options:KnowledgeGapsEnabled: {Enabled}).",
             lacunasLigadas ? "LIGADO" : "desligado", string.IsNullOrWhiteSpace(_agents.KnowledgeGapHashKey) ? "NÃO" : "sim", _agents.KnowledgeGapsEnabled ? "sim" : "NÃO");
 
-        return Task.CompletedTask;
+        await ReportOllamaAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Só quando o catálogo tem modelo ATIVO do Ollama (nenhum vem ativo de fábrica): sonda, em modo leitura e com tempo curto, se o servidor responde e se cada modelo está instalado e é compatível com conversa. Nunca baixa
+    /// nem instala nada, nunca imprime o endereço, e a falha da sonda nunca impede a partida do Worker.
+    /// </summary>
+    private async Task ReportOllamaAsync(CancellationToken cancellationToken)
+    {
+        var ativos = _catalog.Models.Where(m => m.ProviderId == OllamaChatOptions.ProviderId && m.Status == AiModelStatus.Active).Select(m => m.ModelId).ToList();
+        if (_ollama is null || ativos.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var situacao = await _ollama.ProbeAsync(ativos, TimeSpan.FromSeconds(3), cancellationToken);
+            if (!situacao.Reachable)
+            {
+                _logger.LogWarning("Ollama: servidor NÃO acessível ({Code}); os tenants que usam modelos do Ollama vão transferir ao atendente até ele voltar.", situacao.ErrorCode);
+                return;
+            }
+
+            foreach (var modelo in situacao.Models)
+            {
+                _logger.LogInformation(
+                    "Ollama: modelo {Model}: instalado {Installed}, compatível com conversa {Compatible}; versão do servidor {Version}.",
+                    modelo.ModelId, modelo.Installed ? "sim" : "NÃO", modelo.Compatible ? "sim" : "NÃO", situacao.Version ?? "?");
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Ollama: a sondagem falhou ({Type}).", ex.GetType().Name);
+        }
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;

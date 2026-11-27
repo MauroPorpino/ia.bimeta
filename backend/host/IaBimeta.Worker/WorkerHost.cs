@@ -124,6 +124,7 @@ public static class WorkerHost
         // O adaptador da OpenAI (C4): o Worker é quem chama o modelo (o executor de turnos do Agents). Nenhum segredo na configuração: a credencial BYOK de cada tenant chega por chamada.
         builder.Services.AddOpenAiProvider(openai => builder.Configuration.GetSection("AiGateway:Providers:OpenAi").Bind(openai));
         builder.Services.AddAnthropicProvider(anthropic => builder.Configuration.GetSection("AiGateway:Providers:Anthropic").Bind(anthropic));
+        builder.Services.AddOllamaChatProvider(ollama => builder.Configuration.GetSection("AiGateway:Providers:Ollama").Bind(ollama));
         builder.Services.AddOutboxRelay<ConversationsDbContext>();
 
         // O Inbox do Channels (ADR 0011): o Receiver do Api grava os eventos do provedor no outbox do Channels, e este relay os entrega, em ordem por lane, aos handlers do próprio módulo (a ingestão no
@@ -203,7 +204,14 @@ public static class WorkerHost
         }
 
         overrideServices?.Invoke(builder.Services);
-        return builder.Build();
+        var host = builder.Build();
+
+        // Etapa 04: modelo ATIVO do Ollama com janela do catálogo diferente da que o perfil aloca (ou perfil inexistente) é configuração incoerente: o Worker não sobe.
+        var catalogoDeIa = host.Services.GetRequiredService<IaBimeta.AiGateway.Domain.AiModelCatalog>();
+        OllamaCatalogCoherence.EnsureCoherent(
+            host.Services.GetRequiredService<OllamaChatOptions>(),
+            catalogoDeIa.Models.Select(m => new OllamaCatalogEntry(m.ProviderId, m.ModelId, m.Profile, m.ContextWindowTokens, m.MaxOutputTokens, m.Status == IaBimeta.AiGateway.Contracts.AiModelStatus.Active)));
+        return host;
     }
 
     // Todos os módulos usam o mesmo banco por enquanto: a string própria do módulo, senão a padrão e, por compatibilidade, a do Tenancy.

@@ -21,6 +21,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\..\backend\adapters\IaBimeta.Adapters.Ai.Ollama\IaBimeta.Adapters.Ai.Ollama.csproj" />
     <ProjectReference Include="..\..\..\backend\modules\knowledge\IaBimeta.Knowledge.Contracts\IaBimeta.Knowledge.Contracts.csproj" />
+    <ProjectReference Include="..\..\..\backend\modules\ai-gateway\IaBimeta.AiGateway.Contracts\IaBimeta.AiGateway.Contracts.csproj" />
   </ItemGroup>
 
 </Project>

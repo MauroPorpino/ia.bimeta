@@ -106,20 +106,28 @@ public sealed class AiGatewayService : IAiGateway
             return Fail(aiRequestId, modelo, AiErrorKind.TenantLimitExceeded, AiFailureCodes.PerCallTokenLimit);
         }
 
+        // Só um provedor que declara não ter chave comercial (servidor de IA local, Etapa 04) dispensa a credencial; todos os outros falham fechados sem ela.
         AiCredential? credencial;
-        try
+        if (!provedor.RequiresCredential)
         {
-            credencial = await _credentials.ResolveAsync(tenant, modelo.ProviderId, cancellationToken);
+            credencial = AiCredential.None;
         }
-        catch (AiSecretsUnavailableException)
+        else
         {
-            // A chave mestra não está disponível: falha da PLATAFORMA (não do tenant), fechada, e nada do conteúdo da chave é repetido.
-            return Fail(aiRequestId, modelo, AiErrorKind.NotConfigured, AiFailureCodes.SecretsUnavailable);
-        }
+            try
+            {
+                credencial = await _credentials.ResolveAsync(tenant, modelo.ProviderId, cancellationToken);
+            }
+            catch (AiSecretsUnavailableException)
+            {
+                // A chave mestra não está disponível: falha da PLATAFORMA (não do tenant), fechada, e nada do conteúdo da chave é repetido.
+                return Fail(aiRequestId, modelo, AiErrorKind.NotConfigured, AiFailureCodes.SecretsUnavailable);
+            }
 
-        if (credencial is null || string.IsNullOrWhiteSpace(credencial.Secret))
-        {
-            return Fail(aiRequestId, modelo, AiErrorKind.InvalidCredentials, AiFailureCodes.CredentialMissing);
+            if (credencial is null || string.IsNullOrWhiteSpace(credencial.Secret))
+            {
+                return Fail(aiRequestId, modelo, AiErrorKind.InvalidCredentials, AiFailureCodes.CredentialMissing);
+            }
         }
 
         var tempoLimite = request.Timeout > _options.MaxCallTimeout ? _options.MaxCallTimeout : request.Timeout;
