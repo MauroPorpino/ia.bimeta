@@ -115,6 +115,9 @@ public static class AiGatewayInfrastructureExtensions
         services.AddScoped<IAiCredentialResolver, AiCredentialResolver>();
         services.AddScoped<IAiUsageLedger, PostgresAiUsageLedger>();
         services.AddScoped<AiTenantConfigurationService>();
+        services.AddSingleton<AiDiagnosticStore>();
+        services.AddSingleton<AiDiagnosticThrottle>();
+        services.AddScoped<AiProviderAdminService>();
         services.AddScoped<AiGatewayService>();
         services.AddScoped<IAiGateway>(provider => provider.GetRequiredService<AiGatewayService>());
 

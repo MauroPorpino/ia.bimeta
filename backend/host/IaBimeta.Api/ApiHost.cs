@@ -7,6 +7,7 @@ using IaBimeta.Agents.Presentation;
 using IaBimeta.Agents.Infrastructure;
 using IaBimeta.AiGateway.Application;
 using IaBimeta.AiGateway.Infrastructure;
+using IaBimeta.AiGateway.Presentation;
 using IaBimeta.Api.Platform;
 using IaBimeta.Api.Channels;
 using IaBimeta.Api.ContactCenter;
@@ -314,6 +315,7 @@ public static class ApiHost
 
         // A API administrativa do agente do tenant (ADR 0030): revisão das lacunas do FAQ, rascunho e publicação da definição.
         app.MapAgentsEndpoints();
+        app.MapAiProviderEndpoints();
 
         // A API do Motor de Integração Empresarial (ADR 0035): conexões, operações, execuções e histórico.
         app.MapCapabilitiesEndpoints();

@@ -20,6 +20,9 @@ internal sealed class ServidorOllamaSimulado : HttpMessageHandler
 
     public void Definir(string canarioDasInstrucoes, Func<CapturaHttp, CancellationToken, Task<HttpResponseMessage>> roteiro) => _roteiros[canarioDasInstrucoes] = roteiro;
 
+    /// <summary>O roteiro das requisições SEM canário de tenant (a sondagem do servidor: GET /api/version e /api/tags, POST /api/show). Sem ele, 404.</summary>
+    public Func<CapturaHttp, CancellationToken, Task<HttpResponseMessage>>? Padrao { get; set; }
+
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         var corpo = request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(cancellationToken);
@@ -32,6 +35,11 @@ internal sealed class ServidorOllamaSimulado : HttpMessageHandler
             {
                 return await roteiro(captura, cancellationToken);
             }
+        }
+
+        if (Padrao is not null)
+        {
+            return await Padrao(captura, cancellationToken);
         }
 
         return Json(HttpStatusCode.NotFound, "{\"error\":\"model not found\"}");

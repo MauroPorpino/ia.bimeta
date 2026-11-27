@@ -201,16 +201,17 @@ public class GrafoDeProjetosTests
         Assert.Contains("IaBimeta.AiGateway.Contracts", nomes);
         Assert.Contains("IaBimeta.AiGateway.Core", nomes);
         Assert.Contains("IaBimeta.AiGateway.Infrastructure", nomes);
-        Assert.DoesNotContain("IaBimeta.AiGateway.Presentation", nomes);
+        Assert.Contains("IaBimeta.AiGateway.Presentation", nomes); // Etapa 05 (a C1.5 prevista no ADR 0017): a API administrativa dos provedores de IA do tenant
 
         // Só o Audit entre os outros módulos (a auditoria da configuração do tenant); nenhum outro módulo, nenhum adaptador. A matriz não mudou.
         var doModulo = Projetos.Where(p => p.Nome.StartsWith("IaBimeta.AiGateway.", StringComparison.Ordinal) && !p.Nome.EndsWith("Tests", StringComparison.Ordinal)).ToList();
-        Assert.Equal(3, doModulo.Count);
+        Assert.Equal(4, doModulo.Count); // Etapa 05: a Presentation (API administrativa dos provedores de IA), como a do Agents
         var permitidas = new Dictionary<string, string[]>
         {
             ["IaBimeta.AiGateway.Contracts"] = Array.Empty<string>(),
             ["IaBimeta.AiGateway.Core"] = new[] { "IaBimeta.SharedKernel", "IaBimeta.AiGateway.Contracts", "IaBimeta.Audit.Contracts" },
             ["IaBimeta.AiGateway.Infrastructure"] = new[] { "IaBimeta.SharedKernel", "IaBimeta.AiGateway.Contracts", "IaBimeta.AiGateway.Core" },
+            ["IaBimeta.AiGateway.Presentation"] = new[] { "IaBimeta.SharedKernel", "IaBimeta.AiGateway.Core" },
         };
         foreach (var projeto in doModulo)
         {

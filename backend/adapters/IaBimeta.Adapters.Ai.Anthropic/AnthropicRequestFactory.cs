@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using IaBimeta.AiGateway.Contracts;
+using IaBimeta.AiGateway.Contracts.Ports;
 
 namespace IaBimeta.Adapters.Ai.Anthropic;
 
@@ -166,5 +167,23 @@ internal static class AnthropicRequestFactory
         }
 
         return corrigido?.ToString() ?? texto;
+    }
+
+    /// <summary>
+    /// O pedido de verificação do modelo (<c>GET {base}/models/{modelo}</c>, com a versão da API), ou nulo se a credencial não tem formato de chave (nada é enviado). A credencial vai só no cabeçalho DESTE pedido: o único
+    /// outro ponto, além da geração, em que o valor é lido.
+    /// </summary>
+    public static HttpRequestMessage? CreateModelLookup(AiConnectivityRequest request, AnthropicOptions options)
+    {
+        if (!IsHeaderSafeToken(request.Credential.Secret))
+        {
+            return null;
+        }
+
+        var mensagem = new HttpRequestMessage(HttpMethod.Get, new Uri(new Uri(options.BaseAddress, UriKind.Absolute), "models/" + Uri.EscapeDataString(request.ModelId)));
+        mensagem.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        mensagem.Headers.Authorization = new AuthenticationHeaderValue("Bearer", request.Credential.Secret);
+        mensagem.Headers.TryAddWithoutValidation("anthropic-version", options.ApiVersion);
+        return mensagem;
     }
 }

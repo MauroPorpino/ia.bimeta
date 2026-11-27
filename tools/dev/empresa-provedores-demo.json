@@ -1,0 +1,28 @@
+// Empresa SINTETICA para validar a Etapa 05 (Configuracoes -> Inteligencia artificial) com os tres provedores SIMULADOS.
+// Comeca com o Ollama simulado como padrao e SEM nenhuma credencial: as chaves sinteticas da OpenAI e da Anthropic sao cadastradas pela interface.
+// Nenhum segredo aqui: os campos terminados em "Env" sao o NOME de uma variavel que o script define so para o processo dele.
+{
+  "tenant": {
+    "slug": "demo-provedores",
+    "name": "Empresa Demo Provedores de IA",
+    "unlimitedUsers": true
+  },
+  "administrator": {
+    "email": "admin@demo-provedores.local",
+    "displayName": "Marina Administradora",
+    "passwordEnv": "DEMO_PROVEDORES_SENHA_ADMIN"
+  },
+  "organization": { "name": "Empresa Demo Provedores", "unitName": "Matriz" },
+  "queue": { "name": "Atendimento humano" },
+  "ai": {
+    "providerId": "ollama",
+    "modelId": "qwen3:4b",
+    "instructions": "Voce e uma assistente de demonstracao. Responda de forma curta e cordial.",
+    "handoffNotice": "Vou chamar uma pessoa da equipe. Um instante!",
+    "faq": []
+  },
+  "whatsApp": { "mode": "simulated" },
+  "attendants": [
+    { "email": "ana@demo-provedores.local", "displayName": "Ana Atendente", "passwordEnv": "DEMO_PROVEDORES_SENHA_ATENDENTE" }
+  ]
+}

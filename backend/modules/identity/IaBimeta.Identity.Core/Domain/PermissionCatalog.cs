@@ -40,6 +40,11 @@ public static class PermissionCatalog
         new(Permission.WorkflowTest, "Fluxos", "Simular fluxos", false),
         new(Permission.AuditRead, "Configurações", "Consultar a auditoria", true),
         new(Permission.TenantSettingsManage, "Configurações", "Alterar as configurações do tenant", true),
+        new(Permission.AiSettingsRead, "Inteligência artificial", "Consultar a configuração de IA e os diagnósticos", true),
+        new(Permission.AiSettingsManage, "Inteligência artificial", "Escolher o provedor e o modelo padrão", true),
+        new(Permission.AiCredentialManage, "Inteligência artificial", "Cadastrar, substituir e remover credenciais dos provedores", true),
+        new(Permission.AiConnectivityTest, "Inteligência artificial", "Testar a conectividade dos provedores (sem geração)", true),
+        new(Permission.AiGenerationTest, "Inteligência artificial", "Testar a geração de IA (pode gerar cobrança)", true),
     };
 
     private static readonly Dictionary<Permission, PermissionInfo> ByPermission = Items.ToDictionary(i => i.Permission);

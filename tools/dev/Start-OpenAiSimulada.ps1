@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Uma "OpenAI" local para a demonstracao do atendimento SEM credito e SEM chamada paga: escuta em 127.0.0.1 e
     responde a Responses API no formato que o adaptador espera. Roda ate Ctrl-C.
@@ -34,6 +34,18 @@ try {
         $leitor = New-Object System.IO.StreamReader($contexto.Request.InputStream, [System.Text.Encoding]::UTF8)
         $corpo = $leitor.ReadToEnd()
 
+        # Etapa 05: a verificacao de conectividade (GET /v1/models/{modelo}), sem gerar texto. Qualquer modelo existe no simulador.
+        if ($contexto.Request.HttpMethod -eq 'GET' -and $contexto.Request.Url.AbsolutePath -match '/v1/models/(.+)$') {
+            $idDoModelo = [System.Uri]::UnescapeDataString($Matches[1])
+            Write-Host ((Get-Date).ToString('HH:mm:ss') + ' verificacao do modelo=' + $idDoModelo)
+            $bytesModelo = [System.Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject @{ id = $idDoModelo; object = 'model'; created = 1; owned_by = 'simulada' } -Compress))
+            $contexto.Response.StatusCode = 200
+            $contexto.Response.ContentType = 'application/json'
+            $contexto.Response.ContentLength64 = $bytesModelo.Length
+            $contexto.Response.OutputStream.Write($bytesModelo, 0, $bytesModelo.Length)
+            $contexto.Response.Close()
+            continue
+        }
         $ultima = ''
         $modelo = ''
         try {

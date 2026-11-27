@@ -26,6 +26,12 @@ internal sealed class AiTenantConfigurationStore : IAiTenantConfigurationStore
     public Task<StoredAiCredential?> FindActiveCredentialAsync(string providerId, CancellationToken cancellationToken) =>
         _db.Credentials.SingleOrDefaultAsync(c => c.ProviderId == providerId && c.Status == StoredAiCredentialStatus.Active, cancellationToken);
 
+    public async Task<AiCredentialInfo?> ReadCredentialInfoAsync(string providerId, CancellationToken cancellationToken) =>
+        await _db.Credentials.AsNoTracking()
+            .Where(c => c.ProviderId == providerId && c.Status == StoredAiCredentialStatus.Active)
+            .Select(c => new AiCredentialInfo(c.Fingerprint, c.UpdatedAt))
+            .SingleOrDefaultAsync(cancellationToken);
+
     public async Task SaveSettingsAsync(AiTenantSettings settings, bool isNew, CancellationToken cancellationToken)
     {
         if (isNew)

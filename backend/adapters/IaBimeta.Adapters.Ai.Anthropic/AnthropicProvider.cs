@@ -12,7 +12,7 @@ namespace IaBimeta.Adapters.Ai.Anthropic;
 /// O teto de tokens de saída que o AiGateway limitou é imposto na própria requisição (<c>max_output_tokens</c>), e o consumo informado pelo provedor volta normalizado, com a certeza declarada
 /// (ver <see cref="AnthropicResponseReader"/>).
 /// </summary>
-public sealed class AnthropicProvider : IAiProvider, IDisposable
+public sealed partial class AnthropicProvider : IAiProvider, IDisposable
 {
     private readonly HttpClient _http;
     private readonly AnthropicOptions _options;

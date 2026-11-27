@@ -1,4 +1,5 @@
 using IaBimeta.AiGateway.Contracts;
+using IaBimeta.AiGateway.Contracts.Ports;
 using IaBimeta.AiGateway.Domain;
 using IaBimeta.SharedKernel;
 
@@ -31,6 +32,7 @@ public sealed class AiGatewayService : IAiGateway
     private readonly TimeProvider _clock;
     private readonly AiGatewayOptions _options;
     private readonly ITenantOperationGate? _gate;
+    private readonly AiDefaultLimits? _defaultLimits;
 
     public AiGatewayService(
         IRequestContextAccessor context,
@@ -40,7 +42,8 @@ public sealed class AiGatewayService : IAiGateway
         IAiUsageLedger ledger,
         TimeProvider clock,
         AiGatewayOptions? options = null,
-        ITenantOperationGate? gate = null)
+        ITenantOperationGate? gate = null,
+        AiDefaultLimits? defaultLimits = null)
     {
         _context = context;
         _configurations = configurations;
@@ -51,6 +54,7 @@ public sealed class AiGatewayService : IAiGateway
         _options = options ?? new AiGatewayOptions();
         _options.EnsureValid();
         _gate = gate;
+        _defaultLimits = defaultLimits;
     }
 
     public async Task<AiGenerationResult> GenerateAsync(AiGenerationRequest request, CancellationToken cancellationToken = default)
@@ -77,10 +81,85 @@ public sealed class AiGatewayService : IAiGateway
             return Fail(aiRequestId, null, AiErrorKind.NotConfigured, selecao.Code);
         }
 
-        var modelo = selecao.Model!;
-        var provedor = selecao.Provider!;
-        var limites = selecao.Configuration!.Limits;
+        return await ExecuteAsync(request, tenant, aiRequestId, selecao.Model!, selecao.Provider!, selecao.Configuration!.Limits, cancellationToken);
+    }
 
+    /// <summary>A mensagem SINTÉTICA do teste de geração: fixa, controlada pelo sistema, sem dado de cliente nem de conversa.</summary>
+    public const string DiagnosticSystemInstruction = "Você é um verificador de configuração do sistema ia.bimeta. Responda somente com a palavra OK.";
+
+    public const string DiagnosticUserMessage = "Teste de configuração do sistema.";
+
+    /// <summary>O teto de saída do teste de geração (reduzido de propósito).</summary>
+    public const int DiagnosticMaxOutputTokens = 64;
+
+    /// <summary>O tempo limite do teste de geração.</summary>
+    public static readonly TimeSpan DiagnosticTimeout = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// O TESTE DE GERAÇÃO (Etapa 05): uma geração de IA com a mensagem sintética fixa, para um provedor e um modelo do catálogo escolhidos EXPLICITAMENTE, sem tocar a configuração padrão do tenant. Passa pela mesma sequência do
+    /// <see cref="GenerateAsync"/> (suspensão, limites reduzidos, credencial do tenant, vaga e ledger, adaptador) e registra o consumo como qualquer chamada, com correlação <c>diagnostic:…</c> (a finalidade diagnóstica no
+    /// ledger, sem coluna nova). Nunca faz fallback para outro provedor, nunca usa conversa real, canal nem fluxo. Exige <see cref="Permission.AiGenerationTest"/> (ou a permissão ampla <see cref="Permission.TenantSettingsManage"/>);
+    /// o tenant vem do contexto confiável.
+    /// </summary>
+    public async Task<AiGenerationResult> GenerateDiagnosticAsync(string providerId, string modelId, CancellationToken cancellationToken = default)
+    {
+        var contexto = _context.GetRequired();
+        AiAccess.Require(contexto, Permission.AiGenerationTest);
+
+        var tenant = contexto.TenantId;
+        var aiRequestId = Guid.CreateVersion7();
+        if (_gate is not null && !(await _gate.GetAsync(tenant, cancellationToken)).IsOperational)
+        {
+            return Fail(aiRequestId, null, AiErrorKind.NotConfigured, AiFailureCodes.TenantSuspended);
+        }
+
+        // A configuração do tenant só decide a habilitação, os limites e a origem da credencial: o provedor e o modelo vêm do pedido, validados contra o catálogo e os adaptadores.
+        var configuracao = await _configurations.GetAsync(tenant, cancellationToken);
+        if (configuracao is not null && configuracao.TenantId != tenant)
+        {
+            return Fail(aiRequestId, null, AiErrorKind.NotConfigured, AiFailureCodes.ConfigurationTenantMismatch);
+        }
+
+        if (configuracao is not null && configuracao.Status != AiTenantStatus.Enabled)
+        {
+            return Fail(aiRequestId, null, AiErrorKind.NotConfigured, AiFailureCodes.TenantAiDisabled);
+        }
+
+        var limites = configuracao?.Limits ?? _defaultLimits?.Merge(AiTenantLimitOverrides.None);
+        if (limites is null || !limites.IsValid)
+        {
+            return Fail(aiRequestId, null, AiErrorKind.NotConfigured, AiFailureCodes.LimitsInvalid);
+        }
+
+        var modelo = _selector.Catalog.Find(providerId, modelId);
+        if (modelo is null)
+        {
+            return Fail(aiRequestId, null, AiErrorKind.NotConfigured, AiFailureCodes.ModelNotSupported);
+        }
+
+        if (modelo.Status != AiModelStatus.Active)
+        {
+            return Fail(aiRequestId, modelo, AiErrorKind.NotConfigured, AiFailureCodes.ModelDisabled);
+        }
+
+        var provedor = _selector.Providers.Find(modelo.ProviderId);
+        if (provedor is null)
+        {
+            return Fail(aiRequestId, modelo, AiErrorKind.NotConfigured, AiFailureCodes.ProviderNotRegistered);
+        }
+
+        var pedido = new AiGenerationRequest(
+            $"diagnostic:{aiRequestId:N}",
+            DiagnosticSystemInstruction,
+            [new AiMessage(AiMessageRole.User, DiagnosticUserMessage)],
+            DiagnosticMaxOutputTokens,
+            DiagnosticTimeout);
+        return await ExecuteAsync(pedido, tenant, aiRequestId, modelo, provedor, limites, cancellationToken);
+    }
+
+    private async Task<AiGenerationResult> ExecuteAsync(
+        AiGenerationRequest request, TenantId tenant, Guid aiRequestId, AiModelDescriptor modelo, IAiProvider provedor, AiTenantLimits limites, CancellationToken cancellationToken)
+    {
         if (request.Messages.Count > limites.MaxInputMessages)
         {
             return Fail(aiRequestId, modelo, AiErrorKind.TenantLimitExceeded, AiFailureCodes.InputMessageLimit);

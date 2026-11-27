@@ -79,6 +79,11 @@ public static class RolePermissions
         Permission.AuditRead,
         Permission.TenantSettingsManage,
         Permission.EmbedManage,
+        Permission.AiSettingsRead,
+        Permission.AiSettingsManage,
+        Permission.AiCredentialManage,
+        Permission.AiConnectivityTest,
+        Permission.AiGenerationTest,
     };
 
     // Papéis da plataforma BImeta (ADR 0043): só existem no escopo do tenant técnico e só dão permissões de plataforma. Nenhum dá acesso a dado privado de cliente.

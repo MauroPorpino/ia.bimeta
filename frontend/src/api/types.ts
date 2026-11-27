@@ -1098,3 +1098,94 @@ export interface ListFlowInstancesParams {
   take?: number;
   skip?: number;
 }
+
+// ---------------------------------------------------------------- Configurações → Inteligência artificial (Etapa 05)
+// A API nunca devolve o valor de uma credencial: só se existe, a impressão digital e a data. Nenhum campo aqui carrega endereço de servidor, preço ou limite comercial.
+
+export type EstadoDoDiagnosticoDeConectividade = 'Verified' | 'AuthenticationFailed' | 'Unreachable' | 'ModelUnavailable' | 'NotSupported' | 'Inconclusive';
+
+export type EstadoDoTesteDeGeracao = 'Succeeded' | 'Failed' | 'NotExecuted';
+
+export interface DiagnosticoDeIa {
+  /** Conectividade: `EstadoDoDiagnosticoDeConectividade`; geração: `EstadoDoTesteDeGeracao`. */
+  state: string;
+  code: string | null;
+  checkedAt: string;
+  /** O resultado está DESATUALIZADO (credencial trocada ou removida depois, ou resultado antigo): nunca confirma funcionamento. */
+  stale: boolean;
+  staleReason: 'credential-changed' | 'age' | null;
+  latencyMs: number;
+  reachable: boolean | null;
+  authenticated: boolean | null;
+  modelAvailable: boolean | null;
+  conversationCapable: boolean | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  usageCertainty: string | null;
+  replyPreview: string | null;
+}
+
+export interface ModeloDeIa {
+  modelId: string;
+  profile: string;
+  contextWindowTokens: number;
+  maxOutputTokens: number;
+  isDefault: boolean;
+  connectivity: DiagnosticoDeIa | null;
+  generation: DiagnosticoDeIa | null;
+}
+
+export interface CredencialDeIa {
+  required: boolean;
+  present: boolean;
+  fingerprint: string | null;
+  updatedAt: string | null;
+}
+
+export interface ProvedorDeIa {
+  providerId: string;
+  implemented: boolean;
+  authorized: boolean;
+  /** `Byok` (credencial do próprio tenant) ou `Infrastructure` (servidor da infraestrutura, sem chave). */
+  supply: 'Byok' | 'Infrastructure';
+  credential: CredencialDeIa;
+  isDefault: boolean;
+  connectivityCheckSupported: boolean;
+  models: ModeloDeIa[];
+}
+
+export interface ConfiguracaoDeIa {
+  configured: boolean;
+  defaultProviderId: string | null;
+  defaultModelId: string | null;
+  status: string | null;
+  updatedAt: string | null;
+  warnings: string[];
+  providers: ProvedorDeIa[];
+}
+
+export interface ResultadoDaEscolhaDoPadrao {
+  warnings: string[];
+}
+
+export interface ResultadoDaRemocaoDeCredencial {
+  revoked: boolean;
+  wasDefaultProvider: boolean;
+}
+
+export interface TesteDeConectividade {
+  providerId: string;
+  modelId: string;
+  supported: boolean;
+  result: DiagnosticoDeIa | null;
+  superseded: boolean;
+}
+
+export interface TesteDeGeracao {
+  providerId: string;
+  modelId: string;
+  succeeded: boolean;
+  result: DiagnosticoDeIa;
+  aiRequestId: string;
+  superseded: boolean;
+}

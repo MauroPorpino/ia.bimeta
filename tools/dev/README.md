@@ -129,3 +129,7 @@ Validação do adaptador da Anthropic **sem chamada paga**: `Start-AnthropicSimu
 ## Ollama (Etapa 04)
 
 Validação do adaptador conversacional **sem instalar o Ollama nem baixar modelo**: `Start-OllamaSimulado.ps1` (porta 5201: `/api/version`, `/api/tags`, `/api/show`, `/api/chat` simulados), `Novo-TenantDeOllamaDeDemonstracao.ps1` (empresa sintética `demo-ollama`, **sem chave**) e `Test-ServidorOllama.ps1` (sondagem somente leitura de um servidor real ou simulado). O Api, o Worker e o `provision` precisam de `AiGateway__Providers__Ollama__BaseAddress=http://127.0.0.1:5201/` e `AiGateway__Catalog__Models__3__Status=Active` (o modelo vem desativado no catálogo). Procedimento completo e limites em `docs/operations/ETAPA-04-OLLAMA.md`.
+
+## Provedores de IA pela interface (Etapa 05)
+
+`Novo-TenantDeProvedoresDeDemonstracao.ps1` cria a empresa sintética `demo-provedores` (Ollama simulado como padrão, sem chaves; administrador com as permissões de IA e uma atendente sem elas) para validar **Configurações → Inteligência artificial** com a OpenAI (5199), a Anthropic (5200) e o Ollama (5201) **simulados**. Os simuladores da OpenAI e da Anthropic agora também respondem `GET /v1/models/{modelo}` (a verificação de conectividade, sem geração). Api e Worker precisam das variáveis `AiGateway__Providers__*__BaseAddress` e `AiGateway__Catalog__Models__3__Status=Active` (veja o roteiro). Procedimento completo em `docs/operations/ETAPA-05-PROVEDORES-IA.md`.

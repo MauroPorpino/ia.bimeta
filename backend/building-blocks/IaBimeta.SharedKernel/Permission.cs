@@ -128,4 +128,21 @@ public enum Permission
 
     /// <summary>Consultar a visão geral (indicadores agregados).</summary>
     PlatformOverviewRead = 39,
+
+    // ---- Provedores de inteligência artificial do tenant (Etapa 05). Escopo do TENANT (não de organização); só o administrador do tenant as tem por padrão. Nenhuma dá acesso ao valor de uma credencial. ----
+
+    /// <summary>Consultar a configuração de IA do tenant: provedores, modelos autorizados, situação das credenciais e resultados dos diagnósticos.</summary>
+    AiSettingsRead = 40,
+
+    /// <summary>Escolher o provedor e o modelo padrão da IA do tenant.</summary>
+    AiSettingsManage = 41,
+
+    /// <summary>Cadastrar, substituir e remover credenciais de provedores de IA do tenant (BYOK).</summary>
+    AiCredentialManage = 42,
+
+    /// <summary>Executar o teste de CONECTIVIDADE de um provedor (sem geração de texto e sem consumo de tokens).</summary>
+    AiConnectivityTest = 43,
+
+    /// <summary>Executar o teste de GERAÇÃO de IA com mensagem sintética (pode gerar cobrança no provedor comercial). Distinta de propósito do teste de conectividade.</summary>
+    AiGenerationTest = 44,
 }

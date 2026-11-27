@@ -18,6 +18,7 @@ import { TrocarSenha } from './components/TrocarSenha';
 import { ehAdministradorDoTenant } from './conhecimento';
 import { podeVerFluxos } from './fluxo';
 import { podeVerIntegracoes } from './integracao';
+import { podeVerIa } from './ia';
 import { podeVerUsuarios } from './usuarios';
 import { useCacheDeConversas, useEstadoDaConexao, useNomesDosContatos, usePolling } from './hooks';
 
@@ -242,7 +243,7 @@ function Atendimento({ api, saidaManual, intervaloFilaMs, intervaloConversaMs, i
   const naAreaDeIntegracoes = podeVerIntegracao && area === 'integracoes';
   const podeVerFluxo = me !== null && podeVerFluxos(me);
   const naAreaDeFluxos = podeVerFluxo && area === 'fluxos';
-  const podeVerConfiguracoes = me !== null && podeVerUsuarios(me);
+  const podeVerConfiguracoes = me !== null && (podeVerUsuarios(me) || podeVerIa(me));
   const naAreaDeConfiguracoes = podeVerConfiguracoes && area === 'configuracoes';
   const foraDoAtendimento = naAreaDeConhecimento || naAreaDeIntegracoes || naAreaDeFluxos || naAreaDeConfiguracoes;
 

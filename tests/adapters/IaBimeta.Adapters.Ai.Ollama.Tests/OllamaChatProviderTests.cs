@@ -725,4 +725,62 @@ public sealed class OllamaChatProviderTests
     {
         ExigeInutilizavelComConsumo(await ComConteudo("<think>nao fechou {\"action\":\"reply\"}"), "reasoning-leak");
     }
+
+    // Etapa 05: verificação do servidor (diagnóstico, sem gerar texto)
+
+    private static Handler Servidor(string tags = "{\"models\":[{\"name\":\"qwen3:4b\"}]}", string show = "{\"capabilities\":[\"completion\"],\"model_info\":{}}", HttpStatusCode showStatus = HttpStatusCode.OK)
+    {
+        var h = new Handler();
+        h.Behavior = (req, _, _) => Task.FromResult(req.RequestUri!.AbsolutePath switch
+        {
+            "/api/version" => Json(HttpStatusCode.OK, "{\"version\":\"0.1.0\"}"),
+            "/api/tags" => Json(HttpStatusCode.OK, tags),
+            "/api/show" => Json(showStatus, show),
+            _ => Json(HttpStatusCode.NotFound, "{}"),
+        });
+        return h;
+    }
+
+    private static async Task<IaBimeta.AiGateway.Contracts.Ports.AiConnectivityResult> Verificar(Handler h)
+    {
+        var provedor = new OllamaChatProvider(new HttpClient(h) { Timeout = Timeout.InfiniteTimeSpan }, new OllamaChatOptions());
+        var diagnostico = (IaBimeta.AiGateway.Contracts.Ports.IAiProviderDiagnostics)provedor;
+        return await diagnostico.CheckConnectivityAsync(new IaBimeta.AiGateway.Contracts.Ports.AiConnectivityRequest("qwen3:4b", AiCredential.None, TimeSpan.FromSeconds(2)), default);
+    }
+
+    [Fact]
+    public async Task A_verificacao_do_Ollama_confirma_instalado_e_com_capacidade_de_conversa_sem_gerar_nem_baixar_nada()
+    {
+        var h = Servidor();
+        var r = await Verificar(h);
+        Assert.Equal(IaBimeta.AiGateway.Contracts.Ports.AiConnectivityState.Verified, r.State);
+        Assert.True(r.Reachable == true && r.ModelAvailable == true && r.ConversationCapable == true);
+        Assert.Null(r.Authenticated); // o servidor local não autentica por tenant
+        Assert.DoesNotContain(h.Requests, x => x.Uri.AbsolutePath is "/api/chat" or "/api/pull" or "/api/generate");
+    }
+
+    [Fact]
+    public async Task Nao_instalado_embedding_e_capacidade_desconhecida_nunca_viram_verificado()
+    {
+        var naoInstalado = await Verificar(Servidor(tags: "{\"models\":[]}"));
+        Assert.Equal((IaBimeta.AiGateway.Contracts.Ports.AiConnectivityState.ModelUnavailable, "model-not-installed"), (naoInstalado.State, naoInstalado.Code));
+
+        var soEmbedding = await Verificar(Servidor(show: "{\"capabilities\":[\"embedding\"]}"));
+        Assert.Equal((IaBimeta.AiGateway.Contracts.Ports.AiConnectivityState.ModelUnavailable, "not-conversational"), (soEmbedding.State, soEmbedding.Code));
+        Assert.False(soEmbedding.ConversationCapable);
+
+        // Se o /api/show falhou a capacidade é DESCONHECIDA (inconclusivo), nunca "incompatível" nem "verificado".
+        var semShow = await Verificar(Servidor(show: "{}", showStatus: HttpStatusCode.InternalServerError));
+        Assert.Equal((IaBimeta.AiGateway.Contracts.Ports.AiConnectivityState.Inconclusive, "capability-unknown"), (semShow.State, semShow.Code));
+        Assert.Null(semShow.ConversationCapable);
+    }
+
+    [Fact]
+    public async Task Servidor_fora_do_ar_e_inalcancavel()
+    {
+        var h = new Handler { Behavior = (_, _, _) => throw new HttpRequestException("recusada em 10.0.0.9") };
+        var r = await Verificar(h);
+        Assert.Equal(IaBimeta.AiGateway.Contracts.Ports.AiConnectivityState.Unreachable, r.State);
+        Assert.False(r.Reachable);
+    }
 }

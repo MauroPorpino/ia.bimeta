@@ -18,9 +18,15 @@ public interface IAiTenantConfigurationStore
     /// <summary>A credencial ATIVA do tenant do contexto para o provedor, ou nulo. Rastreada.</summary>
     Task<StoredAiCredential?> FindActiveCredentialAsync(string providerId, CancellationToken cancellationToken);
 
+    /// <summary>A situação da credencial ATIVA do tenant para o provedor, lida SEM rastreamento (sempre o que está gravado agora), ou nulo. Nunca traz o valor nem o texto cifrado.</summary>
+    Task<AiCredentialInfo?> ReadCredentialInfoAsync(string providerId, CancellationToken cancellationToken);
+
     /// <summary>Grava a credencial (nova ou alterada). Uma alteração concorrente falha com <see cref="AiConfigurationConflictException"/>.</summary>
     Task SaveCredentialAsync(StoredAiCredential credential, bool isNew, CancellationToken cancellationToken);
 }
+
+/// <summary>O que a interface pode saber de uma credencial ativa: a impressão digital e quando foi atualizada. Nunca o valor.</summary>
+public sealed record AiCredentialInfo(string Fingerprint, DateTimeOffset UpdatedAt);
 
 /// <summary>Outra alteração da mesma configuração ou credencial aconteceu primeiro: releia e repita.</summary>
 public sealed class AiConfigurationConflictException : Exception
@@ -87,7 +93,7 @@ public sealed class AiTenantConfigurationService
     public async Task<AiTenantStatusView> GetStatusAsync(CancellationToken cancellationToken = default)
     {
         var contexto = _context.GetRequired();
-        contexto.Require(Permission.TenantSettingsManage);
+        AiAccess.Require(contexto, Permission.AiSettingsRead);
 
         var configuracao = await _store.FindSettingsAsync(cancellationToken);
         if (configuracao is null)
@@ -109,7 +115,7 @@ public sealed class AiTenantConfigurationService
     public async Task SetConfigurationAsync(string providerId, string modelId, AiTenantStatus status = AiTenantStatus.Enabled, CancellationToken cancellationToken = default)
     {
         var contexto = _context.GetRequired();
-        contexto.Require(Permission.TenantSettingsManage);
+        AiAccess.Require(contexto, Permission.AiSettingsManage);
 
         if (status is not (AiTenantStatus.Enabled or AiTenantStatus.Disabled))
         {
@@ -146,7 +152,7 @@ public sealed class AiTenantConfigurationService
             await _store.SaveSettingsAsync(atual, isNew: false, cancellationToken);
         }
 
-        await _audit.WriteAsync(new AuditEntry("ai-gateway.settings.set", SettingsResource, atual.Id.ToString(), AuditOutcome.Success), cancellationToken);
+        await _audit.WriteAsync(new AuditEntry("ai-gateway.settings.set", SettingsResource, AiAudit.Id(providerId, modelId), AuditOutcome.Success), cancellationToken);
     }
 
     /// <summary>
@@ -158,7 +164,7 @@ public sealed class AiTenantConfigurationService
     public async Task SetCredentialAsync(string providerId, string secret, CancellationToken cancellationToken = default)
     {
         var contexto = _context.GetRequired();
-        contexto.Require(Permission.TenantSettingsManage);
+        AiAccess.Require(contexto, Permission.AiCredentialManage);
 
         if (!_catalog.ProviderIds.Contains(providerId, StringComparer.Ordinal) || !IsAvailable(providerId))
         {
@@ -194,7 +200,7 @@ public sealed class AiTenantConfigurationService
         }
 
         // Só o identificador: nunca o valor, o texto cifrado nem a impressão.
-        await _audit.WriteAsync(new AuditEntry("ai-gateway.credential.set", CredentialResource, id.ToString(), AuditOutcome.Success), cancellationToken);
+        await _audit.WriteAsync(new AuditEntry("ai-gateway.credential.set", CredentialResource, AiAudit.Id(providerId, id.ToString()), AuditOutcome.Success), cancellationToken);
     }
 
     /// <summary>Revoga a credencial ativa do tenant para o provedor: APAGA o texto cifrado. Idempotente: revogar de novo, ou sem credencial, não muda nada.</summary>
@@ -202,7 +208,7 @@ public sealed class AiTenantConfigurationService
     public async Task<bool> RevokeCredentialAsync(string providerId, CancellationToken cancellationToken = default)
     {
         var contexto = _context.GetRequired();
-        contexto.Require(Permission.TenantSettingsManage);
+        AiAccess.Require(contexto, Permission.AiCredentialManage);
 
         var credencial = await _store.FindActiveCredentialAsync(providerId, cancellationToken);
         if (credencial is null || !credencial.Revoke(_clock.GetUtcNow(), contexto.Principal?.UserId))
@@ -211,7 +217,7 @@ public sealed class AiTenantConfigurationService
         }
 
         await _store.SaveCredentialAsync(credencial, isNew: false, cancellationToken);
-        await _audit.WriteAsync(new AuditEntry("ai-gateway.credential.revoke", CredentialResource, credencial.Id.ToString(), AuditOutcome.Success), cancellationToken);
+        await _audit.WriteAsync(new AuditEntry("ai-gateway.credential.revoke", CredentialResource, AiAudit.Id(providerId, credencial.Id.ToString()), AuditOutcome.Success), cancellationToken);
         return true;
     }
 

@@ -1,4 +1,4 @@
-import { chaveDoArquivo } from '../arquivos';
+﻿import { chaveDoArquivo } from '../arquivos';
 import { encerrarSessaoLocal, obterToken } from './session';
 import type {
   ActionResult,
@@ -74,6 +74,11 @@ import type {
   SemanticMetrics,
   SemanticSettings,
   SemanticSettingsRequest,
+  ConfiguracaoDeIa,
+  ResultadoDaEscolhaDoPadrao,
+  ResultadoDaRemocaoDeCredencial,
+  TesteDeConectividade,
+  TesteDeGeracao,
   SendingAlert,
   ServiceQueue,
   TemplateParameterError,
@@ -496,6 +501,16 @@ export function createApi(opcoes: ApiOptions = {}) {
     obterRascunhoDoAgente: () => versaoOuNula('/agents/definition/draft'),
     obterPublicadaDoAgente: () => versaoOuNula('/agents/definition/published'),
     publicarRascunhoDoAgente: () => requisitar<AgentDefinition>('POST', '/agents/definition/publish'),
+
+    // ---- Configurações → Inteligência artificial (Etapa 05). A chave só SAI daqui (PUT) e nunca volta; o tenant vem da sessão. Salvar o padrão não chama o provedor; os testes são operações à parte.
+    obterConfiguracaoDeIa: () => requisitar<ConfiguracaoDeIa>('GET', '/ai/settings'),
+    escolherPadraoDeIa: (providerId: string, modelId: string) => requisitar<ResultadoDaEscolhaDoPadrao>('PUT', '/ai/settings/default', { corpo: { providerId, modelId } }),
+    salvarCredencialDeIa: (providerId: string, apiKey: string) => requisitar<void>('PUT', `/ai/providers/${encodeURIComponent(providerId)}/credential`, { corpo: { apiKey } }),
+    removerCredencialDeIa: (providerId: string) => requisitar<ResultadoDaRemocaoDeCredencial>('DELETE', `/ai/providers/${encodeURIComponent(providerId)}/credential`),
+    testarConectividadeDeIa: (providerId: string, modelId: string | null) =>
+      requisitar<TesteDeConectividade>('POST', `/ai/providers/${encodeURIComponent(providerId)}/connectivity-test`, { corpo: { modelId } }),
+    testarGeracaoDeIa: (providerId: string, modelId: string, confirmed: boolean) =>
+      requisitar<TesteDeGeracao>('POST', `/ai/providers/${encodeURIComponent(providerId)}/generation-test`, { corpo: { modelId, confirmed } }),
 
     // ---- Conhecimento híbrido (ADR 0034): configuração e métricas da resposta por similaridade e as sugestões da IA local. A IA só propõe; aceitar leva ao RASCUNHO.
     obterConfiguracaoSemantica: () => requisitar<SemanticSettings>('GET', '/agents/semantic/settings'),

@@ -1,6 +1,9 @@
+import { useState } from 'react';
 import type { ApiClient } from '../api/client';
 import type { CurrentUser } from '../api/types';
+import { podeVerIa } from '../ia';
 import { podeVerUsuarios } from '../usuarios';
+import { IaProvedores } from './IaProvedores';
 import { UsuariosConfig } from './UsuariosConfig';
 
 interface Props {
@@ -10,18 +13,33 @@ interface Props {
   oculto?: boolean;
 }
 
-/** A área "Configurações". Hoje tem a subseção "Usuários" (só com a permissão UserRead); outras entram aqui como novas abas. */
+type Secao = 'usuarios' | 'ia';
+
+/** A área "Configurações": "Usuários" (só com a permissão UserRead) e "Inteligência artificial" (só com a permissão de consultar a configuração de IA). Outras entram aqui como novas abas. */
 export function Configuracoes({ api, me, oculto = false }: Props) {
+  const temUsuarios = podeVerUsuarios(me);
+  const temIa = podeVerIa(me);
+  const [escolhida, setEscolhida] = useState<Secao>(temUsuarios ? 'usuarios' : 'ia');
+  const secao: Secao = escolhida === 'usuarios' && !temUsuarios ? 'ia' : escolhida === 'ia' && !temIa ? 'usuarios' : escolhida;
+
   return (
     <main className="integracoes" hidden={oculto}>
       <nav className="abas-integracoes" aria-label="Seções de configurações">
-        {podeVerUsuarios(me) && (
-          <button type="button" className="area-aba" aria-current="page">
+        {temUsuarios && (
+          <button type="button" className="area-aba" aria-current={secao === 'usuarios' ? 'page' : undefined} onClick={() => setEscolhida('usuarios')}>
             Usuários
           </button>
         )}
+        {temIa && (
+          <button type="button" className="area-aba" aria-current={secao === 'ia' ? 'page' : undefined} onClick={() => setEscolhida('ia')}>
+            Inteligência artificial
+          </button>
+        )}
       </nav>
-      <div className="integracoes-aba">{podeVerUsuarios(me) && <UsuariosConfig api={api} me={me} />}</div>
+      <div className="integracoes-aba">
+        {temUsuarios && secao === 'usuarios' && <UsuariosConfig api={api} me={me} />}
+        {temIa && secao === 'ia' && <IaProvedores api={api} me={me} />}
+      </div>
     </main>
   );
 }

@@ -12,7 +12,7 @@ namespace IaBimeta.Adapters.Ai.OpenAI;
 /// O teto de tokens de saída que o AiGateway limitou é imposto na própria requisição (<c>max_output_tokens</c>), e o consumo informado pelo provedor volta normalizado, com a certeza declarada
 /// (ver <see cref="OpenAiResponseReader"/>).
 /// </summary>
-public sealed class OpenAiProvider : IAiProvider, IDisposable
+public sealed partial class OpenAiProvider : IAiProvider, IDisposable
 {
     private readonly HttpClient _http;
     private readonly OpenAiOptions _options;

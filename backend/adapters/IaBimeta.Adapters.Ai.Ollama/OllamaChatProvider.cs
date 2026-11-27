@@ -11,7 +11,7 @@ namespace IaBimeta.Adapters.Ai.Ollama;
 /// estado entre chamadas, e o adaptador não conhece tenant. O servidor não exige chave: <see cref="RequiresCredential"/> é falso, o AiGateway entrega <see cref="AiCredential.None"/> e o adaptador nunca a lê.
 /// O endereço vem só da configuração da infraestrutura; o cliente não segue redirecionamentos e a validação de certificado do HTTPS fica intacta.
 /// </summary>
-public sealed class OllamaChatProvider : IAiProvider, IDisposable
+public sealed partial class OllamaChatProvider : IAiProvider, IDisposable
 {
     private readonly HttpClient _http;
     private readonly OllamaChatOptions _options;

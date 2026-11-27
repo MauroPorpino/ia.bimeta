@@ -9,8 +9,9 @@ namespace IaBimeta.Adapters.Ai.Ollama;
 /// <param name="Installed">O modelo está instalado (aparece em <c>GET /api/tags</c>).</param>
 /// <param name="Compatible">Instalado E declara a capacidade <c>completion</c> em <c>POST /api/show</c> (conversa). Embedding puro ou modelo sem a capacidade não é compatível.</param>
 /// <param name="SupportsThinking">Declara a capacidade <c>thinking</c>: o perfil pode precisar de <c>think</c>.</param>
+/// <param name="ConversationCapabilityKnown">Falso quando <c>POST /api/show</c> falhou: a capacidade é DESCONHECIDA (não "incompatível").</param>
 /// <param name="ContextLength">A janela nativa do modelo (<c>model_info.*.context_length</c>), quando informada.</param>
-public sealed record OllamaModelStatus(string ModelId, bool Installed, bool Compatible, bool SupportsThinking, int? ContextLength);
+public sealed record OllamaModelStatus(string ModelId, bool Installed, bool Compatible, bool SupportsThinking, int? ContextLength, bool ConversationCapabilityKnown = true);
 
 /// <summary>O servidor Ollama visto pelo ia.bimeta: alcançável ou não, a versão e a situação de cada modelo pedido. Nunca traz o corpo do servidor nem o endereço.</summary>
 public sealed record OllamaServerStatus(bool Reachable, string? Version, string? ErrorCode, IReadOnlyList<OllamaModelStatus> Models);
@@ -105,7 +106,7 @@ public sealed class OllamaServerProbe
         if (!resposta.IsSuccessStatusCode)
         {
             // Instalado, mas sem como confirmar a capacidade: NÃO é tratado como compatível.
-            return new OllamaModelStatus(modelId, true, false, false, null);
+            return new OllamaModelStatus(modelId, true, false, false, null, ConversationCapabilityKnown: false);
         }
 
         var corpo = JsonNode.Parse(await resposta.Content.ReadAsStringAsync(cancellationToken)) as JsonObject;

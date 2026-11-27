@@ -91,6 +91,8 @@ public sealed class AiModelSelector
 
     public AiModelCatalog Catalog => _catalog;
 
+    public AiProviderRegistry Providers => _providers;
+
     /// <param name="tenantId">O tenant do contexto confiável: a configuração precisa ser dele.</param>
     /// <param name="configuration">A configuração do tenant, ou nulo se não existe.</param>
     public AiSelection Select(TenantId tenantId, AiTenantConfiguration? configuration)
